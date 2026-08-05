@@ -29,6 +29,7 @@ const initialLoading = computed(() => pending.value && !project.value);
 /** Tab แต่ละอันเปิดจริงในเฟสที่ระบุ — ตอนนี้แสดงเป็น placeholder ที่บอกสถานะชัดเจน */
 const tabs = [
   { key: "overview", label: "Overview", phase: null },
+  { key: "source", label: "Source", phase: null },
   { key: "settings", label: "Settings", phase: null },
   { key: "deploy", label: "Deploy", phase: "Phase 3" },
   { key: "environment", label: "Environment", phase: "Phase 4" },
@@ -53,6 +54,100 @@ async function archive() {
     archiving.value = false;
   }
 }
+
+// === Source tab ===
+const { data: gitHubStatus, pending: statusPending } = await useAsyncData(
+  "github-status-project",
+  async () => {
+    const { data } = await api.api.v1.github.status.get();
+    return data;
+  },
+  { server: false },
+);
+
+const { data: installationsData, refresh: refreshInstallations } = await useAsyncData(
+  "github-installations-project",
+  async () => {
+    const { data } = await api.api.v1.github.installations.get();
+    return data;
+  },
+  { server: false },
+);
+
+const activeInstallations = computed(
+  () => installationsData.value?.items.filter((i) => i.status === "active") ?? [],
+);
+
+const sourceError = ref("");
+const sourceSaving = ref(false);
+const sourceSuccess = ref(false);
+const showPicker = ref(false);
+
+/** installation ที่ project นี้เชื่อมอยู่ (ถ้ามี) */
+const connectedInstallation = computed(() => {
+  if (!project.value?.installationId) return null;
+  return installationsData.value?.items.find((i) => i.id === project.value!.installationId) ?? null;
+});
+
+const isConnected = computed(() => !!project.value?.repoFullName);
+
+async function connectSource(picked: {
+  installationId: number;
+  repoId: number;
+  repoFullName: string;
+  branch: string;
+}) {
+  sourceSaving.value = true;
+  sourceError.value = "";
+  sourceSuccess.value = false;
+  try {
+    const { error } = await api.api.v1.projects({ id: id.value }).source.post({
+      installationId: picked.installationId,
+      repoId: picked.repoId,
+      repoFullName: picked.repoFullName,
+      branch: picked.branch,
+    });
+    if (error) {
+      const body = error.value as { error?: { message?: string } } | null;
+      sourceError.value = body?.error?.message ?? "บันทึกไม่สำเร็จ";
+      return;
+    }
+    sourceSuccess.value = true;
+    showPicker.value = false;
+    await refresh();
+  } catch {
+    sourceError.value = "ติดต่อ API ไม่ได้";
+  } finally {
+    sourceSaving.value = false;
+  }
+}
+
+async function disconnectSource() {
+  sourceSaving.value = true;
+  sourceError.value = "";
+  sourceSuccess.value = false;
+  try {
+    const { error } = await api.api.v1.projects({ id: id.value }).source.delete();
+    if (error) {
+      const body = error.value as { error?: { message?: string } } | null;
+      sourceError.value = body?.error?.message ?? "ยกเลิกการเชื่อมต่อไม่สำเร็จ";
+      return;
+    }
+    showPicker.value = false;
+    await refresh();
+  } catch {
+    sourceError.value = "ติดต่อ API ไม่ได้";
+  } finally {
+    sourceSaving.value = false;
+  }
+}
+
+// installation ที่ project อ้างอิง — ตรวจ revoked/suspended state
+const installationStatus = computed(() => {
+  if (!project.value?.installationId) return "none";
+  const inst = installationsData.value?.items.find((i) => i.id === project.value!.installationId);
+  return inst?.status ?? "unknown";
+});
 </script>
 
 <template>
@@ -89,6 +184,7 @@ async function archive() {
       </nav>
 
       <div class="card panel">
+        <!-- Overview tab -->
         <template v-if="activeTab === 'overview'">
           <dl>
             <dt>Repository</dt>
@@ -110,6 +206,128 @@ async function archive() {
           </div>
         </template>
 
+        <!-- Source tab -->
+        <template v-else-if="activeTab === 'source'">
+          <div class="source-panel">
+            <h2 class="section-title">GitHub Repository</h2>
+
+            <!-- revoked warning -->
+            <div
+              v-if="isConnected && (installationStatus === 'deleted' || installationStatus === 'suspended')"
+              class="revoke-warning"
+            >
+              <p class="warn-text">
+                ⚠️ GitHub installation
+                {{ installationStatus === 'deleted' ? 'ถูกถอนการติดตั้งแล้ว' : 'ถูก suspend' }}
+                — Auto deploy ถูกปิดอัตโนมัติ
+              </p>
+              <p class="muted">
+                {{ installationStatus === 'deleted'
+                  ? 'Reinstall GitHub App แล้วเชื่อมต่อ repository ใหม่'
+                  : 'Unsuspend GitHub App ผ่าน GitHub Settings แล้ว refresh' }}
+              </p>
+            </div>
+
+            <!-- Connected state -->
+            <template v-if="isConnected && !showPicker">
+              <div class="connected-repo">
+                <div class="repo-info-row">
+                  <span class="label muted">Repository</span>
+                  <strong>{{ project.repoFullName }}</strong>
+                </div>
+                <div class="repo-info-row">
+                  <span class="label muted">Branch</span>
+                  <code>{{ project.branch }}</code>
+                </div>
+                <div v-if="connectedInstallation" class="repo-info-row">
+                  <span class="label muted">Account</span>
+                  <span>{{ connectedInstallation.accountLogin }}</span>
+                </div>
+              </div>
+
+              <p v-if="sourceSuccess" class="ok-text">เชื่อมต่อสำเร็จ</p>
+              <p v-if="sourceError" class="error-text">{{ sourceError }}</p>
+
+              <div v-if="!project.archivedAt" class="source-actions">
+                <button
+                  class="secondary"
+                  :disabled="sourceSaving"
+                  @click="showPicker = true; sourceSuccess = false"
+                >
+                  เปลี่ยน repository
+                </button>
+                <button
+                  class="danger"
+                  :disabled="sourceSaving"
+                  @click="disconnectSource"
+                >
+                  {{ sourceSaving ? "กำลังยกเลิก…" : "ยกเลิกการเชื่อมต่อ" }}
+                </button>
+              </div>
+            </template>
+
+            <!-- Not connected / picker open -->
+            <template v-else>
+              <p v-if="!isConnected && !showPicker" class="muted">
+                ยังไม่ได้เชื่อมต่อ repository — เลือก repository จาก GitHub
+              </p>
+
+              <!-- GitHub not configured -->
+              <template v-if="statusPending">
+                <p class="muted">กำลังตรวจ GitHub integration…</p>
+              </template>
+              <template v-else-if="!gitHubStatus?.configured">
+                <div class="not-configured-msg">
+                  <p class="muted">
+                    GitHub App ยังไม่ได้ configure — ติดต่อผู้ดูแลระบบเพื่อตั้งค่า ZIXPLOY_GITHUB_* environment variables
+                  </p>
+                </div>
+              </template>
+
+              <!-- No installations -->
+              <template v-else-if="activeInstallations.length === 0 && !showPicker">
+                <div class="no-install">
+                  <p class="muted">ยังไม่มี GitHub installation</p>
+                  <GitHubConnect />
+                </div>
+              </template>
+
+              <!-- Repo picker -->
+              <template v-else>
+                <template v-if="!showPicker && !isConnected">
+                  <button
+                    v-if="!project.archivedAt"
+                    class="primary"
+                    @click="showPicker = true"
+                  >
+                    เลือก repository
+                  </button>
+                </template>
+
+                <template v-if="showPicker">
+                  <RepositoryPicker
+                    :installations="activeInstallations"
+                    @pick="connectSource"
+                  />
+
+                  <div class="picker-cancel">
+                    <button
+                      class="secondary small"
+                      :disabled="sourceSaving"
+                      @click="showPicker = false; sourceError = ''"
+                    >
+                      ยกเลิก
+                    </button>
+                  </div>
+                  <p v-if="sourceError" class="error-text">{{ sourceError }}</p>
+                  <p v-if="sourceSaving" class="muted">กำลังบันทึก…</p>
+                </template>
+              </template>
+            </template>
+          </div>
+        </template>
+
+        <!-- Settings tab -->
         <ProjectSettingsForm
           v-else-if="activeTab === 'settings'"
           :project="project"
@@ -196,5 +414,64 @@ dd {
   text-align: center;
   padding: 2.5rem 1rem;
   margin: 0;
+}
+
+/* Source tab */
+.source-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.section-title {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.revoke-warning {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.warn-text {
+  color: var(--warn);
+  margin: 0;
+}
+.connected-repo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.repo-info-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.label {
+  min-width: 100px;
+  font-size: 0.875rem;
+}
+.source-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.not-configured-msg {
+  padding: 0.75rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+.no-install {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.picker-cancel {
+  margin-top: 0.5rem;
 }
 </style>

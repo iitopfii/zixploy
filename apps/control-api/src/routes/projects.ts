@@ -7,6 +7,8 @@ interface ProjectRow {
   id: string;
   name: string;
   status: string;
+  installation_id: string | null;
+  repo_id: number | null;
   repo_full_name: string | null;
   branch: string | null;
   auto_deploy: number;
@@ -29,6 +31,8 @@ const projectSchema = t.Object({
     t.Literal("failed"),
     t.Literal("stopped"),
   ]),
+  installationId: t.Nullable(t.String()),
+  repoId: t.Nullable(t.Number()),
   repoFullName: t.Nullable(t.String()),
   branch: t.Nullable(t.String()),
   autoDeploy: t.Boolean(),
@@ -59,6 +63,8 @@ function toProject(row: ProjectRow) {
     id: row.id,
     name: row.name,
     status: row.status as "new" | "running" | "deploying" | "failed" | "stopped",
+    installationId: row.installation_id,
+    repoId: row.repo_id,
     repoFullName: row.repo_full_name,
     branch: row.branch,
     autoDeploy: row.auto_deploy === 1,
@@ -72,8 +78,8 @@ function toProject(row: ProjectRow) {
   };
 }
 
-const SELECT_COLUMNS = `id, name, status, repo_full_name, branch, auto_deploy, dockerfile_path,
-  build_context, internal_port, health_check_path, archived_at, created_at, updated_at`;
+const SELECT_COLUMNS = `id, name, status, installation_id, repo_id, repo_full_name, branch, auto_deploy,
+  dockerfile_path, build_context, internal_port, health_check_path, archived_at, created_at, updated_at`;
 
 function loadProject(db: Database, id: string): ProjectRow {
   // ตรวจรูปแบบ ID ก่อนแตะ DB — public ID เป็น ULID เสมอ (ADR-0005)

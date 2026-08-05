@@ -1,8 +1,8 @@
 /**
  * Structured JSON logging พร้อม redaction (docs/phase-01, docs/threat-model.md)
  *
- * กติกาเดียวของระบบ: ห้าม cookie, password, session token หรือ CSRF token
- * ปรากฏใน log ไม่ว่าจะ level ใด รวมถึง debug
+ * กติกาเดียวของระบบ: ห้าม cookie, password, session token, CSRF token,
+ * GitHub JWT, installation token หรือ private key ปรากฏใน log
  *
  * Phase 4 จะต่อยอด redactor นี้ด้วย secret values จาก environment variables
  */
@@ -25,6 +25,11 @@ const SENSITIVE_KEY_PATTERNS = [
   "api_key",
   "private_key",
   "privatekey",
+  // GitHub-specific (phase 2)
+  "webhook_secret",
+  "pem",
+  "clone_url", // authenticated clone URLs อาจมี token ฝังอยู่
+  "access_token",
 ];
 
 export const REDACTED = "[redacted]";
@@ -38,12 +43,18 @@ function isSensitiveKey(key: string): boolean {
 const CREDENTIAL_URL_RE = /(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi;
 const BEARER_RE = /\b(bearer|token|basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi;
 const COOKIE_PAIR_RE = /\b(zx_session|zx_csrf)=[^;\s]+/gi;
+/** GitHub JWT: 3-part base64url string ที่ขึ้นด้วย eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9 */
+const JWT_RE = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
+/** GitHub installation token: ghp_... หรือ ghs_... */
+const GITHUB_TOKEN_RE = /\b(ghp_|ghs_|github_pat_)[A-Za-z0-9_]{20,}/g;
 
 export function redactString(value: string): string {
   return value
     .replace(CREDENTIAL_URL_RE, `$1${REDACTED}@`)
     .replace(BEARER_RE, `$1 ${REDACTED}`)
-    .replace(COOKIE_PAIR_RE, `$1=${REDACTED}`);
+    .replace(COOKIE_PAIR_RE, `$1=${REDACTED}`)
+    .replace(JWT_RE, REDACTED)
+    .replace(GITHUB_TOKEN_RE, REDACTED);
 }
 
 /**

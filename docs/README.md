@@ -35,7 +35,7 @@ Backend ทั้งระบบใช้ TypeScript โดยมี Elysia เ�
 |---|---|---|---|
 | 0 | ตรึง scope, architecture และข้อกำหนดระบบ | [phase-00-foundation.md](./phase-00-foundation.md) | ✅ ผ่าน Exit Criteria |
 | 1 | สร้าง control plane, authentication และ persistence | [phase-01-control-plane.md](./phase-01-control-plane.md) | ✅ ผ่าน Exit Criteria |
-| 2 | เชื่อม GitHub App และเลือก repository/branch | [phase-02-github-app.md](./phase-02-github-app.md) | ⬜ ยังไม่เริ่ม |
+| 2 | เชื่อม GitHub App และเลือก repository/branch | [phase-02-github-app.md](./phase-02-github-app.md) | ✅ ผ่าน Exit Criteria (mock-validated) |
 | 3 | สร้าง deploy engine และ deployment queue | [phase-03-deploy-engine.md](./phase-03-deploy-engine.md) | ⬜ ยังไม่เริ่ม |
 | 4 | Environment Settings และ secret handling | [phase-04-environment.md](./phase-04-environment.md) | ⬜ ยังไม่เริ่ม |
 | 5 | Domains, routing และ HTTPS | [phase-05-domains.md](./phase-05-domains.md) | ⬜ ยังไม่เริ่ม |
@@ -43,8 +43,8 @@ Backend ทั้งระบบใช้ TypeScript โดยมี Elysia เ�
 | 7 | Volumes, backup hooks และ lifecycle safety | [phase-07-volumes.md](./phase-07-volumes.md) | ⬜ ยังไม่เริ่ม |
 | 8 | Hardening, recovery และ production release | [phase-08-production.md](./phase-08-production.md) | ⬜ ยังไม่เริ่ม |
 
-ระบบตอนนี้ **ยังไม่สามารถ deploy อะไรได้** — มีเพียง control plane (login, project configuration)
-GitHub App, deploy queue, environment secrets, domains flow, logs และ volumes ยังไม่ถูกสร้าง
+ระบบตอนนี้ **ยังไม่สามารถ deploy อะไรได้** — มี control plane (login, project CRUD) และ GitHub App integration (repository/branch picker, webhook handling) แล้ว
+Deploy queue, environment secrets, domains flow, logs และ volumes ยังไม่ถูกสร้าง
 
 ## เอกสาร Foundation (ผลลัพธ์ Phase 0)
 

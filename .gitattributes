@@ -1,0 +1,8 @@
+# เก็บ LF ใน repository เสมอ — CI และ production รันบน Linux
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.pem binary
+*.sqlite binary

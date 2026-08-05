@@ -3,6 +3,7 @@ import { Elysia } from "elysia";
 import { bodyLimit } from "./plugins/body-limit";
 import { errorHandler } from "./plugins/error-handler";
 import { requestId } from "./plugins/request-id";
+import { requestLog } from "./plugins/request-log";
 import { securityHeaders } from "./plugins/security-headers";
 import { authRoutes } from "./routes/auth";
 import { projectRoutes } from "./routes/projects";
@@ -15,6 +16,7 @@ import { systemRoutes } from "./routes/system";
 export function buildApp(db: Database) {
   return new Elysia()
     .use(requestId)
+    .use(requestLog)
     .use(securityHeaders)
     .use(bodyLimit)
     .use(errorHandler)

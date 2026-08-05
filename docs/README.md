@@ -31,17 +31,20 @@ Backend ทั้งระบบใช้ TypeScript โดยมี Elysia เ�
 
 ## Phase Map
 
-| Phase | เป้าหมาย | เอกสาร |
-|---|---|---|
-| 0 | ตรึง scope, architecture และข้อกำหนดระบบ | [phase-00-foundation.md](./phase-00-foundation.md) |
-| 1 | สร้าง control plane, authentication และ persistence | [phase-01-control-plane.md](./phase-01-control-plane.md) |
-| 2 | เชื่อม GitHub App และเลือก repository/branch | [phase-02-github-app.md](./phase-02-github-app.md) |
-| 3 | สร้าง deploy engine และ deployment queue | [phase-03-deploy-engine.md](./phase-03-deploy-engine.md) |
-| 4 | Environment Settings และ secret handling | [phase-04-environment.md](./phase-04-environment.md) |
-| 5 | Domains, routing และ HTTPS | [phase-05-domains.md](./phase-05-domains.md) |
-| 6 | Build/Runtime Logs และ observability | [phase-06-logs.md](./phase-06-logs.md) |
-| 7 | Volumes, backup hooks และ lifecycle safety | [phase-07-volumes.md](./phase-07-volumes.md) |
-| 8 | Hardening, recovery และ production release | [phase-08-production.md](./phase-08-production.md) |
+| Phase | เป้าหมาย | เอกสาร | สถานะ |
+|---|---|---|---|
+| 0 | ตรึง scope, architecture และข้อกำหนดระบบ | [phase-00-foundation.md](./phase-00-foundation.md) | ✅ ผ่าน Exit Criteria |
+| 1 | สร้าง control plane, authentication และ persistence | [phase-01-control-plane.md](./phase-01-control-plane.md) | ✅ ผ่าน Exit Criteria |
+| 2 | เชื่อม GitHub App และเลือก repository/branch | [phase-02-github-app.md](./phase-02-github-app.md) | ⬜ ยังไม่เริ่ม |
+| 3 | สร้าง deploy engine และ deployment queue | [phase-03-deploy-engine.md](./phase-03-deploy-engine.md) | ⬜ ยังไม่เริ่ม |
+| 4 | Environment Settings และ secret handling | [phase-04-environment.md](./phase-04-environment.md) | ⬜ ยังไม่เริ่ม |
+| 5 | Domains, routing และ HTTPS | [phase-05-domains.md](./phase-05-domains.md) | ⬜ ยังไม่เริ่ม |
+| 6 | Build/Runtime Logs และ observability | [phase-06-logs.md](./phase-06-logs.md) | ⬜ ยังไม่เริ่ม |
+| 7 | Volumes, backup hooks และ lifecycle safety | [phase-07-volumes.md](./phase-07-volumes.md) | ⬜ ยังไม่เริ่ม |
+| 8 | Hardening, recovery และ production release | [phase-08-production.md](./phase-08-production.md) | ⬜ ยังไม่เริ่ม |
+
+ระบบตอนนี้ **ยังไม่สามารถ deploy อะไรได้** — มีเพียง control plane (login, project configuration)
+GitHub App, deploy queue, environment secrets, domains flow, logs และ volumes ยังไม่ถูกสร้าง
 
 ## เอกสาร Foundation (ผลลัพธ์ Phase 0)
 
@@ -69,6 +72,9 @@ flowchart LR
 ```
 
 ## Definition of Done ระดับผลิตภัณฑ์
+
+รายการนี้เป็นเกณฑ์ของ **MVP ทั้งหมด** — ยังไม่มีข้อใดผ่านครบ เพราะต้องรอ Phase 2–8
+(สถานะรายเฟสดูที่ตาราง Phase Map ด้านบน)
 
 - Admin ติดตั้ง GitHub App เลือก private repository และ branch ได้
 - Push ไปยัง branch ที่กำหนดสร้าง deployment เพียงหนึ่งงานต่อ webhook delivery

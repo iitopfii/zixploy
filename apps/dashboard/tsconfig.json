@@ -1,0 +1,12 @@
+{
+  // Nuxt 4 แยก tsconfig ตาม environment (app/server/shared/node) และ generate ลง .nuxt
+  // ระหว่าง `nuxt prepare` — ไฟล์นี้เพียงอ้างถึงทั้งหมดเพื่อให้ `nuxt typecheck` ตรวจครบทุกส่วน
+  // strict mode มาจาก generated configs (typescript.strict ใน nuxt.config.ts) — ห้ามปิดที่นี่
+  "files": [],
+  "references": [
+    { "path": "./.nuxt/tsconfig.app.json" },
+    { "path": "./.nuxt/tsconfig.server.json" },
+    { "path": "./.nuxt/tsconfig.shared.json" },
+    { "path": "./.nuxt/tsconfig.node.json" }
+  ]
+}

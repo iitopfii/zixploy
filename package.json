@@ -8,9 +8,12 @@
     "internal/*"
   ],
   "scripts": {
+    "dev": "bun run scripts/dev.ts",
     "dev:api": "bun run --filter @zixploy/control-api dev",
     "dev:worker": "bun run --filter @zixploy/deploy-worker dev",
     "dev:dashboard": "bun run --filter @zixploy/dashboard dev",
+    "dev:proxy": "docker compose -f deploy/control-plane/docker-compose.dev.yml up -d",
+    "dev:proxy:down": "docker compose -f deploy/control-plane/docker-compose.dev.yml down",
     "typecheck": "bun run --filter '*' typecheck",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",

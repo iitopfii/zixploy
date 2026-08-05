@@ -1,5 +1,6 @@
 import { AppError, toErrorEnvelope, ulid } from "@zixploy/shared";
 import { Elysia } from "elysia";
+import { log } from "../logger";
 
 /**
  * Map ทุก error เป็น error envelope เดียวกัน (docs/conventions.md)
@@ -32,14 +33,11 @@ export const errorHandler = new Elysia({ name: "error-handler" }).onError(
       return toErrorEnvelope(new AppError("NOT_FOUND", "ไม่พบ endpoint นี้"), requestId);
     }
 
-    // unknown error — log ฝั่ง server เท่านั้น ไม่ส่งรายละเอียดออกไป
-    console.error(
-      JSON.stringify({
-        level: "error",
-        requestId,
-        message: error instanceof Error ? error.message : String(error),
-      }),
-    );
+    // unknown error — log ฝั่ง server เท่านั้น (ผ่าน redaction) ไม่ส่งรายละเอียดออกไป
+    log.error("unhandled error", {
+      requestId,
+      reason: error instanceof Error ? error.message : String(error),
+    });
     set.status = 500;
     return toErrorEnvelope(new AppError("INTERNAL_ERROR", "เกิดข้อผิดพลาดภายในระบบ"), requestId);
   },

@@ -120,30 +120,35 @@ docs/
 
 ## งานดำเนินการ
 
-- [ ] เขียน user stories และ non-goals
-- [ ] ตั้งค่า Bun workspace และ TypeScript shared packages
-- [ ] สร้าง Elysia Control API พร้อม typed request/response schemas
-- [ ] สร้าง Bun Deploy Worker เป็น entrypoint และ process แยกจาก API
-- [ ] กำหนด supported Linux distribution และ Docker version
-- [ ] กำหนด naming convention ของ image, container, network และ volume
-- [ ] กำหนด API prefix เช่น `/api/v1`
-- [ ] กำหนด error envelope และ request ID
-- [ ] ออกแบบ database schema และ migration strategy
-- [ ] กำหนด encryption/key rotation approach
-- [ ] ทำ threat model สำหรับ Docker socket, webhook, build และ secrets
-- [ ] ทำ local stack ที่เปิด Dashboard, API, SQLite และ Traefik ได้
-- [ ] เพิ่ม lint, typecheck, unit test และ migration check ใน CI
+- [x] เขียน user stories และ non-goals — [requirements.md](./requirements.md)
+- [x] ตั้งค่า Bun workspace และ TypeScript shared packages — `internal/shared`, `internal/db`
+- [x] สร้าง Elysia Control API พร้อม typed request/response schemas
+- [x] สร้าง Bun Deploy Worker เป็น entrypoint และ process แยกจาก API — [ADR-0002](./adr/0002-worker-process-isolation.md)
+- [x] กำหนด supported Linux distribution และ Docker version — [conventions.md](./conventions.md)
+- [x] กำหนด naming convention ของ image, container, network และ volume — `internal/shared/src/naming.ts` พร้อม unit tests
+- [x] กำหนด API prefix `/api/v1` — `internal/shared/src/constants.ts`
+- [x] กำหนด error envelope และ request ID — `internal/shared/src/errors.ts`, ทดสอบใน `security-contract.test.ts`
+- [x] ออกแบบ database schema และ migration strategy — [database-schema.md](./database-schema.md)
+- [x] กำหนด encryption/key rotation approach — [encryption.md](./encryption.md) (ออกแบบแล้ว, implement ใน Phase 4)
+- [x] ทำ threat model สำหรับ Docker socket, webhook, build และ secrets — [threat-model.md](./threat-model.md)
+- [x] ทำ local stack ที่เปิด Dashboard, API, SQLite และ Traefik ได้ — `bun run dev` + `bun run dev:proxy`
+- [x] เพิ่ม lint, typecheck, unit test และ migration check ใน CI — `.github/workflows/ci.yml`
 
 ## การทดสอบ
 
-- เปิด local stack จากเครื่องใหม่ได้ตาม README
-- Migration จากฐานข้อมูลว่างทำงานและ rollback ใน development ได้
-- API health endpoint ตรวจ DB และ worker readiness แยกกัน
-- State machine ปฏิเสธ transition ที่ไม่ถูกต้อง
+- [x] เปิด local stack จากเครื่องใหม่ได้ตาม README — ตรวจด้วย `bun run dev` (API + worker + dashboard พร้อมกัน)
+- [x] Migration จากฐานข้อมูลว่างทำงานและ rollback ใน development ได้ — `bun run migrate:check` (up → down → up)
+- [x] API health endpoint ตรวจ DB และ worker readiness แยกกัน — `app.test.ts`
+- [x] State machine ปฏิเสธ transition ที่ไม่ถูกต้อง — `deployment-state.test.ts`
 
 ## Exit Criteria
 
-- ไม่มีคำถามค้างเรื่อง scope ที่กระทบ schema หลัก
-- Architecture และ security boundaries ได้รับการ review
-- Local development stack ทำงานซ้ำได้
-- CI baseline ผ่านทั้งหมด
+- [x] ไม่มีคำถามค้างเรื่อง scope ที่กระทบ schema หลัก — scope ตรึงใน [requirements.md](./requirements.md)
+- [x] Architecture และ security boundaries ได้รับการ review — ADR-0001 ถึง ADR-0005 และมีเทสต์บังคับว่า Control API แตะ Docker ไม่ได้ (`architecture.test.ts`)
+- [x] Local development stack ทำงานซ้ำได้
+- [x] CI baseline ผ่านทั้งหมด — lint, typecheck (รวม Dashboard), migration check, tests, dashboard build
+
+**สถานะ: Phase 0 ผ่าน Exit Criteria แล้ว**
+
+หมายเหตุ: state machine, naming helper และ encryption design ถูกสร้างเป็น "สัญญา" ไว้ล่วงหน้า
+แต่ยังไม่มีผู้ใช้งานจริงจนกว่าจะถึง Phase 3–4

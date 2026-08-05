@@ -14,7 +14,8 @@
     "@elysiajs/eden": "^1.4.9",
     "@zixploy/control-api": "workspace:*",
     "nuxt": "^4.2.2",
-    "vue": "^3.5.0"
+    "vue": "^3.5.0",
+    "vue-router": "^5.2.0"
   },
   "devDependencies": {
     "vue-tsc": "^3.1.0"

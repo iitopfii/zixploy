@@ -52,11 +52,18 @@ export function authPlugin(db: Database) {
   });
 }
 
-/** ใช้ใน route ที่ต้อง login + ผ่าน CSRF: `beforeHandle: [requireAuthenticated]` */
+/**
+ * ใช้ใน route ที่ต้อง login + ผ่าน CSRF: `beforeHandle: [requireAuthenticated]`
+ *
+ * ตรวจ authentication ก่อน CSRF เสมอ เพื่อให้ status code สอดคล้องกันทุก method:
+ * ไม่มี session = 401 ทั้ง GET และ mutation ส่วน 403 สงวนไว้สำหรับกรณีที่ login แล้ว
+ * แต่ CSRF ไม่ผ่าน การสลับลำดับไม่ลดความปลอดภัย เพราะ request ที่ไม่มี session
+ * ก็ทำอะไรไม่ได้อยู่แล้ว
+ */
 export function requireAuthenticated(ctx: {
   requireSession: () => ActiveSession;
   assertCsrf: () => void;
 }): void {
-  ctx.assertCsrf();
   ctx.requireSession();
+  ctx.assertCsrf();
 }

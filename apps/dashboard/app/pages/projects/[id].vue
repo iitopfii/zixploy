@@ -19,9 +19,17 @@ const {
   { server: false, watch: [id] },
 );
 
+/**
+ * แสดง loading เฉพาะตอนโหลดครั้งแรกที่ยังไม่มีข้อมูล
+ * ถ้าใช้ `pending` ตรง ๆ การ refresh หลัง save จะ unmount ทั้ง panel
+ * ทำให้ฟอร์มถูกสร้างใหม่และสถานะ "บันทึกแล้ว" หายไปทันที
+ */
+const initialLoading = computed(() => pending.value && !project.value);
+
 /** Tab แต่ละอันเปิดจริงในเฟสที่ระบุ — ตอนนี้แสดงเป็น placeholder ที่บอกสถานะชัดเจน */
 const tabs = [
   { key: "overview", label: "Overview", phase: null },
+  { key: "settings", label: "Settings", phase: null },
   { key: "deploy", label: "Deploy", phase: "Phase 3" },
   { key: "environment", label: "Environment", phase: "Phase 4" },
   { key: "domains", label: "Domains", phase: "Phase 5" },
@@ -49,7 +57,7 @@ async function archive() {
 
 <template>
   <section>
-    <p v-if="pending" class="muted">กำลังโหลด…</p>
+    <p v-if="initialLoading" class="muted">กำลังโหลด…</p>
 
     <div v-else-if="error || !project" class="card">
       <p class="error-text">ไม่พบ project นี้</p>
@@ -101,6 +109,12 @@ async function archive() {
             <button class="danger" @click="confirmArchive = true">Archive project</button>
           </div>
         </template>
+
+        <ProjectSettingsForm
+          v-else-if="activeTab === 'settings'"
+          :project="project"
+          @saved="refresh()"
+        />
 
         <p v-else class="muted placeholder">
           {{ activePhase }} จะเปิดใช้งานส่วนนี้

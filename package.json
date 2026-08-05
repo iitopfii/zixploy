@@ -15,7 +15,9 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "test": "bun test",
-    "migrate:check": "bun run internal/db/scripts/migration-check.ts"
+    "migrate:check": "bun run internal/db/scripts/migration-check.ts",
+    "bootstrap:admin": "bun run apps/control-api/src/cli/bootstrap-admin.ts",
+    "backup": "bun run internal/db/scripts/backup.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.4",

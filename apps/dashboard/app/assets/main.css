@@ -1,0 +1,132 @@
+:root {
+  --bg: #0b0e14;
+  --surface: #12161f;
+  --surface-hover: #1a1f2b;
+  --border: #262c3a;
+  --text: #e6e8ee;
+  --muted: #8b93a7;
+  --accent: #5b9dff;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --bad: #f87171;
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0.5rem 1rem;
+}
+button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #04101f;
+  font-weight: 600;
+}
+button.danger {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+input,
+select {
+  font: inherit;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+input:focus,
+select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+label {
+  display: block;
+  margin-bottom: 1rem;
+}
+label span {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+
+.muted {
+  color: var(--muted);
+}
+.error-text {
+  color: var(--bad);
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8125rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.status-running {
+  color: var(--ok);
+}
+.status-deploying {
+  color: var(--accent);
+}
+.status-failed {
+  color: var(--bad);
+}
+.status-stopped,
+.status-new {
+  color: var(--muted);
+}

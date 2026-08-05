@@ -11,6 +11,8 @@
     "typecheck": "nuxt typecheck"
   },
   "dependencies": {
+    "@elysiajs/eden": "^1.4.9",
+    "@zixploy/control-api": "workspace:*",
     "nuxt": "^4.2.2",
     "vue": "^3.5.0"
   },

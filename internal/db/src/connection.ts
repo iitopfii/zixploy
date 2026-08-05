@@ -16,9 +16,13 @@ export function openDatabase(options: OpenOptions): Database {
     create: !options.readonly,
     strict: true,
   });
-  db.exec("PRAGMA journal_mode = WAL;");
+  // foreign keys และ busy timeout เป็น per-connection setting ตั้งได้ทั้งสองโหมด
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec("PRAGMA busy_timeout = 5000;");
-  db.exec("PRAGMA synchronous = NORMAL;");
+  // journal_mode/synchronous เขียนลงไฟล์ — ตั้งได้เฉพาะ connection ที่เขียนได้
+  if (!options.readonly) {
+    db.exec("PRAGMA journal_mode = WAL;");
+    db.exec("PRAGMA synchronous = NORMAL;");
+  }
   return db;
 }

@@ -36,6 +36,12 @@ docs/              แผนงานและ decision records
 bun install
 ```
 
+สร้าง admin คนแรก (ครั้งเดียว — password ต้องยาวอย่างน้อย 12 ตัวอักษร):
+
+```bash
+ZIXPLOY_ADMIN_USERNAME=admin ZIXPLOY_ADMIN_PASSWORD='your-long-password' bun run bootstrap:admin
+```
+
 เปิดแต่ละ service คนละ terminal **ตามลำดับนี้** — API เป็นผู้สร้างและ migrate database ส่วน worker จะไม่สตาร์ทถ้ายังไม่มี database:
 
 ```bash
@@ -76,6 +82,13 @@ bun run typecheck   # ตรวจ TypeScript ทุก package
 bun run lint        # Biome lint + format check
 bun test            # Unit/integration tests
 bun run migrate:check  # ตรวจ migration จากฐานข้อมูลว่าง (up + rollback)
+bun run backup         # consistent snapshot ของ database (VACUUM INTO)
+```
+
+เปลี่ยน password admin (revoke ทุก session เดิมด้วย):
+
+```bash
+ZIXPLOY_ADMIN_USERNAME=admin ZIXPLOY_ADMIN_PASSWORD='new-long-password' bun run bootstrap:admin --reset
 ```
 
 ## หลักการสถาปัตยกรรมที่ตรึงไว้

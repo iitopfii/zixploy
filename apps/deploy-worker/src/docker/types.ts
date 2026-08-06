@@ -16,6 +16,8 @@ export interface ContainerCreateParams {
   pidsLimit?: number;
   restartPolicy: "no" | "on-failure" | "always" | "unless-stopped";
   networkName: string;
+  /** Named volumes ที่ต้องการ mount (Phase 7) — ต้องสร้าง volume ใน Docker ก่อนเรียก createContainer */
+  volumes?: VolumeMount[];
 }
 
 export interface ContainerInspect {
@@ -53,4 +55,30 @@ export interface ImageSummary {
   ID: string;
   Repository: string;
   Tag: string;
+}
+
+// ---------------------------------------------------------------------------
+// Volume types (Phase 7)
+// ---------------------------------------------------------------------------
+
+/** Volume ที่ต้อง mount เมื่อสร้าง container — ชื่อ Docker volume ต้องมีอยู่แล้วก่อน createContainer */
+export interface VolumeMount {
+  /** Docker volume name (จาก volumes.docker_name — สร้างโดย volumeName() ห้ามใช้ user input) */
+  dockerName: string;
+  /** Absolute Linux path ใน container — ตรวจแล้วด้วย validateMountPath() */
+  mountPath: string;
+  readOnly?: boolean;
+}
+
+export interface VolumeInspect {
+  Name: string;
+  Driver: string;
+  Mountpoint: string;
+  Labels: Record<string, string> | null;
+}
+
+export interface VolumeSummary {
+  Name: string;
+  Driver: string;
+  Labels: string;
 }

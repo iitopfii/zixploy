@@ -16,6 +16,7 @@ import { githubRoutes } from "./routes/github";
 import { logRoutes } from "./routes/logs";
 import { projectRoutes } from "./routes/projects";
 import { systemRoutes } from "./routes/system";
+import { volumeRoutes } from "./routes/volumes";
 import { webhookRoutes } from "./routes/webhook";
 
 /**
@@ -61,7 +62,8 @@ export function buildApp(db: Database, options: AppOptions = {}) {
     .use(webhookRoutes(db, registry))
     .use(environmentRoutes(db, masterKeys))
     .use(domainRoutes(db))
-    .use(logRoutes(db));
+    .use(logRoutes(db))
+    .use(volumeRoutes(db));
 }
 
 export type App = ReturnType<typeof buildApp>;

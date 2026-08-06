@@ -214,9 +214,7 @@ describe("GET /deployments/:id/logs/download", () => {
   test("deployment ไม่มีอยู่ → 404", async () => {
     const { app, auth } = await setup();
     const res = await app.handle(
-      auth(
-        new Request(`http://localhost/api/v1/deployments/${ulid()}/logs/download`),
-      ),
+      auth(new Request(`http://localhost/api/v1/deployments/${ulid()}/logs/download`)),
     );
     expect(res.status).toBe(404);
   });

@@ -21,6 +21,7 @@ import { heartbeatLoop } from "./heartbeat";
 import { runtimeLogLoop } from "./logs/runtime-poller";
 import { createDispatcher } from "./pipeline/dispatch";
 import { claimNextJob, completeJob, failJob, LeaseLostError, withLeaseRenewal } from "./queue";
+import { volumeReconcileLoop } from "./volumes/reconciler";
 
 const workerId = `worker-${ulid()}`;
 const log = createLogger({
@@ -160,6 +161,7 @@ await Promise.all([
   heartbeatLoop(db, workerId, controller.signal),
   jobLoop(controller.signal),
   runtimeLogLoop(db, docker, controller.signal),
+  volumeReconcileLoop(db, docker, controller.signal),
 ]);
 
 log.info("deploy-worker stopped", { workerId });

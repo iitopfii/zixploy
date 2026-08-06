@@ -83,14 +83,14 @@ MVP ควรเตรียม extension point แม้ยังไม่ท�
 
 ## งานดำเนินการ
 
-- [ ] สร้าง volume schema และ naming policy
-- [ ] สร้าง Docker volume adapter
-- [ ] สร้าง mount-path/driver allowlist validation
-- [ ] ผูก volume configuration กับ container creation
-- [ ] รองรับ single-writer activation strategy
-- [ ] สร้าง volume UI และ confirmation flow
-- [ ] สร้าง orphan detection แบบ report-only ก่อน
-- [ ] เขียน backup/restore runbook และ extension interface
+- [x] สร้าง volume schema และ naming policy (migrations/0010_volumes.sql, shared/naming.ts)
+- [x] สร้าง Docker volume adapter (cli-client.ts: createVolume, inspectVolume, removeVolume, listVolumesByLabel)
+- [x] สร้าง mount-path/driver allowlist validation (shared/volumes.ts: validateMountPath, safety.ts: defense-in-depth)
+- [x] ผูก volume configuration กับ container creation (pipeline/build.ts: createVolume → createContainer)
+- [x] รองรับ single-writer activation strategy (warning log — start-before-stop ยังเหมือนเดิม, phase doc: MVP)
+- [ ] สร้าง volume UI และ confirmation flow (Phase 8)
+- [x] สร้าง orphan detection แบบ report-only ก่อน (volumes/reconciler.ts: volumeReconcileLoop)
+- [x] เขียน backup/restore runbook และ extension interface (docs/runbooks/volume-backup-restore.md)
 
 ## การทดสอบ
 

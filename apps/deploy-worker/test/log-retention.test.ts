@@ -45,21 +45,13 @@ function insertDeployment(
   return id;
 }
 
-function insertBuildLog(
-  db: ReturnType<typeof makeDb>,
-  deploymentId: string,
-  seq: number,
-): void {
+function insertBuildLog(db: ReturnType<typeof makeDb>, deploymentId: string, seq: number): void {
   db.query(
     `INSERT INTO build_logs (id, deployment_id, seq, line, created_at) VALUES (?, ?, ?, 'x', ?)`,
   ).run(ulid(), deploymentId, seq, Date.now());
 }
 
-function insertRuntimeLog(
-  db: ReturnType<typeof makeDb>,
-  projectId: string,
-  seq: number,
-): void {
+function insertRuntimeLog(db: ReturnType<typeof makeDb>, projectId: string, seq: number): void {
   const now = Date.now();
   db.query(
     `INSERT INTO runtime_logs (id, project_id, container_id, seq, stream, line, logged_at, created_at)
@@ -94,7 +86,10 @@ describe("pruneBuildLogs", () => {
 
     // deployment ที่ expire แล้ว (31 วันก่อน)
     const oldFinish = Date.now() - 31 * 24 * 60 * 60 * 1000;
-    const oldDepId = insertDeployment(db, projectId, { status: "succeeded", finishedAt: oldFinish });
+    const oldDepId = insertDeployment(db, projectId, {
+      status: "succeeded",
+      finishedAt: oldFinish,
+    });
     insertBuildLog(db, oldDepId, 1);
     insertBuildLog(db, oldDepId, 2);
 

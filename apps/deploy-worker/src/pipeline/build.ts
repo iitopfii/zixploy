@@ -40,6 +40,7 @@ import type { MasterKeys } from "../github/master-key";
 import type { MintedToken } from "../github/token";
 import { pruneBuildLogs } from "../logs/retention";
 import type { ClaimedJob } from "../queue";
+import { loadActiveVolumes } from "../volumes/loader";
 import { assertDockerfileWithinContext, createWorkspace, removeWorkspace } from "../workspace";
 import type { ActivateParams } from "./activate";
 import { cleanupProjectImages } from "./cleanup";
@@ -218,6 +219,24 @@ export async function runBuildOrRollbackPipeline(
       ...buildTraefikLabels(domainConfigs, job.projectId),
     };
 
+    // โหลด active volumes — ensure Docker volumes มีอยู่จริงก่อนสร้าง container (Phase 7 M4)
+    const activeVolumes = loadActiveVolumes(db, job.projectId);
+    for (const vol of activeVolumes) {
+      // single-writer warning: ทั้ง candidate และ old container จะ share volume (start-before-stop)
+      if (vol.accessMode === "single-writer") {
+        safeLog(
+          `[volume] ⚠️  volume '${vol.dockerName}' (mount: ${vol.mountPath}) มี access_mode=single-writer ` +
+            "— container เก่าและใหม่อาจเขียน volume พร้อมกันชั่วคราวระหว่าง activation (start-before-stop)",
+        );
+      }
+      // docker volume create เป็น idempotent — ไม่ fail ถ้า volume มีอยู่แล้ว
+      await deps.docker.createVolume({
+        name: vol.dockerName,
+        driver: vol.driver,
+        labels: { "platform.managed": "true", "platform.volume_id": vol.id },
+      });
+    }
+
     const { containerId } = await deps.docker.createContainer({
       name: cName,
       image: imageTag,
@@ -229,6 +248,16 @@ export async function runBuildOrRollbackPipeline(
       networkName: PROXY_NETWORK,
       // runtimeEnv เป็น Record<string, string> เสมอ (อาจว่าง) — ไม่ส่ง undefined
       env: envInject.runtimeEnv,
+      // Named volume mounts — Docker volumes สร้างแล้วในขั้นตอนก่อนหน้า
+      ...(activeVolumes.length > 0
+        ? {
+            volumes: activeVolumes.map((v) => ({
+              dockerName: v.dockerName,
+              mountPath: v.mountPath,
+              ...(v.readOnly ? { readOnly: true } : {}),
+            })),
+          }
+        : {}),
     });
     await deps.docker.startContainer(containerId);
     transitionDeployment(db, deploymentId, "health_checking", { containerId });

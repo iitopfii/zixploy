@@ -18,6 +18,8 @@ import type {
   ContainerSummary,
   ImageInspect,
   ImageSummary,
+  VolumeInspect,
+  VolumeSummary,
 } from "./types";
 
 export interface DockerClientOptions {
@@ -130,6 +132,13 @@ export class DockerCliClient {
     }
     if (params.cpuLimit != null) args.push("--cpus", String(params.cpuLimit));
     if (params.memoryLimitMb != null) args.push("--memory", `${params.memoryLimitMb}m`);
+    // Named volume mounts — Docker volume ต้องมีอยู่แล้วก่อน createContainer (Phase 7)
+    for (const v of params.volumes ?? []) {
+      // --mount format: type=volume,source=<name>,target=<path>[,readonly]
+      // ห้ามใช้ --volume/-v เพราะ --mount ชัดเจนกว่า และไม่สร้าง anonymous volume โดยไม่ตั้งใจ
+      const spec = `type=volume,source=${v.dockerName},target=${v.mountPath}${v.readOnly ? ",readonly" : ""}`;
+      args.push("--mount", spec);
+    }
 
     assertDockerArgsSafe(args);
 
@@ -301,5 +310,92 @@ export class DockerCliClient {
     // เรียงตาม loggedAt เพราะ docker ส่ง stdout + stderr แยกกัน ลำดับอาจคละกัน
     parsed.sort((a, b) => a.loggedAt - b.loggedAt);
     return parsed;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Volume operations (Phase 7)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * สร้าง Docker named volume (idempotent — ถ้า volume มีอยู่แล้ว error ไม่ถูก throw)
+   * Worker เรียกก่อน createContainer ทุกครั้งเพื่อ ensure volume exists
+   */
+  async createVolume(params: {
+    name: string;
+    driver: string;
+    labels?: Record<string, string>;
+  }): Promise<void> {
+    const args = ["volume", "create", "--driver", params.driver];
+    for (const [k, v] of Object.entries(params.labels ?? {})) {
+      args.push("--label", `${k}=${v}`);
+    }
+    args.push(params.name);
+
+    const result = await this.exec(args);
+    if (result.code !== 0) {
+      // docker volume create โดยปกติ idempotent — ถ้า fail จริงถือว่า error สำคัญ
+      throw new AppError(
+        "VOLUME_CREATE_FAILED",
+        `docker volume create ล้มเหลว: ${truncate(result.stderr)}`,
+      );
+    }
+  }
+
+  /** ดึงข้อมูล Docker volume — คืน null ถ้าไม่มีอยู่ */
+  async inspectVolume(name: string): Promise<VolumeInspect | null> {
+    const result = await this.exec(["volume", "inspect", "--format", "{{json .}}", name]);
+    if (result.code !== 0) return null;
+    try {
+      return JSON.parse(result.stdout.trim()) as VolumeInspect;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * ลบ Docker named volume
+   * คืนปกติถ้า volume ไม่มีอยู่แล้ว (idempotent)
+   * Throw VOLUME_IN_USE ถ้า container ยังใช้ volume อยู่
+   */
+  async removeVolume(name: string, opts: { force?: boolean } = {}): Promise<void> {
+    const args = ["volume", "rm"];
+    if (opts.force) args.push("-f");
+    args.push(name);
+
+    const result = await this.exec(args);
+    if (result.code !== 0) {
+      if (isNotFoundError(result.stderr)) return; // idempotent
+      // docker volume rm ล้มเหลวเพราะ container ยังใช้ volume อยู่
+      if (result.stderr.toLowerCase().includes("in use")) {
+        throw new AppError("VOLUME_IN_USE", `volume ${name} ยังมี container ใช้อยู่ ลบไม่ได้`);
+      }
+      throw new AppError(
+        "DOCKER_UNAVAILABLE",
+        `docker volume rm ล้มเหลว: ${truncate(result.stderr)}`,
+      );
+    }
+  }
+
+  /** List Docker volumes ที่ตรงกับ labels ที่กำหนด (ใช้ใน orphan reconciler) */
+  async listVolumesByLabel(labels: Record<string, string>): Promise<VolumeSummary[]> {
+    const args = ["volume", "ls", "--format", "json"];
+    for (const [k, v] of Object.entries(labels)) {
+      args.push("--filter", `label=${k}=${v}`);
+    }
+
+    const result = await this.exec(args);
+    if (result.code !== 0) return [];
+
+    return result.stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .flatMap((line) => {
+        try {
+          return [JSON.parse(line) as VolumeSummary];
+        } catch {
+          return [];
+        }
+      });
   }
 }

@@ -96,9 +96,7 @@ describe("migration 0009 — build_logs", () => {
     // ลบ deployment
     db.query("DELETE FROM deployments WHERE id = ?").run(DEPLOYMENT_ID);
 
-    const count = db
-      .query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM build_logs")
-      .get()!;
+    const count = db.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM build_logs").get()!;
     expect(count.cnt).toBe(0);
   });
 
@@ -196,9 +194,7 @@ describe("migration 0009 — runtime_logs", () => {
     db.query("DELETE FROM deployments WHERE project_id = ?").run(PROJECT_ID);
     db.query("DELETE FROM projects WHERE id = ?").run(PROJECT_ID);
 
-    const count = db
-      .query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM runtime_logs")
-      .get()!;
+    const count = db.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM runtime_logs").get()!;
     expect(count.cnt).toBe(0);
   });
 

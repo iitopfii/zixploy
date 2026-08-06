@@ -54,6 +54,28 @@ export const LOG_SETTINGS = {
   pageLimit: 500,
 } as const;
 
+/** Docker volume driver ที่อนุญาต — MVP: local เท่านั้น (Phase 7) */
+export const VOLUME_ALLOWED_DRIVERS = ["local"] as const;
+export type VolumeDriver = (typeof VOLUME_ALLOWED_DRIVERS)[number];
+
+/**
+ * Container path prefixes ที่ห้าม mount volume — threat-model.md (Phase 7)
+ * ตรวจสองชั้น: validateMountPath() ที่ API และ assertDockerArgsSafe() ที่ worker (defense-in-depth)
+ */
+export const VOLUME_SENSITIVE_PATHS = [
+  "/proc",
+  "/sys",
+  "/dev",
+  "/etc",
+  "/bin",
+  "/sbin",
+  "/usr/bin",
+  "/usr/sbin",
+  "/run/docker.sock",
+  "/var/run/docker.sock",
+  "/.dockerenv",
+] as const;
+
 /** Ownership labels — cleanup/reconciler เลือก resource จาก labels เหล่านี้เท่านั้น (ADR-0005) */
 export const LABELS = {
   managed: "platform.managed",

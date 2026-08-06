@@ -10,7 +10,7 @@
  * host bind mounts เลยตั้งแต่ระดับ type — "assert-by-construction" ชั้นแรกสุด
  */
 
-import { AppError } from "@zixploy/shared";
+import { AppError, validateMountPath } from "@zixploy/shared";
 import type { ContainerCreateParams } from "./types";
 
 const FORBIDDEN_MOUNT_TARGETS = ["/var/run/docker.sock", "/proc", "/sys", "/dev"];
@@ -27,6 +27,15 @@ export function assertContainerConfigSafe(params: ContainerCreateParams): void {
   }
   if (params.pidsLimit != null && params.pidsLimit <= 0) {
     throw new AppError("VALIDATION_ERROR", "pidsLimit ต้องมากกว่า 0", { field: "pidsLimit" });
+  }
+  // ตรวจ volume mount paths (Phase 7) — defense-in-depth ชั้นที่ 1 ก่อนสร้าง argv
+  for (const vol of params.volumes ?? []) {
+    const check = validateMountPath(vol.mountPath);
+    if (!check.ok) {
+      throw new AppError("VOLUME_INVALID_PATH", check.reason ?? "invalid mount path", {
+        mountPath: vol.mountPath,
+      });
+    }
   }
 }
 
@@ -68,12 +77,23 @@ function assertMountSafe(mountSpec: string): void {
       throw new AppError("VALIDATION_ERROR", `ห้าม mount path ที่อ่อนไหว: ${forbidden}`);
     }
   }
-  // mount ทั้ง root filesystem ("/") เป็น source หรือ target — เช็คแบบตรง segment ไม่ใช่ substring
-  // (กัน false positive กับ path ที่มี "/" เป็นส่วนหนึ่งตามปกติ)
-  const parts = normalized.split(":");
-  for (const part of parts.slice(0, 2)) {
-    if (part === "/") {
+
+  // ตรวจ root filesystem mount — รองรับทั้ง -v format และ --mount type=volume/bind format
+  if (normalized.includes("type=volume") || normalized.includes("type=bind")) {
+    // --mount format: "type=volume,source=name,target=/path"
+    // ดึง target= value (จบที่ "," หรือท้าย string)
+    const targetMatch = /target=([^,]+)/.exec(normalized);
+    const target = targetMatch?.[1]?.trim();
+    if (target === "/") {
       throw new AppError("VALIDATION_ERROR", "ห้าม mount root filesystem ทั้งหมด");
+    }
+  } else {
+    // -v / --volume format: "source:target:options" หรือ "target" (anonymous)
+    const parts = normalized.split(":");
+    for (const part of parts.slice(0, 2)) {
+      if (part === "/") {
+        throw new AppError("VALIDATION_ERROR", "ห้าม mount root filesystem ทั้งหมด");
+      }
     }
   }
 }

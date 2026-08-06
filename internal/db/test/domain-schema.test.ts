@@ -159,9 +159,7 @@ describe("migration 0008 — project_domains", () => {
     // ลบ project
     db.query("DELETE FROM projects WHERE id = ?").run(PROJECT_ID);
 
-    const count = db
-      .query<{ n: number }, []>("SELECT COUNT(*) as n FROM project_domains")
-      .get()!.n;
+    const count = db.query<{ n: number }, []>("SELECT COUNT(*) as n FROM project_domains").get()!.n;
     expect(count).toBe(0);
   });
 

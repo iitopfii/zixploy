@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   AppError,
+  BUILD_SANDBOX_LIMITS,
   buildTraefikLabels,
   containerName,
   deploymentLabels,
@@ -41,7 +42,12 @@ import type { MintedToken } from "../github/token";
 import { pruneBuildLogs } from "../logs/retention";
 import type { ClaimedJob } from "../queue";
 import { loadActiveVolumes } from "../volumes/loader";
-import { assertDockerfileWithinContext, createWorkspace, removeWorkspace } from "../workspace";
+import {
+  assertDockerfileWithinContext,
+  assertWorkspaceSizeWithinLimit,
+  createWorkspace,
+  removeWorkspace,
+} from "../workspace";
 import type { ActivateParams } from "./activate";
 import { cleanupProjectImages } from "./cleanup";
 import type { HealthCheckParams } from "./health-check";
@@ -133,6 +139,8 @@ export async function runBuildOrRollbackPipeline(
         });
         // ตรวจหลัง clone จริงเท่านั้น (ต้องมี buildContextDir อยู่จริงก่อนถึงจะ realpath ได้)
         assertDockerfileWithinContext(buildContextDir, project.dockerfilePath);
+        // ตรวจขนาด workspace ก่อนเริ่ม build เสมอ (Phase 8 M1 — threat-model.md)
+        assertWorkspaceSizeWithinLimit(workspaceDir, BUILD_SANDBOX_LIMITS.workspaceMaxMb);
 
         // --- building ---
         transitionDeployment(db, deploymentId, "building");

@@ -19,12 +19,24 @@
  */
 
 import { resolve } from "node:path";
-import { AppError } from "@zixploy/shared";
+import { AppError, BUILD_SANDBOX_LIMITS } from "@zixploy/shared";
 import { isDiskFullError } from "../disk-full";
 
 export interface BuildSecret {
   id: string;
   sourcePath: string;
+}
+
+/**
+ * Sandbox limits ของ RUN instructions ระหว่าง build — default มาจาก BUILD_SANDBOX_LIMITS
+ * (Phase 8 M1) เปิดให้ override ต่อ call ได้สำหรับเทสต์/tuning ในอนาคต ไม่ผูกกับ project settings
+ */
+export interface BuildResourceLimits {
+  memoryMb: number;
+  cpuQuota: number;
+  cpuPeriod: number;
+  nprocSoft: number;
+  nprocHard: number;
 }
 
 export interface BuildImageParams {
@@ -41,6 +53,8 @@ export interface BuildImageParams {
   signal: AbortSignal;
   /** เรียกทุกบรรทัดของ build output — ผู้เรียกต้อง redact เอง (ดู comment บนสุดของไฟล์) */
   onLog: (line: string) => void;
+  /** ไม่ระบุ → ใช้ BUILD_SANDBOX_LIMITS (ค่า platform-wide) */
+  resourceLimits?: BuildResourceLimits;
 }
 
 export interface BuildImageResult {
@@ -87,19 +101,13 @@ function truncate(text: string, max = 800): string {
 const DOCKERFILE_MISSING_RE =
   /failed to read dockerfile|dockerfile: no such file|no such file.*dockerfile/i;
 
-export async function buildImage(params: BuildImageParams): Promise<BuildImageResult> {
-  const {
-    contextDir,
-    dockerfilePath,
-    tag,
-    target,
-    buildArgs,
-    secrets,
-    labels,
-    timeoutMs,
-    signal,
-    onLog,
-  } = params;
+/**
+ * สร้าง argv ของ `docker buildx build` ล้วน ๆ (ไม่ spawn) — แยกออกมาให้เทสต์ตรวจ flag ได้โดยไม่ต้องมี
+ * Docker daemon จริง ดู BuildResourceLimits: จำกัด memory/cpu/nproc ของแต่ละ RUN step (Phase 8 M1)
+ */
+export function buildBuildxArgs(params: BuildImageParams): string[] {
+  const { contextDir, dockerfilePath, tag, target, buildArgs, secrets, labels } = params;
+  const limits = params.resourceLimits ?? BUILD_SANDBOX_LIMITS;
 
   // -f resolve เทียบ cwd ของ subprocess เอง (repo root) ไม่ใช่ contextDir — ต้องส่ง absolute path เสมอ
   const absoluteDockerfilePath = resolve(contextDir, dockerfilePath);
@@ -112,12 +120,26 @@ export async function buildImage(params: BuildImageParams): Promise<BuildImageRe
     "-t",
     tag,
     "--load",
+    "--resource",
+    `memory=${limits.memoryMb}m`,
+    "--resource",
+    `cpu-quota=${limits.cpuQuota}`,
+    "--resource",
+    `cpu-period=${limits.cpuPeriod}`,
+    "--ulimit",
+    `nproc=${limits.nprocSoft}:${limits.nprocHard}`,
   ];
   if (target) args.push("--target", target);
   for (const [k, v] of Object.entries(buildArgs ?? {})) args.push("--build-arg", `${k}=${v}`);
   for (const s of secrets ?? []) args.push("--secret", `id=${s.id},src=${s.sourcePath}`);
   for (const [k, v] of Object.entries(labels)) args.push("--label", `${k}=${v}`);
   args.push(contextDir);
+  return args;
+}
+
+export async function buildImage(params: BuildImageParams): Promise<BuildImageResult> {
+  const { dockerfilePath, tag, timeoutMs, signal, onLog } = params;
+  const args = buildBuildxArgs(params);
 
   const timeoutController = new AbortController();
   const timer = setTimeout(() => timeoutController.abort(), timeoutMs);

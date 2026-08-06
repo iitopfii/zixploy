@@ -13,7 +13,7 @@
  * ตาม ADR-0002) — เป็น implementation เดียวกันแบบ standalone
  */
 
-import { mkdirSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { AppError } from "@zixploy/shared";
 
@@ -56,6 +56,36 @@ export function createWorkspace(deploymentId: string, buildContext: string): Wor
 /** ลบ workspace ทิ้งเสมอหลังจบงาน (สำเร็จหรือล้มเหลว) — เรียกใน finally ของ pipeline */
 export function removeWorkspace(deploymentId: string): void {
   rmSync(join(workspacesDir(), deploymentId), { recursive: true, force: true });
+}
+
+/** รวมขนาดไฟล์ทั้งหมดใน dir แบบ recursive (bytes) — ไม่ follow symlink กัน loop/escape */
+function dirSizeBytes(dir: string): number {
+  let total = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isSymbolicLink()) continue;
+    if (entry.isDirectory()) {
+      total += dirSizeBytes(full);
+    } else if (entry.isFile()) {
+      total += statSync(full).size;
+    }
+  }
+  return total;
+}
+
+/**
+ * ตรวจขนาดรวมของ workspace หลัง clone ก่อนเริ่ม build — threat-model.md "Build กิน...disk จน host ตาย"
+ * (Phase 8 M1) เรียกหลัง clone เสร็จ ก่อน buildImage() เท่านั้น
+ */
+export function assertWorkspaceSizeWithinLimit(workspaceDir: string, maxMb: number): void {
+  const sizeMb = dirSizeBytes(workspaceDir) / (1024 * 1024);
+  if (sizeMb > maxMb) {
+    throw new AppError(
+      "WORKSPACE_TOO_LARGE",
+      `workspace มีขนาด ${sizeMb.toFixed(1)}MB เกินขีดจำกัด ${maxMb}MB`,
+      { sizeMb, maxMb },
+    );
+  }
 }
 
 /**

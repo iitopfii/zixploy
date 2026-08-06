@@ -39,8 +39,8 @@
 |---|---|
 | Build ขโมย secret ของ platform | ไม่ mount control-plane files/env เข้า build; secret build-time ผ่าน BuildKit secrets เท่านั้น |
 | Dockerfile path traversal ออกนอก workspace | Validate dockerfile path/build context อยู่ใน workspace ที่ isolate ต่อ deployment |
-| Build กิน CPU/RAM/disk จน host ตาย | Resource limits + build timeout + workspace size limit + disk watermark (Phase 6) |
-| Fork bomb / PID exhaustion | PID limit บน build/run containers |
+| Build กิน CPU/RAM/disk จน host ตาย | Resource limits (`--resource memory/cpu-quota/cpu-period`) + build timeout + workspace size limit (`assertWorkspaceSizeWithinLimit`) + disk watermark (Phase 6) — Phase 8 M1 |
+| Fork bomb / PID exhaustion | PID limit บน run containers (`--pids-limit`, Phase 0-3) และบน build steps (`--ulimit nproc`, Phase 8 M1) |
 | Container runtime หนีออก host | ไม่ให้ privileged/capabilities; pin Docker version ที่ patch แล้ว |
 | Token รั่วใน build log | Installation token ไม่เข้า clone URL ที่ถูก log; ทุก output ผ่าน redaction pipeline |
 

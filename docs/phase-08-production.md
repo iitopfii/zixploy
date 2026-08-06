@@ -146,6 +146,15 @@
 - Rotate GitHub private key/webhook secret
 - Rotate environment encryption key
 
+## งานดำเนินการ
+
+- [x] M1: Untrusted build resource sandbox — `--resource memory/cpu-quota/cpu-period` + `--ulimit nproc` บน `docker buildx build` (BUILD_SANDBOX_LIMITS, buildkit.ts: buildBuildxArgs), workspace size limit หลัง clone (workspace.ts: assertWorkspaceSizeWithinLimit) — ดู threat-model.md section 3
+- [ ] M2: General reconciliation loop (container drift/degraded, deploying-without-lease recovery, installation revoked)
+- [ ] M3: Audit log (login, config change, deploy, rollback, volume deletion)
+- [ ] M4: Backup automation (encryption keys, GitHub App PEM/webhook secret, ACME storage)
+- [ ] M5: Web security (secure headers, CSRF, session rotation, login rate limit, origin/host validation)
+- [ ] M6: Production docker-compose, resource limits ทุก container, runbooks, release checklist sign-off
+
 ## Exit Criteria
 
 - End-to-end production test matrix ผ่าน

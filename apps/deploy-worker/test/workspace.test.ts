@@ -6,6 +6,7 @@ import { AppError } from "@zixploy/shared";
 import {
   assertDockerfileWithinContext,
   assertSafeRelativePath,
+  assertWorkspaceSizeWithinLimit,
   createWorkspace,
   removeWorkspace,
   workspacesDir,
@@ -155,5 +156,35 @@ describe("assertDockerfileWithinContext", () => {
     }
     expect(caught).toBeInstanceOf(AppError);
     expect((caught as AppError).code).toBe("DOCKERFILE_NOT_FOUND");
+  });
+});
+
+describe("assertWorkspaceSizeWithinLimit", () => {
+  test("workspace เล็กกว่า limit → ผ่าน", () => {
+    const ctx = tempDir();
+    writeFileSync(join(ctx, "small.txt"), "a".repeat(1024)); // 1KB
+    expect(() => assertWorkspaceSizeWithinLimit(ctx, 1)).not.toThrow();
+  });
+
+  test("workspace ใหญ่กว่า limit → throw WORKSPACE_TOO_LARGE", () => {
+    const ctx = tempDir();
+    writeFileSync(join(ctx, "big.bin"), Buffer.alloc(2 * 1024 * 1024)); // 2MB
+    let caught: unknown;
+    try {
+      assertWorkspaceSizeWithinLimit(ctx, 1); // limit 1MB
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(AppError);
+    expect((caught as AppError).code).toBe("WORKSPACE_TOO_LARGE");
+  });
+
+  test("รวมขนาดไฟล์ใน subdirectory ด้วย (recursive)", () => {
+    const ctx = tempDir();
+    mkdirSync(join(ctx, "sub"), { recursive: true });
+    writeFileSync(join(ctx, "a.bin"), Buffer.alloc(1024 * 1024)); // 1MB
+    writeFileSync(join(ctx, "sub", "b.bin"), Buffer.alloc(1024 * 1024)); // 1MB
+    expect(() => assertWorkspaceSizeWithinLimit(ctx, 1)).toThrow(AppError); // รวม 2MB > 1MB
+    expect(() => assertWorkspaceSizeWithinLimit(ctx, 3)).not.toThrow();
   });
 });

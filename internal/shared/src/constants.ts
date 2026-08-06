@@ -76,6 +76,22 @@ export const VOLUME_SENSITIVE_PATHS = [
   "/.dockerenv",
 ] as const;
 
+/**
+ * Sandbox limits สำหรับ `docker buildx build` เอง (RUN instructions ระหว่าง build) — threat-model.md
+ * section 3 "Build กิน CPU/RAM/disk จน host ตาย" / "Fork bomb / PID exhaustion"
+ * ต่างจาก ContainerCreateParams.cpuLimit/memoryLimitMb/pidsLimit ซึ่งเป็น limit ของ container
+ * ตอน runtime (Phase 0-3) — อันนี้ครอบเฉพาะ build step ที่ยังไม่เคยจำกัดมาก่อน (Phase 8 M1)
+ */
+export const BUILD_SANDBOX_LIMITS = {
+  memoryMb: 2048,
+  cpuQuota: 100_000,
+  cpuPeriod: 100_000,
+  nprocSoft: 512,
+  nprocHard: 512,
+  /** ขนาดรวมของ workspace (หลัง clone) ก่อนเริ่ม build — ป้องกัน repo/objects ขนาดใหญ่ผิดปกติ */
+  workspaceMaxMb: 2048,
+} as const;
+
 /** Ownership labels — cleanup/reconciler เลือก resource จาก labels เหล่านี้เท่านั้น (ADR-0005) */
 export const LABELS = {
   managed: "platform.managed",

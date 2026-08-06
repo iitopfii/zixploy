@@ -19,7 +19,9 @@ data/
 
 # secrets / keys
 *.pem
+*.key
 secrets/
+backups/
 
 # logs
 *.log

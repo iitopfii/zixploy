@@ -14,6 +14,16 @@ export const CSRF_HEADER = "x-csrf-token";
 /** อายุ session — ต่ออายุอัตโนมัติไม่ได้ใน MVP, หมดอายุแล้วต้อง login ใหม่ */
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * Session rotation (Phase 8 M5) — session ที่ยังใช้งานอยู่นานเกินนี้จะถูกออก token ใหม่
+ * ให้อัตโนมัติแบบโปร่งใส (ผู้ใช้ไม่ต้อง login ใหม่) แล้ว revoke token เก่าทันที
+ * ลดเวลาที่ token เดิม (ถ้าหลุด) ยังใช้งานได้ โดยไม่กระทบ UX ของ session ที่ TTL ยาว 7 วัน
+ */
+export const SESSION_ROTATION_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/** cookie ต้องตั้ง Secure flag เฉพาะ production (Traefik เป็น HTTPS เสมอ) — dev ใช้ http://localhost ได้ */
+export const secureCookies = process.env.NODE_ENV === "production";
+
 export interface SessionRow {
   id: string;
   user_id: string;
@@ -57,6 +67,7 @@ export function createSession(db: Database, userId: string, now = Date.now()): C
 export interface ActiveSession {
   sessionId: string;
   userId: string;
+  createdAt: number;
   expiresAt: number;
 }
 
@@ -72,7 +83,17 @@ export function findActiveSession(
   if (!row) return null;
   if (row.revoked_at !== null) return null;
   if (row.expires_at <= now) return null;
-  return { sessionId: row.id, userId: row.user_id, expiresAt: row.expires_at };
+  return {
+    sessionId: row.id,
+    userId: row.user_id,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+  };
+}
+
+/** session เก่ากว่า rotation interval แล้วหรือยัง — ใช้ตัดสินใจออก token ใหม่แบบโปร่งใส */
+export function needsRotation(session: ActiveSession, now = Date.now()): boolean {
+  return now - session.createdAt >= SESSION_ROTATION_INTERVAL_MS;
 }
 
 export function touchSession(db: Database, sessionId: string, now = Date.now()): void {

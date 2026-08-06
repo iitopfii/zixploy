@@ -16,6 +16,10 @@ export const ERROR_CODES = {
   CSRF_REJECTED: 403,
   INVALID_CREDENTIALS: 401,
 
+  // web security (phase 8 M5)
+  INVALID_HOST: 400,
+  INVALID_ORIGIN: 403,
+
   // projects (phase 1)
   PROJECT_NOT_FOUND: 404,
   PROJECT_ARCHIVED: 409,

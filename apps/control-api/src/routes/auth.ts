@@ -11,6 +11,7 @@ import {
   revokeSession,
   SESSION_COOKIE,
   SESSION_TTL_MS,
+  secureCookies,
 } from "../auth/session";
 import { authPlugin } from "../plugins/auth";
 
@@ -30,9 +31,6 @@ const sessionResponse = t.Object({
   username: t.Optional(t.String()),
   expiresAt: t.Optional(t.Number()),
 });
-
-/** ใน production API อยู่หลัง Traefik ซึ่งเป็น HTTPS เสมอ */
-const secureCookies = process.env.NODE_ENV === "production";
 
 /** key สำหรับ rate limit — ใช้ IP ที่ Traefik ส่งมา ไม่ใช่ค่าที่ client ตั้งเองได้ทั้งหมด */
 function clientKey(request: Request, server: { requestIP?: (r: Request) => unknown } | null) {

@@ -5,6 +5,7 @@ import type { GitHubAppRegistry } from "./github/registry";
 import { RealGitHubAppRegistry } from "./github/registry";
 import { bodyLimit } from "./plugins/body-limit";
 import { errorHandler } from "./plugins/error-handler";
+import { originGuard } from "./plugins/origin-guard";
 import { requestId } from "./plugins/request-id";
 import { requestLog } from "./plugins/request-log";
 import { securityHeaders } from "./plugins/security-headers";
@@ -41,17 +42,19 @@ export interface AppOptions {
 
 export function buildApp(db: Database, options: AppOptions = {}) {
   const masterKeys = options.masterKeys ?? null;
+  const baseUrl = options.baseUrl ?? "http://localhost:3001";
 
   const registry =
     options.registry ??
     new RealGitHubAppRegistry(db, {
-      baseUrl: options.baseUrl ?? "http://localhost:3001",
+      baseUrl,
       masterKeys,
     });
 
   return new Elysia()
     .use(requestId)
     .use(requestLog)
+    .use(originGuard(baseUrl))
     .use(securityHeaders)
     .use(bodyLimit)
     .use(errorHandler)

@@ -214,6 +214,71 @@ describe("POST /auth/logout", () => {
   });
 });
 
+describe("session rotation (Phase 8 M5)", () => {
+  test("session เก่าเกิน rotation interval -> ได้ token ใหม่แบบโปร่งใส, token เก่าใช้ไม่ได้ต่อ", async () => {
+    const { db, app } = await makeApp();
+    const { cookies } = await login(app);
+
+    // จำลอง session ที่สร้างมานานเกิน rotation interval (ปกติ createSession ใช้ Date.now())
+    db.query("UPDATE sessions SET created_at = ?").run(Date.now() - 25 * 60 * 60 * 1000);
+
+    const res = await app.handle(
+      new Request("http://localhost/api/v1/auth/session", {
+        headers: { cookie: cookieHeader(cookies) },
+      }),
+    );
+    expect(await json(res)).toMatchObject({ authenticated: true, username: "admin" });
+
+    const rotatedCookies = parseCookies(res);
+    expect(rotatedCookies.zx_session).toBeDefined();
+    expect(rotatedCookies.zx_session).not.toBe(cookies.zx_session);
+    expect(rotatedCookies.zx_csrf).not.toBe(cookies.zx_csrf);
+
+    // token เดิม (pre-rotation) ใช้ต่อไม่ได้อีกแล้ว — ถูก revoke ทันทีตอน rotate
+    const oldTokenRes = await app.handle(
+      new Request("http://localhost/api/v1/auth/session", {
+        headers: { cookie: cookieHeader(cookies) },
+      }),
+    );
+    expect(await json(oldTokenRes)).toEqual({ authenticated: false });
+
+    // token ใหม่ใช้งานได้ปกติ
+    const newTokenRes = await app.handle(
+      new Request("http://localhost/api/v1/auth/session", {
+        headers: { cookie: cookieHeader(rotatedCookies) },
+      }),
+    );
+    expect(await json(newTokenRes)).toMatchObject({ authenticated: true, username: "admin" });
+  });
+
+  test("session ยังไม่ถึง rotation interval -> ไม่ set cookie ใหม่", async () => {
+    const { app } = await makeApp();
+    const { cookies } = await login(app);
+
+    const res = await app.handle(
+      new Request("http://localhost/api/v1/auth/session", {
+        headers: { cookie: cookieHeader(cookies) },
+      }),
+    );
+    expect(res.headers.getSetCookie().length).toBe(0);
+  });
+
+  test("rotation ระหว่าง mutating request ไม่ทำให้ CSRF check ของ request เดียวกันพัง", async () => {
+    const { db, app } = await makeApp();
+    const { cookies } = await login(app);
+    db.query("UPDATE sessions SET created_at = ?").run(Date.now() - 25 * 60 * 60 * 1000);
+
+    // logout เป็น mutating request ที่ผ่าน assertCsrf — ต้องผ่านแม้ session เพิ่งถูก rotate ระหว่าง request นี้
+    const res = await app.handle(
+      new Request("http://localhost/api/v1/auth/logout", {
+        method: "POST",
+        headers: { cookie: cookieHeader(cookies), "x-csrf-token": cookies.zx_csrf ?? "" },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("security headers", () => {
   test("ทุก response มี security headers", async () => {
     const { app } = await makeApp();

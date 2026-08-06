@@ -20,6 +20,7 @@
 
 import { resolve } from "node:path";
 import { AppError } from "@zixploy/shared";
+import { isDiskFullError } from "../disk-full";
 
 export interface BuildSecret {
   id: string;
@@ -142,6 +143,9 @@ export async function buildImage(params: BuildImageParams): Promise<BuildImageRe
       const stderrText = stderrLines.join("\n");
       if (timeoutController.signal.aborted) {
         throw new AppError("BUILD_TIMEOUT", `build เกินเวลาที่กำหนด (${timeoutMs}ms)`);
+      }
+      if (isDiskFullError(stderrText)) {
+        throw new AppError("DISK_FULL", `เนื้อที่ดิสก์เต็มระหว่าง build: ${truncate(stderrText)}`);
       }
       if (DOCKERFILE_MISSING_RE.test(stderrText)) {
         throw new AppError("DOCKERFILE_NOT_FOUND", `ไม่พบ Dockerfile: ${dockerfilePath}`);

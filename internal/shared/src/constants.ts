@@ -23,6 +23,9 @@ export const DEPLOY_QUEUE = {
   leaseRenewIntervalMs: 15_000,
 } as const;
 
+/** จำนวน image ของ deployment ที่ succeeded ล่าสุดต่อ project ที่เก็บไว้เสมอ (Phase 3 M7 cleanup) */
+export const IMAGE_RETENTION_KEEP_COUNT = 3;
+
 /** Ownership labels — cleanup/reconciler เลือก resource จาก labels เหล่านี้เท่านั้น (ADR-0005) */
 export const LABELS = {
   managed: "platform.managed",

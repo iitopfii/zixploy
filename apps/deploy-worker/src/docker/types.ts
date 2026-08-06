@@ -36,6 +36,10 @@ export interface ContainerInspect {
 export interface ImageInspect {
   Id: string;
   RepoDigests: string[];
+  /** ownership labels (ADR-0005) — อยู่ใต้ Config.Labels ไม่ใช่ top-level (ตรวจสอบจริงกับ Docker Desktop) */
+  Config: {
+    Labels: Record<string, string> | null;
+  };
 }
 
 export interface ContainerSummary {
@@ -43,4 +47,10 @@ export interface ContainerSummary {
   Names: string;
   Image: string;
   Labels: string;
+}
+
+export interface ImageSummary {
+  ID: string;
+  Repository: string;
+  Tag: string;
 }

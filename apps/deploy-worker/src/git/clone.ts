@@ -14,6 +14,7 @@
 
 import { mkdirSync } from "node:fs";
 import { AppError, redactString } from "@zixploy/shared";
+import { isDiskFullError } from "../disk-full";
 
 export interface CloneParams {
   repoFullName: string;
@@ -82,6 +83,9 @@ export async function cloneCommit(params: CloneParams): Promise<void> {
 
     let result = await run(["git", "init", destDir], { signal: combinedSignal, onLog });
     if (result.code !== 0) {
+      if (isDiskFullError(result.stderr)) {
+        throw new AppError("DISK_FULL", `เนื้อที่ดิสก์เต็มระหว่าง git init: ${truncate(result.stderr)}`);
+      }
       throw new AppError("CLONE_FAILED", `git init ล้มเหลว: ${truncate(result.stderr)}`);
     }
 
@@ -98,6 +102,9 @@ export async function cloneCommit(params: CloneParams): Promise<void> {
       { signal: combinedSignal, onLog },
     );
     if (result.code !== 0) {
+      if (isDiskFullError(result.stderr)) {
+        throw new AppError("DISK_FULL", `เนื้อที่ดิสก์เต็มระหว่าง git fetch: ${truncate(result.stderr)}`);
+      }
       if (combinedSignal.aborted && timeoutController.signal.aborted) {
         throw new AppError("CLONE_FAILED", "git fetch timeout");
       }
@@ -112,6 +119,12 @@ export async function cloneCommit(params: CloneParams): Promise<void> {
       onLog,
     });
     if (result.code !== 0) {
+      if (isDiskFullError(result.stderr)) {
+        throw new AppError(
+          "DISK_FULL",
+          `เนื้อที่ดิสก์เต็มระหว่าง git checkout: ${truncate(result.stderr)}`,
+        );
+      }
       throw new AppError("CLONE_FAILED", `git checkout ล้มเหลว: ${truncate(result.stderr)}`);
     }
   } finally {

@@ -17,6 +17,7 @@ import type {
   ContainerInspect,
   ContainerSummary,
   ImageInspect,
+  ImageSummary,
 } from "./types";
 
 export interface DockerClientOptions {
@@ -189,6 +190,19 @@ export class DockerCliClient {
       .split("\n")
       .filter((line) => line.trim())
       .map((line) => JSON.parse(line) as ContainerSummary);
+  }
+
+  async listImagesByLabel(labels: Record<string, string>): Promise<ImageSummary[]> {
+    const args = ["images", "--format", "{{json .}}"];
+    for (const [k, v] of Object.entries(labels)) args.push("--filter", `label=${k}=${v}`);
+    const result = await this.exec(args);
+    if (result.code !== 0) {
+      throw new AppError("DOCKER_UNAVAILABLE", `docker images ล้มเหลว: ${truncate(result.stderr)}`);
+    }
+    return result.stdout
+      .split("\n")
+      .filter((line) => line.trim())
+      .map((line) => JSON.parse(line) as ImageSummary);
   }
 
   /** idempotent — "no such image" ไม่ถือเป็น error */

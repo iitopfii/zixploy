@@ -34,8 +34,10 @@ import type { MintedToken } from "../github/token";
 import type { ClaimedJob } from "../queue";
 import { assertDockerfileWithinContext, createWorkspace, removeWorkspace } from "../workspace";
 import type { ActivateParams } from "./activate";
+import { cleanupProjectImages } from "./cleanup";
 import type { HealthCheckParams } from "./health-check";
 import type { DeployJobPayload } from "./payload";
+import { createDeployTimeout } from "./timeout";
 
 export interface BuildPipelineDeps {
   db: Database;
@@ -82,6 +84,10 @@ export async function runBuildOrRollbackPipeline(
 
   const cName = containerName(job.projectId, deploymentId);
 
+  // ครอบทั้ง pipeline ด้วย deploy_timeout_sec แยกจาก lease/cancel signal ที่รับมา (timeout.ts) —
+  // ต้อง cleanup() เสมอไม่ว่าจบแบบไหน กัน timer ค้าง/leak
+  const deployTimeout = createDeployTimeout(signal, project.deployTimeoutSec * 1000);
+
   try {
     let imageTag: string;
     let imageDigest: string;
@@ -100,7 +106,7 @@ export async function runBuildOrRollbackPipeline(
           token: token.token,
           destDir: workspaceDir,
           timeoutMs: cloneMs,
-          signal,
+          signal: deployTimeout.signal,
           onLog: deps.onLog,
         });
         // ตรวจหลัง clone จริงเท่านั้น (ต้องมี buildContextDir อยู่จริงก่อนถึงจะ realpath ได้)
@@ -116,7 +122,7 @@ export async function runBuildOrRollbackPipeline(
           target: project.targetStage,
           labels: deploymentLabels(job.projectId, deploymentId),
           timeoutMs: buildMs,
-          signal,
+          signal: deployTimeout.signal,
           onLog: deps.onLog,
         });
         imageTag = tag;
@@ -147,6 +153,13 @@ export async function runBuildOrRollbackPipeline(
     }
 
     // --- starting: create + start container (idempotent — ลบของเก่าชื่อเดียวกันก่อนเสมอ) ---
+    // preflight: fail เร็วถ้า daemon ไม่พร้อม แทนรอ subprocess timeout ทีละ call (create/network/start)
+    if (!(await deps.docker.ping())) {
+      throw new AppError(
+        "DOCKER_UNAVAILABLE",
+        "Docker daemon ไม่พร้อมใช้งาน — ยกเลิกก่อนเริ่ม starting step",
+      );
+    }
     await deps.docker.removeContainer(cName, { force: true });
     await deps.docker.ensureNetwork(PROXY_NETWORK);
     const { containerId } = await deps.docker.createContainer({
@@ -172,7 +185,7 @@ export async function runBuildOrRollbackPipeline(
       intervalSec: project.healthCheckIntervalSec,
       timeoutSec: project.healthCheckTimeoutSec,
       retries: project.healthCheckRetries,
-      signal,
+      signal: deployTimeout.signal,
     });
 
     // --- activating (ADR-0004: candidate ผ่านแล้วเท่านั้นถึงปิดของเก่า) ---
@@ -184,9 +197,30 @@ export async function runBuildOrRollbackPipeline(
     transitionDeployment(db, deploymentId, "succeeded");
     setProjectStatus(db, job.projectId, "running");
 
+    // retention cleanup best-effort — deploy ถือว่าสำเร็จแล้วไม่ว่า cleanup จะเป็นอย่างไร
+    // (ห้าม throw ทับ error ตรงนี้ไม่ให้กระทบผลลัพธ์ deploy ที่สำเร็จไปแล้วจริง ๆ)
+    try {
+      await cleanupProjectImages({
+        db,
+        docker: deps.docker,
+        projectId: job.projectId,
+        onLog: deps.onLog,
+      });
+    } catch (err) {
+      deps.onLog(
+        `retention cleanup ล้มเหลว (ไม่กระทบผลลัพธ์ deploy นี้): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
     return { outcome: "done" };
   } catch (err) {
-    const code = err instanceof AppError ? err.code : "BUILD_FAILED";
+    // timer นี้เองเป็นสาเหตุ → error code ต้องบอกสาเหตุจริง (DEPLOY_TIMEOUT_EXCEEDED) ไม่ใช่
+    // symptom ปลายทางที่ downstream โยนมาตอนสังเกตเห็น signal abort (เช่น CLONE_FAILED)
+    const code = deployTimeout.timedOut()
+      ? "DEPLOY_TIMEOUT_EXCEEDED"
+      : err instanceof AppError
+        ? err.code
+        : "BUILD_FAILED";
     const message = err instanceof Error ? err.message : String(err);
 
     // ลบ candidate container ถ้าสร้างไปแล้วบางส่วน (health check ไม่ผ่าน ฯลฯ) — ของเก่าไม่ถูกแตะเลย (ADR-0004)
@@ -201,5 +235,7 @@ export async function runBuildOrRollbackPipeline(
 
     // build/rollback error ไม่ auto-retry (ADR-0003) — ผู้ใช้ต้องกด redeploy เองถ้าต้องการลองใหม่
     return { outcome: "failed", retryable: false };
+  } finally {
+    deployTimeout.cleanup();
   }
 }

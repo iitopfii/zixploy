@@ -5,17 +5,25 @@
  * ทุก resource ที่สร้างในเทสต์ติด label เฉพาะแล้วลบทิ้งใน afterAll เสมอ กัน pollution บนเครื่อง dev
  */
 import { afterAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ulid } from "@zixploy/shared";
+import { buildImage } from "../src/docker/buildkit";
 import { DockerCliClient } from "../src/docker/cli-client";
 
 const client = new DockerCliClient();
 const TEST_RUN_ID = ulid();
 const testNetworkName = `zx-test-net-${TEST_RUN_ID}`;
 const createdContainerIds: string[] = [];
+const builtImageTags: string[] = [];
 
 afterAll(async () => {
   for (const id of createdContainerIds) {
     await client.removeContainer(id, { force: true }).catch(() => {});
+  }
+  for (const tag of builtImageTags) {
+    await client.removeImage(tag, { force: true }).catch(() => {});
   }
   // ลบ network ผ่าน docker CLI ตรง ๆ — ไม่ expose removeNetwork ใน client (ไม่มี M6 caller ต้องใช้)
   const proc = Bun.spawn(["docker", "network", "rm", testNetworkName], {
@@ -149,4 +157,54 @@ describe("DockerCliClient — image", () => {
       client.removeImage(`nonexistent-image-${ulid().toLowerCase()}:latest`),
     ).resolves.toBeUndefined();
   });
+
+  test("inspectImage: Config.Labels สะท้อน --label ที่ตั้งตอน build จริง (M7 cleanup อ่านจากตรงนี้)", async () => {
+    const ctx = mkdtempSync(join(tmpdir(), "zixploy-cli-labels-test-"));
+    try {
+      writeFileSync(join(ctx, "Dockerfile"), "FROM alpine:latest\n");
+      const tag = `zx-test-labels-${ulid().toLowerCase()}:latest`;
+      builtImageTags.push(tag);
+
+      await buildImage({
+        contextDir: ctx,
+        dockerfilePath: "Dockerfile",
+        tag,
+        labels: { "platform.managed": "true", "platform.project_id": "01JPROJECTTEST0000000001" },
+        timeoutMs: 60_000,
+        signal: new AbortController().signal,
+        onLog: () => {},
+      });
+
+      const info = await client.inspectImage(tag);
+      expect(info).not.toBeNull();
+      expect(info?.Config.Labels?.["platform.project_id"]).toBe("01JPROJECTTEST0000000001");
+    } finally {
+      rmSync(ctx, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  test("listImagesByLabel: กรองด้วย label ของเทสต์นี้เท่านั้น", async () => {
+    const ctx = mkdtempSync(join(tmpdir(), "zixploy-cli-list-images-test-"));
+    try {
+      writeFileSync(join(ctx, "Dockerfile"), "FROM alpine:latest\n");
+      const runMarker = ulid();
+      const tag = `zx-test-list-images-${runMarker.toLowerCase()}:latest`;
+      builtImageTags.push(tag);
+
+      await buildImage({
+        contextDir: ctx,
+        dockerfilePath: "Dockerfile",
+        tag,
+        labels: { "zixploy.test-run": runMarker },
+        timeoutMs: 60_000,
+        signal: new AbortController().signal,
+        onLog: () => {},
+      });
+
+      const found = await client.listImagesByLabel({ "zixploy.test-run": runMarker });
+      expect(found.some((img) => `${img.Repository}:${img.Tag}` === tag)).toBe(true);
+    } finally {
+      rmSync(ctx, { recursive: true, force: true });
+    }
+  }, 60_000);
 });

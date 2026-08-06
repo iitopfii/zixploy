@@ -7,10 +7,11 @@
  * mock cloneCommit ในเทสต์นี้จึงต้องเขียน Dockerfile ลง destDir จริง ๆ ให้ assertDockerfileWithinContext
  * เจอ ไม่งั้นทุก happy-path test จะพัง DOCKERFILE_NOT_FOUND ตั้งแต่ก่อนถึงจุดที่ตั้งใจทดสอบ
  */
+
+import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "bun:test";
 import { loadMigrations, migrateUp, migrationsDir, openDatabase } from "@zixploy/db";
 import { AppError, ulid } from "@zixploy/shared";
 import type { BuildPipelineDeps } from "../src/pipeline/build";
@@ -119,6 +120,7 @@ function mockDocker(overrides: Partial<Record<string, unknown>> = {}) {
 
   const docker = {
     calls,
+    ping: record("ping", async () => true),
     removeContainer: record("removeContainer", async () => undefined),
     ensureNetwork: record("ensureNetwork", async () => ({ networkId: "net1" })),
     createContainer: record("createContainer", async () => ({ containerId: "container-1" })),
@@ -132,6 +134,10 @@ function mockDocker(overrides: Partial<Record<string, unknown>> = {}) {
       NetworkSettings: { Networks: {} },
     })),
     inspectImage: record("inspectImage", async () => null),
+    // retention cleanup (M7) เรียกทุกครั้งหลัง succeeded — default ว่างเปล่า ไม่มี image ให้จัดการ
+    listContainersByLabel: record("listContainersByLabel", async () => []),
+    listImagesByLabel: record("listImagesByLabel", async () => []),
+    removeImage: record("removeImage", async () => undefined),
     ...overrides,
   };
   return docker;
@@ -559,7 +565,11 @@ describe("runBuildOrRollbackPipeline — rollback", () => {
     const deploymentId = insertDeployment(db, projectId, { commitSha: "c".repeat(40) });
     const job = makeJob(projectId, deploymentId);
     const docker = mockDocker({
-      inspectImage: async () => ({ Id: "sha256:target123", RepoDigests: ["sha256:target123"] }),
+      inspectImage: async () => ({
+        Id: "sha256:target123",
+        RepoDigests: ["sha256:target123"],
+        Config: { Labels: null },
+      }),
     });
 
     const deps = baseDeps({ db, docker: docker as unknown as BuildPipelineDeps["docker"] });
@@ -624,7 +634,11 @@ describe("runBuildOrRollbackPipeline — rollback", () => {
     const deploymentId = insertDeployment(db, projectId);
     const job = makeJob(projectId, deploymentId);
     const docker = mockDocker({
-      inspectImage: async () => ({ Id: "sha256:different", RepoDigests: [] }),
+      inspectImage: async () => ({
+        Id: "sha256:different",
+        RepoDigests: [],
+        Config: { Labels: null },
+      }),
     });
 
     const deps = baseDeps({ db, docker: docker as unknown as BuildPipelineDeps["docker"] });
@@ -649,4 +663,146 @@ describe("runBuildOrRollbackPipeline — rollback", () => {
       .get(deploymentId);
     expect(deployment?.failure_code).toBe("ROLLBACK_IMAGE_UNAVAILABLE");
   });
+});
+
+describe("runBuildOrRollbackPipeline — M7 hardening", () => {
+  test("retention cleanup ถูกเรียกอัตโนมัติหลัง deploy สำเร็จ", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    const deploymentId = insertDeployment(db, projectId);
+    const job = makeJob(projectId, deploymentId);
+    const docker = mockDocker();
+
+    const deps = baseDeps({ db, docker: docker as unknown as BuildPipelineDeps["docker"] });
+    const result = await runBuildOrRollbackPipeline(
+      deps,
+      job,
+      {
+        kind: "build",
+        trigger: "manual",
+        commitSha: "a".repeat(40),
+        commitMessage: null,
+        commitAuthor: null,
+        installationId: 111,
+        repoFullName: "org/repo",
+      },
+      new AbortController().signal,
+    );
+
+    expect(result.outcome).toBe("done");
+    expect(docker.calls.some((c) => c.method === "listImagesByLabel")).toBe(true);
+  });
+
+  test("cleanup ที่ throw ไม่ทำให้ deploy ที่สำเร็จแล้วกลายเป็น failed", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    const deploymentId = insertDeployment(db, projectId);
+    const job = makeJob(projectId, deploymentId);
+    const docker = mockDocker({
+      listImagesByLabel: async () => {
+        throw new Error("docker images ล้มเหลวกลางทาง");
+      },
+    });
+
+    const deps = baseDeps({ db, docker: docker as unknown as BuildPipelineDeps["docker"] });
+    const result = await runBuildOrRollbackPipeline(
+      deps,
+      job,
+      {
+        kind: "build",
+        trigger: "manual",
+        commitSha: "a".repeat(40),
+        commitMessage: null,
+        commitAuthor: null,
+        installationId: 111,
+        repoFullName: "org/repo",
+      },
+      new AbortController().signal,
+    );
+
+    expect(result.outcome).toBe("done");
+    const deployment = db
+      .query<{ status: string }, [string]>("SELECT status FROM deployments WHERE id = ?")
+      .get(deploymentId);
+    expect(deployment?.status).toBe("succeeded");
+  });
+
+  test("Docker daemon ไม่พร้อม (ping คืน false) ก่อนเข้า starting → DOCKER_UNAVAILABLE, ไม่พยายาม createContainer เลย", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    const deploymentId = insertDeployment(db, projectId);
+    const job = makeJob(projectId, deploymentId);
+    const docker = mockDocker({ ping: async () => false });
+
+    const deps = baseDeps({ db, docker: docker as unknown as BuildPipelineDeps["docker"] });
+    const result = await runBuildOrRollbackPipeline(
+      deps,
+      job,
+      {
+        kind: "build",
+        trigger: "manual",
+        commitSha: "a".repeat(40),
+        commitMessage: null,
+        commitAuthor: null,
+        installationId: 111,
+        repoFullName: "org/repo",
+      },
+      new AbortController().signal,
+    );
+
+    expect(result.outcome).toBe("failed");
+    const deployment = db
+      .query<{ failure_code: string | null }, [string]>(
+        "SELECT failure_code FROM deployments WHERE id = ?",
+      )
+      .get(deploymentId);
+    expect(deployment?.failure_code).toBe("DOCKER_UNAVAILABLE");
+    expect(docker.calls.some((c) => c.method === "createContainer")).toBe(false);
+  });
+
+  test("pipeline เกิน deploy_timeout_sec → DEPLOY_TIMEOUT_EXCEEDED บดบัง error code ปลายทางที่ downstream โยนมา", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db, { deployTimeoutSec: 1 });
+    const deploymentId = insertDeployment(db, projectId);
+    const job = makeJob(projectId, deploymentId);
+    const docker = mockDocker();
+
+    const deps = baseDeps({
+      db,
+      docker: docker as unknown as BuildPipelineDeps["docker"],
+      // จำลอง downstream step ที่สังเกตเห็น signal abort แล้วโยน error ของตัวเอง (เหมือน buildImage
+      // จริงตอน timeout — โยน error code เฉพาะของ step นั้น ไม่ใช่ DEPLOY_TIMEOUT_EXCEEDED)
+      waitForHealthy: (params) =>
+        new Promise((_resolve, reject) => {
+          params.signal.addEventListener(
+            "abort",
+            () => reject(new AppError("HEALTH_CHECK_FAILED", "health check ถูกยกเลิกระหว่างทำงาน")),
+            { once: true },
+          );
+        }),
+    });
+
+    const result = await runBuildOrRollbackPipeline(
+      deps,
+      job,
+      {
+        kind: "build",
+        trigger: "manual",
+        commitSha: "a".repeat(40),
+        commitMessage: null,
+        commitAuthor: null,
+        installationId: 111,
+        repoFullName: "org/repo",
+      },
+      new AbortController().signal,
+    );
+
+    expect(result.outcome).toBe("failed");
+    const deployment = db
+      .query<{ failure_code: string | null }, [string]>(
+        "SELECT failure_code FROM deployments WHERE id = ?",
+      )
+      .get(deploymentId);
+    expect(deployment?.failure_code).toBe("DEPLOY_TIMEOUT_EXCEEDED");
+  }, 5_000);
 });

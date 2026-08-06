@@ -10,9 +10,9 @@
  *
  * docs/threat-model.md: ไม่ log JWT หรือ private key — ห้ามเพิ่ม logging ใน function นี้
  *
- * หมายเหตุ: duplicated ใน apps/deploy-worker/src/github/jwt.ts โดยตั้งใจ (ADR-0002
- * ห้าม RPC ระหว่าง API กับ worker — worker mint installation token เองสำหรับ git clone)
- * แก้ behavior ที่นี่ต้องแก้ไฟล์ duplicate ให้ตรงกันด้วย
+ * หมายเหตุ: ไฟล์นี้ duplicated กับ apps/control-api/src/github/jwt.ts โดยตั้งใจ
+ * (ADR-0002 ห้าม RPC ระหว่าง API กับ worker — worker ต้อง sign JWT เองเพื่อ mint
+ * installation token สำหรับ git clone) — แก้ behavior ที่นี่ต้องแก้ไฟล์ต้นทางให้ตรงกันด้วย
  */
 
 /** JWT อายุสูงสุดที่ GitHub รับ (วินาที) */

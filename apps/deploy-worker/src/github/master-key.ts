@@ -7,10 +7,11 @@
  * 2. Plain base64 32-byte เดี่ยว — ถือเป็น key id 1
  *
  * ห้าม log ค่า key ทุกกรณี รวม debug mode
- * ไม่มีไฟล์/ไฟล์ผิด format → คืน null (GitHub App features ปิด, Phase 1 ยังทำงานได้)
+ * ไม่มีไฟล์/ไฟล์ผิด format → คืน null (GitHub App features ปิด, worker claim job อื่นได้ตามปกติ)
  *
- * หมายเหตุ: duplicated ใน apps/deploy-worker/src/github/master-key.ts โดยตั้งใจ (ADR-0002
- * ห้าม RPC ระหว่าง API กับ worker) — แก้ behavior ที่นี่ต้องแก้ไฟล์ duplicate ให้ตรงกันด้วย
+ * หมายเหตุ: ไฟล์นี้ duplicated กับ apps/control-api/src/crypto/master-key.ts โดยตั้งใจ
+ * (ADR-0002 ห้าม RPC ระหว่าง API กับ worker — worker ต้อง decrypt เองจาก DB โดยตรง
+ * ไม่ผ่าน control-api) — แก้ behavior ที่นี่ต้องแก้ไฟล์ต้นทางให้ตรงกันด้วย
  */
 
 import { readFileSync } from "node:fs";
@@ -36,7 +37,7 @@ function decodeBase64(value: string): Uint8Array {
   return Uint8Array.from(Buffer.from(value.trim(), "base64"));
 }
 
-/** สร้าง MasterKeys จาก raw bytes — ใช้ในเทสต์และ CLI */
+/** สร้าง MasterKeys จาก raw bytes — ใช้ในเทสต์ */
 export async function createMasterKeys(
   active: number,
   rawKeys: Record<number, Uint8Array>,
@@ -53,7 +54,7 @@ export async function createMasterKeys(
 
 /**
  * โหลด master keys จากไฟล์ที่ ZIXPLOY_MASTER_KEY_FILE ชี้
- * ไม่ตั้ง env → null (ไม่ error — GitHub App features ปิด)
+ * ไม่ตั้ง env → null (ไม่ error — build job ที่ต้องใช้ token จะ fail แยกจากกัน)
  * ตั้ง env แต่ไฟล์ผิด → throw (fail closed — ไม่เปิด service แบบ encryption ครึ่งเดียว)
  */
 export async function loadMasterKeys(): Promise<MasterKeys | null> {

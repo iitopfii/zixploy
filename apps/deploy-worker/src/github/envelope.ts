@@ -10,8 +10,8 @@
  * AAD ผูก ciphertext กับ context (เช่น "github_app:<id>:pem")
  * — ย้าย ciphertext ข้าม row/field แล้ว decrypt ไม่ได้
  *
- * หมายเหตุ: duplicated ใน apps/deploy-worker/src/github/envelope.ts โดยตั้งใจ (ADR-0002
- * ห้าม RPC ระหว่าง API กับ worker) — แก้ behavior ที่นี่ต้องแก้ไฟล์ duplicate ให้ตรงกันด้วย
+ * หมายเหตุ: ไฟล์นี้ duplicated กับ apps/control-api/src/crypto/envelope.ts โดยตั้งใจ
+ * (ADR-0002 ห้าม RPC ระหว่าง API กับ worker) — แก้ behavior ที่นี่ต้องแก้ไฟล์ต้นทางให้ตรงกันด้วย
  */
 
 import type { MasterKeys } from "./master-key";

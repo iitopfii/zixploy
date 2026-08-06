@@ -7,12 +7,12 @@
  * ทำไมไม่เก็บลง SQLite:
  * - Token เป็น credential ชั่วคราว — DB = persistent store
  * - หาก DB หลุด จะไม่มี credential ที่ valid หลุดออกไป
- * - Token หมดอายุเองอยู่แล้ว; restart app = cache ล้างอัตโนมัติ
+ * - Token หมดอายุเองอยู่แล้ว; restart worker = cache ล้างอัตโนมัติ
  *
  * docs/threat-model.md section 4: "GitHub token ระยะยาวรั่ว"
  *
- * หมายเหตุ: duplicated ใน apps/deploy-worker/src/github/token-cache.ts โดยตั้งใจ
- * (ADR-0002 ห้าม RPC ระหว่าง API กับ worker) — แก้ behavior ที่นี่ต้องแก้ไฟล์ duplicate ให้ตรงกันด้วย
+ * หมายเหตุ: duplicated กับ apps/control-api/src/github/token-cache.ts โดยตั้งใจ
+ * (ADR-0002 ห้าม RPC ระหว่าง API กับ worker — worker cache token ของตัวเองแยกจาก API)
  */
 
 const SAFETY_MARGIN_MS = 5 * 60 * 1000; // 5 นาที
@@ -60,7 +60,7 @@ export class InstallationTokenCache {
     this.cache.delete(installationId);
   }
 
-  /** ใช้ตอน test teardown หรือ config reload */
+  /** ใช้ตอน test teardown */
   invalidateAll(): void {
     this.cache.clear();
   }
@@ -73,5 +73,10 @@ export class InstallationTokenCache {
   /** เวลาหมดอายุที่ cache ถือ (สำหรับ test assertion) */
   getEffectiveExpiry(installationId: number): number | undefined {
     return this.cache.get(installationId)?.effectiveExpiresAt;
+  }
+
+  /** เวลาหมดอายุจริงจาก GitHub (ไม่ใช่ effective/margin-adjusted) — worker ใช้คืนใน MintedToken */
+  getGithubExpiresAt(installationId: number): Date | undefined {
+    return this.cache.get(installationId)?.githubExpiresAt;
   }
 }

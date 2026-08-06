@@ -38,6 +38,22 @@ export const ENV_VAR_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
  */
 export const ENV_SECRET_MIN_REDACT_LENGTH = 4;
 
+/** Log streaming + retention settings (Phase 6) */
+export const LOG_SETTINGS = {
+  /** เก็บ build_logs กี่วัน (นับจาก deployment finished_at) */
+  buildRetentionDays: 30,
+  /** จำนวนบรรทัด runtime log สูงสุดต่อ project (ring buffer) */
+  runtimeRingSize: 2_000,
+  /** ความถี่ poll DB สำหรับ SSE stream ของ build log */
+  ssePollMs: 1_000,
+  /** heartbeat interval สำหรับ SSE — ผ่าน reverse proxy timeout ได้ */
+  sseHeartbeatMs: 15_000,
+  /** ความถี่ poll `docker logs` สำหรับ runtime log (worker side) */
+  runtimePollMs: 5_000,
+  /** จำนวน log lines สูงสุดต่อ page ใน pagination */
+  pageLimit: 500,
+} as const;
+
 /** Ownership labels — cleanup/reconciler เลือก resource จาก labels เหล่านี้เท่านั้น (ADR-0005) */
 export const LABELS = {
   managed: "platform.managed",

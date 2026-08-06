@@ -38,6 +38,7 @@ import { buildRedactFn } from "../env/redaction";
 import type { CloneParams } from "../git/clone";
 import type { MasterKeys } from "../github/master-key";
 import type { MintedToken } from "../github/token";
+import { pruneBuildLogs } from "../logs/retention";
 import type { ClaimedJob } from "../queue";
 import { assertDockerfileWithinContext, createWorkspace, removeWorkspace } from "../workspace";
 import type { ActivateParams } from "./activate";
@@ -267,6 +268,13 @@ export async function runBuildOrRollbackPipeline(
       deps.onLog(
         `retention cleanup ล้มเหลว (ไม่กระทบผลลัพธ์ deploy นี้): ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+
+    // build log retention — ลบ log ที่เกิน buildRetentionDays (Phase 6 M5)
+    try {
+      pruneBuildLogs(db);
+    } catch {
+      // best-effort — ไม่ fail deploy ถ้า prune ล้มเหลว
     }
 
     return { outcome: "done" };

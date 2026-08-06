@@ -13,6 +13,7 @@ import { deploymentRoutes } from "./routes/deployments";
 import { domainRoutes } from "./routes/domains";
 import { environmentRoutes } from "./routes/environment";
 import { githubRoutes } from "./routes/github";
+import { logRoutes } from "./routes/logs";
 import { projectRoutes } from "./routes/projects";
 import { systemRoutes } from "./routes/system";
 import { webhookRoutes } from "./routes/webhook";
@@ -59,7 +60,8 @@ export function buildApp(db: Database, options: AppOptions = {}) {
     .use(deploymentRoutes(db, registry))
     .use(webhookRoutes(db, registry))
     .use(environmentRoutes(db, masterKeys))
-    .use(domainRoutes(db));
+    .use(domainRoutes(db))
+    .use(logRoutes(db));
 }
 
 export type App = ReturnType<typeof buildApp>;

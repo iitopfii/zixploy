@@ -18,6 +18,7 @@ import { createLogger, DEPLOY_QUEUE, type LogLevel, ulid } from "@zixploy/shared
 import { DockerCliClient } from "./docker/cli-client";
 import { loadMasterKeys } from "./github/master-key";
 import { heartbeatLoop } from "./heartbeat";
+import { runtimeLogLoop } from "./logs/runtime-poller";
 import { createDispatcher } from "./pipeline/dispatch";
 import { claimNextJob, completeJob, failJob, LeaseLostError, withLeaseRenewal } from "./queue";
 
@@ -155,6 +156,10 @@ async function jobLoop(signal: AbortSignal): Promise<void> {
 
 log.info("deploy-worker started", { workerId });
 
-await Promise.all([heartbeatLoop(db, workerId, controller.signal), jobLoop(controller.signal)]);
+await Promise.all([
+  heartbeatLoop(db, workerId, controller.signal),
+  jobLoop(controller.signal),
+  runtimeLogLoop(db, docker, controller.signal),
+]);
 
 log.info("deploy-worker stopped", { workerId });

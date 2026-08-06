@@ -246,4 +246,60 @@ export class DockerCliClient {
       );
     }
   }
+
+  /**
+   * อ่าน log ของ container ตั้งแต่ timestamp ที่กำหนด (runtime log poller — Phase 6 M4)
+   *
+   * ใช้ --timestamps เพื่อรับ timestamp ต่อบรรทัด (RFC3339Nano format ของ Docker)
+   * ใช้ --since <sinceTs> เพื่อ incremental pull — ไม่ดึง log ทั้งหมดทุกรอบ
+   * คืน [] ถ้า container ไม่มีอยู่ (graceful — ไม่ throw)
+   *
+   * @param containerId Docker container ID หรือชื่อ container
+   * @param sinceMs timestamp (ms) สำหรับ --since; 0 = ทุก log
+   * @param tail จำนวนบรรทัดสูงสุดที่ดึงต่อครั้ง (ป้องกัน memory spike ถ้า log ยาวมาก)
+   */
+  async fetchLogs(
+    containerId: string,
+    sinceMs: number,
+    tail = 200,
+  ): Promise<Array<{ stream: "stdout" | "stderr"; line: string; loggedAt: number }>> {
+    const args = ["logs", "--timestamps", "--tail", String(tail)];
+    if (sinceMs > 0) {
+      // docker --since รับ RFC3339 หรือ relative (10m, 1h) — ใช้ ISO string ตรงๆ
+      args.push("--since", new Date(sinceMs).toISOString());
+    }
+    args.push(containerId);
+
+    const result = await this.exec(args);
+    if (result.code !== 0 && isNotFoundError(result.stderr)) return [];
+
+    // docker logs: stdout → result.stdout, stderr → result.stderr
+    // แต่ละบรรทัดขึ้นต้นด้วย RFC3339Nano timestamp จาก --timestamps
+    // เช่น "2024-01-15T12:34:56.789012345Z hello world\n"
+    const parsed: Array<{ stream: "stdout" | "stderr"; line: string; loggedAt: number }> = [];
+
+    function parseLines(raw: string, stream: "stdout" | "stderr") {
+      for (const rawLine of raw.split("\n")) {
+        const trimmed = rawLine.trim();
+        if (!trimmed) continue;
+        // timestamp ตัวแรกคั่นด้วย space
+        const spaceIdx = trimmed.indexOf(" ");
+        if (spaceIdx < 0) {
+          parsed.push({ stream, line: trimmed, loggedAt: Date.now() });
+          continue;
+        }
+        const tsStr = trimmed.slice(0, spaceIdx);
+        const line = trimmed.slice(spaceIdx + 1);
+        const loggedAt = new Date(tsStr).getTime();
+        parsed.push({ stream, line, loggedAt: Number.isNaN(loggedAt) ? Date.now() : loggedAt });
+      }
+    }
+
+    parseLines(result.stdout, "stdout");
+    parseLines(result.stderr, "stderr");
+
+    // เรียงตาม loggedAt เพราะ docker ส่ง stdout + stderr แยกกัน ลำดับอาจคละกัน
+    parsed.sort((a, b) => a.loggedAt - b.loggedAt);
+    return parsed;
+  }
 }

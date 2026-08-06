@@ -11,6 +11,9 @@
  */
 
 import type { Database } from "bun:sqlite";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   AppError,
   containerName,
@@ -26,8 +29,10 @@ import {
   transitionToStartingForRollback,
 } from "../db/deployment-state";
 import { findActiveContainerId, loadProjectConfig, setProjectStatus } from "../db/project-config";
-import type { BuildImageParams, BuildImageResult } from "../docker/buildkit";
+import type { BuildImageParams, BuildImageResult, BuildSecret } from "../docker/buildkit";
 import type { DockerCliClient } from "../docker/cli-client";
+import { injectEnvVars } from "../env/inject";
+import { buildRedactFn } from "../env/redaction";
 import type { CloneParams } from "../git/clone";
 import type { MasterKeys } from "../github/master-key";
 import type { MintedToken } from "../github/token";
@@ -92,12 +97,25 @@ export async function runBuildOrRollbackPipeline(
     let imageTag: string;
     let imageDigest: string;
 
+    // Decrypt env vars ก่อน — ใช้ทั้งฝั่ง build (buildArgs/secrets) และ starting (runtimeEnv)
+    // masterKeys=null → empty injection (graceful — deploy ดำเนินต่อได้โดยไม่มี env)
+    const envInject = await injectEnvVars(db, deps.masterKeys, job.projectId, deps.onLog);
+
+    // Wrap onLog ด้วย centralized redact function ทันทีหลังได้ secretValues
+    // — buildkit.ts ไม่ redact เอง (ดู comment ในไฟล์นั้น) pipeline ต้องทำเอง
+    const redactFn = buildRedactFn(envInject.secretValues);
+    const safeLog = (line: string) => deps.onLog(redactFn(line));
+
     if (payload.kind === "build") {
       const { cloneMs, buildMs } = splitTimeoutBudget(project.deployTimeoutSec);
 
       // --- cloning ---
       transitionDeployment(db, deploymentId, "cloning");
       const { workspaceDir, buildContextDir } = createWorkspace(deploymentId, project.buildContext);
+
+      // temp dir สำหรับ build secrets — ลบใน finally เสมอ
+      let secretDir: string | null = null;
+
       try {
         const token = await deps.mintInstallationToken(db, deps.masterKeys, payload.installationId);
         await deps.cloneCommit({
@@ -107,7 +125,7 @@ export async function runBuildOrRollbackPipeline(
           destDir: workspaceDir,
           timeoutMs: cloneMs,
           signal: deployTimeout.signal,
-          onLog: deps.onLog,
+          onLog: safeLog,
         });
         // ตรวจหลัง clone จริงเท่านั้น (ต้องมี buildContextDir อยู่จริงก่อนถึงจะ realpath ได้)
         assertDockerfileWithinContext(buildContextDir, project.dockerfilePath);
@@ -115,19 +133,45 @@ export async function runBuildOrRollbackPipeline(
         // --- building ---
         transitionDeployment(db, deploymentId, "building");
         const tag = imageName(job.projectId, payload.commitSha, deploymentId);
+
+        // เขียน build secrets ลง temp files (--secret id=KEY,src=FILE)
+        // ห้ามส่งผ่าน --build-arg เด็ดขาด (threat-model.md)
+        const buildSecrets: BuildSecret[] = [];
+        if (envInject.buildSecretValues.length > 0) {
+          secretDir = join(tmpdir(), `zixploy-build-secrets-${deploymentId}`);
+          mkdirSync(secretDir, { recursive: true });
+          for (const { key, value } of envInject.buildSecretValues) {
+            const filePath = join(secretDir, key);
+            writeFileSync(filePath, value, { mode: 0o600 });
+            buildSecrets.push({ id: key, sourcePath: filePath });
+          }
+        }
+
         const result = await deps.buildImage({
           contextDir: buildContextDir,
           dockerfilePath: project.dockerfilePath,
           tag,
           target: project.targetStage,
           labels: deploymentLabels(job.projectId, deploymentId),
+          // buildArgs เป็น Record<string, string> เสมอ (อาจว่าง) — ไม่ส่ง undefined
+          buildArgs: envInject.buildArgs,
+          // secrets ใช้ spread เพราะ exactOptionalPropertyTypes ห้าม undefined explicit
+          ...(buildSecrets.length > 0 ? { secrets: buildSecrets } : {}),
           timeoutMs: buildMs,
           signal: deployTimeout.signal,
-          onLog: deps.onLog,
+          onLog: safeLog,
         });
         imageTag = tag;
         imageDigest = result.digest;
       } finally {
+        // ลบ build secret files ก่อน (ข้อมูล sensitive) แล้วค่อยลบ workspace
+        if (secretDir) {
+          try {
+            rmSync(secretDir, { recursive: true, force: true });
+          } catch {
+            // Windows อาจปล่อย handle ช้า — ปล่อยให้ OS เก็บกวาด
+          }
+        }
         // ลบ workspace เสมอไม่ว่าสำเร็จหรือล้มเหลว — ไม่ต้องรอ M7 cleanup job
         removeWorkspace(deploymentId);
       }
@@ -171,6 +215,8 @@ export async function runBuildOrRollbackPipeline(
       memoryLimitMb: project.memoryLimitMb,
       restartPolicy: project.restartPolicy,
       networkName: PROXY_NETWORK,
+      // runtimeEnv เป็น Record<string, string> เสมอ (อาจว่าง) — ไม่ส่ง undefined
+      env: envInject.runtimeEnv,
     });
     await deps.docker.startContainer(containerId);
     transitionDeployment(db, deploymentId, "health_checking", { containerId });
@@ -204,7 +250,7 @@ export async function runBuildOrRollbackPipeline(
         db,
         docker: deps.docker,
         projectId: job.projectId,
-        onLog: deps.onLog,
+        onLog: safeLog,
       });
     } catch (err) {
       deps.onLog(

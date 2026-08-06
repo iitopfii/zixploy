@@ -26,6 +26,18 @@ export const DEPLOY_QUEUE = {
 /** จำนวน image ของ deployment ที่ succeeded ล่าสุดต่อ project ที่เก็บไว้เสมอ (Phase 3 M7 cleanup) */
 export const IMAGE_RETENTION_KEEP_COUNT = 3;
 
+/**
+ * Environment variable key format — [A-Za-z_][A-Za-z0-9_]*
+ * ตรวจ client-side (validate endpoint) + server-side (store.ts) ทั้งคู่
+ */
+export const ENV_VAR_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * ความยาวขั้นต่ำของ secret value ที่จะใส่ใน redaction set
+ * ค่าสั้นมาก (เช่น "1", "on") ทำให้ false positive สูง — skip ออกจาก set
+ */
+export const ENV_SECRET_MIN_REDACT_LENGTH = 4;
+
 /** Ownership labels — cleanup/reconciler เลือก resource จาก labels เหล่านี้เท่านั้น (ADR-0005) */
 export const LABELS = {
   managed: "platform.managed",

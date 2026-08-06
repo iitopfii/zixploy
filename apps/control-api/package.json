@@ -9,7 +9,9 @@
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "bootstrap:admin": "bun src/cli/bootstrap-admin.ts",
+    "rotate:encryption": "bun src/cli/rotate-encryption.ts"
   },
   "dependencies": {
     "@zixploy/db": "workspace:*",

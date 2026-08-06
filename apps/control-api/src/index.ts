@@ -40,7 +40,7 @@ const port = Number(process.env.ZIXPLOY_API_PORT ?? 3001);
 
 // bind เฉพาะ loopback — production ให้ Traefik เป็นตัวรับ traffic จากภายนอก
 // (docs/phase-01 security; API ต้องไม่ bind public interface โดยตรง)
-const app = buildApp(db, { registry, baseUrl }).listen({
+const app = buildApp(db, { registry, baseUrl, masterKeys }).listen({
   port,
   hostname: "127.0.0.1",
   maxRequestBodySize: MAX_BODY_BYTES,

@@ -13,6 +13,16 @@ export const WORKER_HEARTBEAT = {
   staleMs: 15_000,
 } as const;
 
+/** Deploy job queue tuning (Phase 3, ADR-0003) */
+export const DEPLOY_QUEUE = {
+  /** worker poll interval เมื่อไม่มีงาน pending */
+  pollIntervalMs: 2_000,
+  /** อายุ lease ต่อการ claim หนึ่งครั้ง — เกินนี้แล้วไม่ renew ถือว่า worker ตาย */
+  leaseMs: 60_000,
+  /** ความถี่ในการต่ออายุ lease ระหว่างทำงาน (ต้อง < leaseMs มาก ๆ กันพลาด) */
+  leaseRenewIntervalMs: 15_000,
+} as const;
+
 /** Ownership labels — cleanup/reconciler เลือก resource จาก labels เหล่านี้เท่านั้น (ADR-0005) */
 export const LABELS = {
   managed: "platform.managed",

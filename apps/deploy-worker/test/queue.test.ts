@@ -405,6 +405,44 @@ describe("withLeaseRenewal", () => {
     expect((thrown as LeaseLostError).reason).toBe("expired");
   });
 
+  test("lease หลุดและ fn โยน error ของตัวเองพร้อมกัน (สังเกตเห็น signal abort) → LeaseLostError ทับเสมอ", async () => {
+    // regression: ก่อนหน้านี้ fn's error จะ propagate ก่อนถึงจุดเช็ค lostReason — ทำให้ caller เข้าใจผิด
+    // ว่างานล้มเหลวจริง แล้วเรียก completeJob/failJob บนงานที่ lease หลุดไปแล้ว (คนละ worker ถืออยู่)
+    const db = makeDb();
+    const projectId = insertProject(db);
+    insertJob(db, { projectId });
+    const job = claimNextJob(db, "worker-1", 500);
+    expect(job).not.toBeNull();
+    if (!job) return;
+
+    let thrown: unknown;
+    try {
+      await withLeaseRenewal(
+        db,
+        job,
+        "worker-1",
+        async (signal) => {
+          // จำลอง worker อื่น steal lease กลางทาง
+          await new Promise((r) => setTimeout(r, 15));
+          db.query("UPDATE deploy_jobs SET lease_owner = 'thief' WHERE id = ?").run(job.id);
+          // รอให้ renew loop เจอ steal แล้ว abort signal
+          await new Promise<void>((resolve) => {
+            if (signal.aborted) return resolve();
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          // fn สังเกตเห็น signal.aborted แล้วโยน error ของตัวเอง (เช่น subprocess ถูก kill กลางทาง)
+          throw new Error("subprocess killed because signal aborted — noise, not the real cause");
+        },
+        { renewIntervalMs: 20, leaseMs: 500 },
+      );
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(LeaseLostError);
+    expect((thrown as LeaseLostError).reason).toBe("expired");
+  });
+
   test("cancel_requested_at ถูกตั้งกลางทาง → โยน LeaseLostError(cancelled) และ signal ถูก abort", async () => {
     const db = makeDb();
     const projectId = insertProject(db);

@@ -231,11 +231,20 @@ export async function withLeaseRenewal<T>(
   let result: T;
   try {
     result = await fn(controller.signal);
-  } finally {
+  } catch (err) {
     stopped = true;
     controller.abort();
     await renewPromise;
+    // lease หลุดคือสาเหตุจริง — fn มักโยน error ของตัวเองแค่เพราะสังเกตเห็น signal ถูก abort
+    // (เช่น subprocess ถูก kill กลางทาง) ซึ่งไม่ใช่ error ทางธุรกิจจริง ต้องบัง LeaseLostError ทับ
+    // ไม่งั้น caller จะเข้าใจผิดว่างานล้มเหลวจริงแล้วไปเรียก completeJob/failJob บนงานที่ไม่ได้ถือ lease แล้ว
+    if (lostReason) throw new LeaseLostError(lostReason);
+    throw err;
   }
+
+  stopped = true;
+  controller.abort();
+  await renewPromise;
 
   if (lostReason) throw new LeaseLostError(lostReason);
   return result;

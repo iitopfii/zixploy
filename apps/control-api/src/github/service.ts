@@ -9,8 +9,14 @@
  * 2. Service ตรวจ token cache ก่อน
  * 3. ถ้าไม่มี: sign App JWT → POST access_tokens → cache token
  * 4. ใช้ token เรียก GitHub API
+ *
+ * Security:
+ * - CryptoKey cache ใน factory closure — ไม่ re-import PEM ทุก JWT call
+ * - Installation token cache ใน memory ≤ token lifetime − 5 min
+ * - ไม่เก็บ token หรือ JWT ลง DB — docs/threat-model.md
  */
 
+import { AppError } from "@zixploy/shared";
 import type {
   GitHubBranchData,
   GitHubClient,
@@ -76,7 +82,8 @@ export interface GitHubService {
   ): Promise<Branch[]>;
   /**
    * Validate ว่า branch มีอยู่จริงใน repository
-   * คืน branch ถ้าเจอ; โยน AppError("INSTALLATION_NOT_FOUND") ถ้าไม่เจอ
+   * ใช้ GET /repos/{owner}/{repo}/branches/{branch} โดยตรง — รองรับ repo ที่มี >100 branches
+   * โยน AppError("INSTALLATION_NOT_FOUND") ถ้า branch ไม่มีอยู่
    */
   validateBranch(installationId: number, repoFullName: string, branchName: string): Promise<Branch>;
   /** Invalidate cached token เมื่อ installation ถูก suspend/delete */
@@ -113,27 +120,12 @@ function mapBranch(data: GitHubBranchData): Branch {
 
 export class RealGitHubService implements GitHubService {
   private readonly tokenCache: InstallationTokenCache;
-  private cryptoKey: CryptoKey | null = null;
 
   constructor(
     private readonly config: GitHubAppConfig,
     private readonly client: GitHubClient,
   ) {
     this.tokenCache = new InstallationTokenCache();
-  }
-
-  /** Lazy import private key — มี error message ชัดเจนถ้า PEM ผิด */
-  private async getPrivateKey(): Promise<CryptoKey> {
-    if (!this.cryptoKey) {
-      const { importRsaPrivateKey: importKey } = await import("./jwt");
-      this.cryptoKey = await importKey(this.config.privateKey);
-    }
-    return this.cryptoKey;
-  }
-
-  private async makeAppJwt(): Promise<string> {
-    const key = await this.getPrivateKey();
-    return signGitHubJwt(this.config.appId, key);
   }
 
   private async getInstallationToken(installationId: number): Promise<string> {
@@ -188,21 +180,30 @@ export class RealGitHubService implements GitHubService {
     return branches.map(mapBranch);
   }
 
+  /**
+   * Direct branch lookup — GET /repos/{owner}/{repo}/branches/{branch}
+   * รองรับ repo ที่มี >100 branches (ไม่ต้อง paginate ทุก branch)
+   * GitHub ตอบ 404 ถ้า branch ไม่มีอยู่ → map เป็น INSTALLATION_NOT_FOUND
+   */
   async validateBranch(
     installationId: number,
     repoFullName: string,
     branchName: string,
   ): Promise<Branch> {
-    const branches = await this.listBranches(installationId, repoFullName);
-    const found = branches.find((b) => b.name === branchName);
-    if (!found) {
-      const { AppError } = await import("@zixploy/shared");
-      throw new AppError(
-        "INSTALLATION_NOT_FOUND",
-        `ไม่พบ branch "${branchName}" ใน repository "${repoFullName}"`,
-      );
+    const token = await this.getInstallationToken(installationId);
+    try {
+      const data = await this.client.getBranch(token, repoFullName, branchName);
+      return mapBranch(data);
+    } catch (err) {
+      if (err instanceof AppError && err.code === "INSTALLATION_NOT_FOUND") {
+        // Re-throw with clearer message about the branch specifically
+        throw new AppError(
+          "INSTALLATION_NOT_FOUND",
+          `ไม่พบ branch "${branchName}" ใน repository "${repoFullName}"`,
+        );
+      }
+      throw err;
     }
-    return found;
   }
 
   invalidateToken(installationId: number): void {
@@ -213,6 +214,10 @@ export class RealGitHubService implements GitHubService {
 /**
  * สร้าง RealGitHubService จาก config + inject getAppJwt ให้ client
  * แยก factory function ออกมาเพื่อให้ test inject mock client แทนได้
+ *
+ * Security:
+ * - CryptoKey cache ใน closure — import PEM ครั้งเดียว ไม่ re-parse ทุก JWT call
+ * - config.privateKey (PEM string) ไม่ถูกส่งออกจาก closure
  */
 export async function createGitHubService(
   config: GitHubAppConfig,
@@ -221,14 +226,14 @@ export async function createGitHubService(
   if (client) {
     return new RealGitHubService(config, client);
   }
-  // production path: สร้าง HTTP client จริง
+  // production path: cache CryptoKey ใน closure ป้องกัน re-import ซึ่ง expensive
+  let cachedKey: CryptoKey | null = null;
+  const getAppJwt = async (): Promise<string> => {
+    if (!cachedKey) {
+      cachedKey = await importRsaPrivateKey(config.privateKey);
+    }
+    return signGitHubJwt(config.appId, cachedKey);
+  };
   const { GitHubHttpClient } = await import("./client");
-  const service = new RealGitHubService(
-    config,
-    new GitHubHttpClient(async () => {
-      const key = await importRsaPrivateKey(config.privateKey);
-      return signGitHubJwt(config.appId, key);
-    }),
-  );
-  return service;
+  return new RealGitHubService(config, new GitHubHttpClient(getAppJwt));
 }

@@ -4,9 +4,14 @@
  * Security requirements (docs/threat-model.md section 2):
  * 1. อ่าน raw body ก่อน parse JSON
  * 2. ตรวจ HMAC-SHA256 แบบ constant-time กับ raw body
- * 3. เก็บ X-GitHub-Delivery ด้วย unique constraint (idempotency)
- * 4. ตอบ 200 เร็วหลัง persist; ประมวลผลใน scope เดิม (Phase 2 ไม่มี worker)
- * 5. ไม่ log raw body, commit message body, หรือ author email
+ * 3. Atomic INSERT OR IGNORE ป้องกัน race condition ใน idempotency check
+ * 4. Compare-and-set UPDATE เพื่อ claim processing lease
+ * 5. ตอบ 200 เร็วหลัง persist; ประมวลผลใน scope เดิม (Phase 2 ไม่มี worker)
+ * 6. ไม่ log raw body, commit message body, หรือ author email
+ *
+ * Webhook processing state machine (migration 0004):
+ * received → processing (lease claimed) → processed
+ *                                        ↘ failed (retry ได้ถ้า attempt_count < MAX)
  *
  * Phase 2 boundary: สร้าง deploy_intent สำหรับ push ที่ผ่านการตรวจสอบ
  * Phase 3 จะ pick up deploy_intents และสร้าง deploy_jobs
@@ -27,6 +32,18 @@ import { log } from "../logger";
 
 /** Max webhook payload ขนาด 10 MB — GitHub payloads มักไม่เกิน 1 MB */
 const MAX_WEBHOOK_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Max retry attempts ก่อน permanently fail
+ * attempt 1 = first try, attempt 2 = first retry, attempt 3 = last retry
+ */
+const MAX_WEBHOOK_ATTEMPTS = 3;
+
+/**
+ * Processing lease duration (ms)
+ * ถ้า handler ใช้เวลานานกว่านี้ → stale → eligible for recovery
+ */
+const PROCESSING_LEASE_MS = 30_000;
 
 export function webhookRoutes(db: Database, github: GitHubService | null, webhookSecret?: string) {
   return new Elysia({ prefix: `${API_PREFIX}/github` }).post(
@@ -71,43 +88,102 @@ export function webhookRoutes(db: Database, github: GitHubService | null, webhoo
         return { ok: false, reason: "ขาด X-GitHub-Delivery หรือ X-GitHub-Event header" };
       }
 
-      // --- 3. Idempotency check ---
-      const duplicate = db
-        .query<{ delivery_id: string }, [string]>(
-          "SELECT delivery_id FROM webhook_deliveries WHERE delivery_id = ?",
-        )
-        .get(deliveryId);
+      // --- 3. Parse JSON และ extract action (best effort ก่อน INSERT) ---
+      // Parse ก่อน INSERT เพราะต้องการ action สำหรับ storage;
+      // ผล parse เก็บไว้ตรวจซ้ำหลัง claim
+      type ParseResult = { ok: true; value: unknown } | { ok: false };
+      let parseResult: ParseResult = { ok: false };
+      let action: string | null = null;
+      try {
+        const parsed = JSON.parse(rawBody);
+        parseResult = { ok: true, value: parsed };
+        if (typeof parsed === "object" && parsed !== null && "action" in parsed) {
+          action = String((parsed as Record<string, unknown>).action);
+        }
+      } catch {
+        // parseResult stays { ok: false } — handled after claim below
+      }
 
-      if (duplicate) {
-        // ตอบ 200 แบบ idempotent — ไม่ error เพราะ GitHub อาจ retry
-        log.info("webhook duplicate delivery", { deliveryId, eventName });
+      // --- 4. Atomic INSERT OR IGNORE — first request wins ---
+      // ใช้ INSERT OR IGNORE แทน SELECT+INSERT เพื่อป้องกัน race condition
+      // delivery_id เป็น PRIMARY KEY ดังนั้น SQLite enforce uniqueness atomically
+      const receivedAt = Date.now();
+      db.query(
+        `INSERT OR IGNORE INTO webhook_deliveries
+          (delivery_id, event, action, payload, status, attempt_count, received_at)
+         VALUES (?, ?, ?, ?, 'received', 0, ?)`,
+      ).run(deliveryId, eventName, action, rawBody, receivedAt);
+
+      // --- 5. Claim processing lease (compare-and-set UPDATE) ---
+      // อัปเดตสำเร็จ (changes > 0) = เราได้ lease นี้
+      // อัปเดตไม่ได้ = มีคนอื่น claim ไปแล้ว หรือ delivery ถูก process แล้ว หรือ exhausted
+      const now = Date.now();
+      const staleThreshold = now - PROCESSING_LEASE_MS;
+      const claimResult = db
+        .query(
+          `UPDATE webhook_deliveries
+           SET status = 'processing', processing_started_at = ?, attempt_count = attempt_count + 1
+           WHERE delivery_id = ?
+             AND (
+               status = 'received'
+               OR (status = 'failed' AND attempt_count < ?)
+               OR (status = 'processing' AND (processing_started_at IS NULL OR processing_started_at < ?))
+             )`,
+        )
+        .run(now, deliveryId, MAX_WEBHOOK_ATTEMPTS, staleThreshold);
+
+      if (claimResult.changes === 0) {
+        // ไม่ได้ lease: duplicate, กำลัง process โดย request อื่น, หรือ exhausted
+        const statusRow = db
+          .query<{ status: string; attempt_count: number }, [string]>(
+            "SELECT status, attempt_count FROM webhook_deliveries WHERE delivery_id = ?",
+          )
+          .get(deliveryId);
+
+        if (statusRow?.status === "failed" && statusRow.attempt_count >= MAX_WEBHOOK_ATTEMPTS) {
+          log.warn("webhook delivery exhausted max attempts — ไม่ retry อีก", {
+            deliveryId,
+            eventName,
+            attempts: statusRow.attempt_count,
+          });
+        } else {
+          log.info("webhook duplicate delivery", {
+            deliveryId,
+            eventName,
+            status: statusRow?.status ?? "unknown",
+          });
+        }
         return { ok: true, duplicate: true };
       }
 
-      // --- 4. Parse JSON (หลัง verify เท่านั้น) ---
-      let payload: unknown;
-      try {
-        payload = JSON.parse(rawBody);
-      } catch {
+      // ได้ lease — อ่าน attempt_count ปัจจุบัน สำหรับ backoff calculation
+      const claimedRow = db
+        .query<{ attempt_count: number }, [string]>(
+          "SELECT attempt_count FROM webhook_deliveries WHERE delivery_id = ?",
+        )
+        .get(deliveryId);
+      const attemptCount = claimedRow?.attempt_count ?? 1;
+
+      log.info("webhook delivery claimed", { deliveryId, eventName, attempt: attemptCount });
+
+      // --- 6. ตรวจ JSON parse result (หลัง claim lease) ---
+      // Invalid JSON = permanent failure — ไม่ retry เพราะ payload ไม่เปลี่ยน
+      if (!parseResult.ok) {
+        db.query(
+          `UPDATE webhook_deliveries
+           SET status = 'failed', last_error_code = 'INVALID_PAYLOAD', attempt_count = ?
+           WHERE delivery_id = ?`,
+        ).run(MAX_WEBHOOK_ATTEMPTS, deliveryId);
         set.status = 400;
         return { ok: false, reason: "invalid JSON" };
       }
 
-      const action =
-        typeof payload === "object" && payload !== null && "action" in payload
-          ? String((payload as Record<string, unknown>).action)
-          : null;
+      const payload = parseResult.value;
 
-      // --- 5. Persist delivery ---
-      const receivedAt = Date.now();
-      db.query(
-        "INSERT INTO webhook_deliveries (delivery_id, event, action, payload, received_at) VALUES (?, ?, ?, ?, ?)",
-      ).run(deliveryId, eventName, action, rawBody, receivedAt);
-
-      // --- 6. Process event ---
+      // --- 7. Process event ---
       try {
         if (eventName === "push") {
-          await handlePush(db, payload as PushEventPayload, deliveryId, receivedAt);
+          await handlePush(db, payload as PushEventPayload, deliveryId);
         } else if (eventName === "installation") {
           await handleInstallation(db, payload as InstallationEventPayload, github);
         } else if (eventName === "installation_repositories") {
@@ -115,19 +191,31 @@ export function webhookRoutes(db: Database, github: GitHubService | null, webhoo
         }
         // events อื่น ignore อย่างปลอดภัย
 
-        // mark processed
-        db.query("UPDATE webhook_deliveries SET processed_at = ? WHERE delivery_id = ?").run(
-          Date.now(),
-          deliveryId,
-        );
+        // mark processed — รักษา processed_at สำหรับ backward compat กับ Phase 3
+        db.query(
+          `UPDATE webhook_deliveries
+           SET status = 'processed', processed_at = ?
+           WHERE delivery_id = ?`,
+        ).run(Date.now(), deliveryId);
       } catch (err) {
+        const errorCode = err instanceof AppError ? err.code : "INTERNAL_ERROR";
+        // Exponential backoff: 1h × 2^(attempt-1), cap ที่ 24h
+        const backoffMs = Math.min(3_600_000 * 2 ** (attemptCount - 1), 86_400_000);
+
+        db.query(
+          `UPDATE webhook_deliveries
+           SET status = 'failed', last_error_code = ?, next_retry_at = ?
+           WHERE delivery_id = ?`,
+        ).run(errorCode, Date.now() + backoffMs, deliveryId);
+
         log.error("webhook processing error", {
           deliveryId,
           eventName,
-          reason: err instanceof Error ? err.message : String(err),
+          errorCode,
+          attempt: attemptCount,
+          // ไม่ log err.message โดยตรงเพราะอาจมี sensitive data
         });
-        // ยังตอบ 200 เพื่อไม่ให้ GitHub retry — delivery อยู่ใน DB แล้ว
-        // Phase 3 จะมี retry mechanism สำหรับ failed processing
+        // ยังตอบ 200 เพื่อไม่ให้ GitHub retry ทันที — redeliver ผ่าน UI ได้เมื่อพร้อม
       }
 
       return { ok: true };
@@ -135,12 +223,15 @@ export function webhookRoutes(db: Database, github: GitHubService | null, webhoo
   );
 }
 
-/** Handle push event — สร้าง deploy_intent ถ้าผ่านเงื่อนไขทั้งหมด */
+/**
+ * Handle push event — สร้าง deploy_intent ถ้าผ่านเงื่อนไขทั้งหมด
+ * ใช้ INSERT OR IGNORE บน deploy_intents เพื่อ DB-level idempotency
+ * (migration 0004 เพิ่ม UNIQUE INDEX บน project_id + delivery_id)
+ */
 async function handlePush(
   db: Database,
   payload: PushEventPayload,
   deliveryId: string,
-  receivedAt: number,
 ): Promise<void> {
   // branch ถูกลบ → ไม่ deploy
   if (payload.deleted) return;
@@ -191,30 +282,36 @@ async function handlePush(
   const now = Date.now();
   for (const project of projects) {
     const intentId = ulid();
-    db.query(
-      `INSERT INTO deploy_intents
-        (id, project_id, installation_id, repo_id, branch, commit_sha, commit_message, commit_author, delivery_id, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-    ).run(
-      intentId,
-      project.id,
-      installationId,
-      repoId,
-      branch,
-      commitSha,
-      commitMessage ?? null,
-      commitAuthor,
-      deliveryId,
-      now,
-      now,
-    );
+    // INSERT OR IGNORE — UNIQUE INDEX (project_id, delivery_id) ป้องกัน intent ซ้ำ
+    // ถ้า delivery นี้เคย create intent ให้ project นี้แล้ว → silently ignore
+    const intentResult = db
+      .query(
+        `INSERT OR IGNORE INTO deploy_intents
+          (id, project_id, installation_id, repo_id, branch, commit_sha, commit_message, commit_author, delivery_id, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+      )
+      .run(
+        intentId,
+        project.id,
+        installationId,
+        repoId,
+        branch,
+        commitSha,
+        commitMessage ?? null,
+        commitAuthor,
+        deliveryId,
+        now,
+        now,
+      );
 
-    log.info("deploy intent created", {
-      intentId,
-      projectId: project.id,
-      branch,
-      commitSha: commitSha.slice(0, 7), // short SHA สำหรับ log — ไม่ใช่ secret
-    });
+    if (intentResult.changes > 0) {
+      log.info("deploy intent created", {
+        intentId,
+        projectId: project.id,
+        branch,
+        commitSha: commitSha.slice(0, 7), // short SHA สำหรับ log — ไม่ใช่ secret
+      });
+    }
   }
 }
 

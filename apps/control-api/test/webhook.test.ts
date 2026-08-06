@@ -500,3 +500,309 @@ describe("webhook endpoint — installation_repositories", () => {
     expect(kept?.auto_deploy).toBe(1); // ไม่ได้รับผลกระทบ
   });
 });
+
+// === Webhook processing state machine tests (hardening migration 0004) ===
+
+describe("webhook processing state machine — atomic idempotency", () => {
+  test("INSERT OR IGNORE + compare-and-set: มีเพียง claim เดียว", async () => {
+    // ทดสอบ DB-level claim mechanism โดยตรง — ไม่ผ่าน HTTP
+    const { db } = await setup();
+    const deliveryId = crypto.randomUUID();
+    const now = Date.now();
+
+    db.query(
+      `INSERT INTO webhook_deliveries
+        (delivery_id, event, action, payload, status, attempt_count, received_at)
+       VALUES (?, 'ping', NULL, '{}', 'received', 0, ?)`,
+    ).run(deliveryId, now);
+
+    // ทำ claim 2 ครั้งติดกัน — SQLite sync ดังนั้นครั้งแรกชนะ
+    const staleThreshold = now - 30_000;
+    const claimSql = `UPDATE webhook_deliveries
+     SET status = 'processing', processing_started_at = ?, attempt_count = attempt_count + 1
+     WHERE delivery_id = ?
+       AND (
+         status = 'received'
+         OR (status = 'failed' AND attempt_count < 3)
+         OR (status = 'processing' AND (processing_started_at IS NULL OR processing_started_at < ?))
+       )`;
+
+    const r1 = db.query(claimSql).run(now, deliveryId, staleThreshold);
+    const r2 = db.query(claimSql).run(now, deliveryId, staleThreshold);
+
+    expect(r1.changes + r2.changes).toBe(1); // มีเพียง claim เดียวสำเร็จ
+
+    const row = db
+      .query<{ status: string; attempt_count: number }, [string]>(
+        "SELECT status, attempt_count FROM webhook_deliveries WHERE delivery_id = ?",
+      )
+      .get(deliveryId);
+    expect(row?.status).toBe("processing");
+    expect(row?.attempt_count).toBe(1);
+  });
+
+  test("delivery processed แล้ว → ส่งซ้ำ → duplicate:true ไม่ re-process", async () => {
+    const { app, db } = await setup();
+    const deliveryId = crypto.randomUUID();
+    const now = Date.now();
+
+    // Insert delivery ที่ processed แล้ว
+    db.query(
+      `INSERT INTO webhook_deliveries
+        (delivery_id, event, action, payload, status, attempt_count, received_at, processed_at)
+       VALUES (?, 'ping', NULL, '{}', 'processed', 1, ?, ?)`,
+    ).run(deliveryId, now, now);
+
+    const { response } = await sendWebhook(app, {
+      event: "ping",
+      payload: {},
+      deliveryId,
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.ok).toBe(true);
+    expect(body.duplicate).toBe(true);
+
+    // attempt_count ไม่เพิ่ม
+    const row = db
+      .query<{ attempt_count: number }, [string]>(
+        "SELECT attempt_count FROM webhook_deliveries WHERE delivery_id = ?",
+      )
+      .get(deliveryId);
+    expect(row?.attempt_count).toBe(1);
+  });
+
+  test("invalid JSON → 400, delivery marked failed + INVALID_PAYLOAD + attempt exhausted", async () => {
+    const { app, db } = await setup();
+    const deliveryId = crypto.randomUUID();
+
+    // ส่ง body ที่ไม่ใช่ JSON แต่ signature ถูกต้อง
+    const badBody = "not-valid-json!!!";
+    const sig = await signWebhook(badBody, WEBHOOK_SECRET);
+
+    const response = await app.handle(
+      new Request("http://localhost/api/v1/github/webhooks", {
+        method: "POST",
+        headers: {
+          "content-type": "text/plain",
+          "x-github-event": "push",
+          "x-github-delivery": deliveryId,
+          "x-hub-signature-256": sig,
+        },
+        body: badBody,
+      }),
+    );
+    expect(response.status).toBe(400);
+
+    const row = db
+      .query<{ status: string; last_error_code: string; attempt_count: number }, [string]>(
+        "SELECT status, last_error_code, attempt_count FROM webhook_deliveries WHERE delivery_id = ?",
+      )
+      .get(deliveryId);
+    expect(row?.status).toBe("failed");
+    expect(row?.last_error_code).toBe("INVALID_PAYLOAD");
+    expect(row?.attempt_count).toBe(3); // MAX_WEBHOOK_ATTEMPTS — ไม่ retry อีก
+  });
+});
+
+describe("webhook processing state machine — retry recovery", () => {
+  test("failed delivery (attempt_count < 3) → retry สำเร็จ → processed", async () => {
+    const { app, db } = await setup();
+    const installationId = 111111;
+    const repoId = 222222;
+    const installDbId = insertInstallation(db, installationId);
+    insertProject(db, { installationDbId: installDbId, repoId, branch: "main" });
+
+    const deliveryId = crypto.randomUUID();
+    const pushPayload = {
+      ref: "refs/heads/main",
+      after: "f".repeat(40),
+      deleted: false,
+      installation: { id: installationId },
+      repository: { id: repoId, full_name: "test-org/my-app" },
+      head_commit: { message: "retry test", author: { name: "Dev" } },
+    };
+
+    // Pre-insert เป็น failed (attempt_count=1) — เหมือน handler ล้มครั้งแรก
+    const now = Date.now();
+    db.query(
+      `INSERT INTO webhook_deliveries
+        (delivery_id, event, action, payload, status, attempt_count, received_at, last_error_code)
+       VALUES (?, 'push', NULL, ?, 'failed', 1, ?, 'INTERNAL_ERROR')`,
+    ).run(deliveryId, JSON.stringify(pushPayload), now);
+
+    // Redeliver (GitHub retry)
+    const { response } = await sendWebhook(app, {
+      event: "push",
+      payload: pushPayload,
+      deliveryId,
+    });
+    expect(response.status).toBe(200);
+
+    const row = db
+      .query<{ status: string; attempt_count: number }, [string]>(
+        "SELECT status, attempt_count FROM webhook_deliveries WHERE delivery_id = ?",
+      )
+      .get(deliveryId);
+    expect(row?.status).toBe("processed");
+    expect(row?.attempt_count).toBe(2); // incremented by claim
+
+    // ตรวจ deploy_intent ถูกสร้าง (retry สำเร็จ)
+    const intentCount = db
+      .query<{ n: number }, []>("SELECT COUNT(*) as n FROM deploy_intents")
+      .get()!.n;
+    expect(intentCount).toBe(1);
+  });
+
+  test("stale processing lease (>30s) → recovery claim สำเร็จ → processed", async () => {
+    const { app, db } = await setup();
+    const deliveryId = crypto.randomUUID();
+    const staleStart = Date.now() - 60_000; // 60 วินาทีที่แล้ว = stale
+
+    db.query(
+      `INSERT INTO webhook_deliveries
+        (delivery_id, event, action, payload, status, attempt_count, received_at, processing_started_at)
+       VALUES (?, 'ping', NULL, '{}', 'processing', 1, ?, ?)`,
+    ).run(deliveryId, staleStart, staleStart);
+
+    // Redeliver: lease stale → claim ได้ → processed
+    const { response } = await sendWebhook(app, {
+      event: "ping",
+      payload: {},
+      deliveryId,
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.ok).toBe(true);
+    expect(body.duplicate).toBeUndefined(); // ไม่ใช่ duplicate — ถูก process จริง
+
+    const row = db
+      .query<{ status: string; attempt_count: number }, [string]>(
+        "SELECT status, attempt_count FROM webhook_deliveries WHERE delivery_id = ?",
+      )
+      .get(deliveryId);
+    expect(row?.status).toBe("processed");
+    expect(row?.attempt_count).toBe(2); // stale attempt (1) + recovery attempt (2)
+  });
+
+  test("exhausted delivery (attempt_count = 3) → ไม่ retry → duplicate:true", async () => {
+    const { app, db } = await setup();
+    const deliveryId = crypto.randomUUID();
+    const now = Date.now();
+
+    db.query(
+      `INSERT INTO webhook_deliveries
+        (delivery_id, event, action, payload, status, attempt_count, received_at, last_error_code)
+       VALUES (?, 'push', NULL, '{}', 'failed', 3, ?, 'INTERNAL_ERROR')`,
+    ).run(deliveryId, now);
+
+    const { response } = await sendWebhook(app, {
+      event: "push",
+      payload: {},
+      deliveryId,
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.ok).toBe(true);
+    expect(body.duplicate).toBe(true);
+
+    // ยัง failed, attempt_count ไม่เพิ่ม
+    const row = db
+      .query<{ status: string; attempt_count: number }, [string]>(
+        "SELECT status, attempt_count FROM webhook_deliveries WHERE delivery_id = ?",
+      )
+      .get(deliveryId);
+    expect(row?.status).toBe("failed");
+    expect(row?.attempt_count).toBe(3);
+  });
+});
+
+describe("webhook processing state machine — deploy_intent idempotency", () => {
+  test("UNIQUE INDEX (project_id, delivery_id): INSERT OR IGNORE ป้องกัน intent ซ้ำ", async () => {
+    const { db } = await setup();
+    const installationId = 333333;
+    const repoId = 444444;
+    const installDbId = insertInstallation(db, installationId);
+    const projectId = insertProject(db, {
+      installationDbId: installDbId,
+      repoId,
+      branch: "main",
+    });
+    const deliveryId = crypto.randomUUID();
+    const now = Date.now();
+
+    // FK: ต้อง insert webhook_deliveries ก่อน
+    db.query(
+      `INSERT INTO webhook_deliveries (delivery_id, event, action, payload, status, attempt_count, received_at)
+       VALUES (?, 'push', NULL, '{}', 'processed', 1, ?)`,
+    ).run(deliveryId, now);
+
+    // Insert สำเร็จ
+    const r1 = db
+      .query(
+        `INSERT OR IGNORE INTO deploy_intents
+          (id, project_id, installation_id, repo_id, branch, commit_sha, delivery_id, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'main', ?, ?, 'pending', ?, ?)`,
+      )
+      .run(ulid(), projectId, installationId, repoId, "a".repeat(40), deliveryId, now, now);
+    expect(r1.changes).toBe(1);
+
+    // Insert ซ้ำ (project_id + delivery_id เดิม) → IGNORE
+    const r2 = db
+      .query(
+        `INSERT OR IGNORE INTO deploy_intents
+          (id, project_id, installation_id, repo_id, branch, commit_sha, delivery_id, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'main', ?, ?, 'pending', ?, ?)`,
+      )
+      .run(ulid(), projectId, installationId, repoId, "b".repeat(40), deliveryId, now, now);
+    expect(r2.changes).toBe(0); // ไม่ insert
+
+    const count = db.query<{ n: number }, []>("SELECT COUNT(*) as n FROM deploy_intents").get()!.n;
+    expect(count).toBe(1); // intent เดียวเท่านั้น
+  });
+
+  test("intent คนละ delivery_id → สร้างได้ทั้งคู่", async () => {
+    const { db } = await setup();
+    const installationId = 555555;
+    const repoId = 666666;
+    const installDbId = insertInstallation(db, installationId);
+    const projectId = insertProject(db, {
+      installationDbId: installDbId,
+      repoId,
+      branch: "main",
+    });
+    const now = Date.now();
+    const deliveryId1 = crypto.randomUUID();
+    const deliveryId2 = crypto.randomUUID();
+
+    // FK: insert webhook_deliveries ก่อน
+    db.query(
+      `INSERT INTO webhook_deliveries (delivery_id, event, action, payload, status, attempt_count, received_at)
+       VALUES (?, 'push', NULL, '{}', 'processed', 1, ?)`,
+    ).run(deliveryId1, now);
+    db.query(
+      `INSERT INTO webhook_deliveries (delivery_id, event, action, payload, status, attempt_count, received_at)
+       VALUES (?, 'push', NULL, '{}', 'processed', 1, ?)`,
+    ).run(deliveryId2, now);
+
+    const r1 = db
+      .query(
+        `INSERT OR IGNORE INTO deploy_intents
+          (id, project_id, installation_id, repo_id, branch, commit_sha, delivery_id, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'main', ?, ?, 'pending', ?, ?)`,
+      )
+      .run(ulid(), projectId, installationId, repoId, "a".repeat(40), deliveryId1, now, now);
+
+    const r2 = db
+      .query(
+        `INSERT OR IGNORE INTO deploy_intents
+          (id, project_id, installation_id, repo_id, branch, commit_sha, delivery_id, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'main', ?, ?, 'pending', ?, ?)`,
+      )
+      .run(ulid(), projectId, installationId, repoId, "b".repeat(40), deliveryId2, now, now);
+
+    expect(r1.changes + r2.changes).toBe(2);
+    const count = db.query<{ n: number }, []>("SELECT COUNT(*) as n FROM deploy_intents").get()!.n;
+    expect(count).toBe(2);
+  });
+});

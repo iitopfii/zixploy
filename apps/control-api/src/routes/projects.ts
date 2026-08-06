@@ -17,6 +17,7 @@ interface ProjectRow {
   internal_port: number | null;
   health_check_path: string | null;
   archived_at: number | null;
+  degraded_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -31,6 +32,8 @@ const projectSchema = t.Object({
     t.Literal("failed"),
     t.Literal("stopped"),
   ]),
+  // Phase 8 M2 — active container หายไปจาก Docker ทั้งที่ status ยังเป็น 'running'
+  degraded: t.Boolean(),
   installationId: t.Nullable(t.String()),
   repoId: t.Nullable(t.Number()),
   repoFullName: t.Nullable(t.String()),
@@ -63,6 +66,7 @@ function toProject(row: ProjectRow) {
     id: row.id,
     name: row.name,
     status: row.status as "new" | "running" | "deploying" | "failed" | "stopped",
+    degraded: row.degraded_at != null,
     installationId: row.installation_id,
     repoId: row.repo_id,
     repoFullName: row.repo_full_name,
@@ -79,7 +83,7 @@ function toProject(row: ProjectRow) {
 }
 
 const SELECT_COLUMNS = `id, name, status, installation_id, repo_id, repo_full_name, branch, auto_deploy,
-  dockerfile_path, build_context, internal_port, health_check_path, archived_at, created_at, updated_at`;
+  dockerfile_path, build_context, internal_port, health_check_path, archived_at, degraded_at, created_at, updated_at`;
 
 function loadProject(db: Database, id: string): ProjectRow {
   // ตรวจรูปแบบ ID ก่อนแตะ DB — public ID เป็น ULID เสมอ (ADR-0005)

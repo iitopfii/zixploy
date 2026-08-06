@@ -67,17 +67,31 @@ export function loadProjectConfig(db: Database, projectId: string): ProjectConfi
   };
 }
 
-/** อัปเดต project.status — ใช้เฉพาะตอน activate (running) และ stop (stopped) */
+/**
+ * อัปเดต project.status — ใช้เฉพาะตอน activate (running) และ stop (stopped)
+ * เคลียร์ degraded_at ทุกครั้งที่มี lifecycle event ชัดเจน (Phase 8 M2) — เหตุการณ์ intentional
+ * แบบนี้ทำให้ marker "container หายไปเฉย ๆ" ก่อนหน้าไม่มีความหมายแล้วไม่ว่าจะเป็นสถานะไหนก็ตาม
+ */
 export function setProjectStatus(
   db: Database,
   projectId: string,
   status: "running" | "stopped" | "failed",
 ): void {
-  db.query("UPDATE projects SET status = ?, updated_at = ? WHERE id = ?").run(
+  db.query("UPDATE projects SET status = ?, degraded_at = NULL, updated_at = ? WHERE id = ?").run(
     status,
     Date.now(),
     projectId,
   );
+}
+
+/** mark project ว่า active container หายไปจาก Docker ทั้งที่ status ยังเป็น 'running' (Phase 8 M2) */
+export function markProjectDegraded(db: Database, projectId: string): boolean {
+  const result = db
+    .query(
+      "UPDATE projects SET degraded_at = ? WHERE id = ? AND status = 'running' AND degraded_at IS NULL",
+    )
+    .run(Date.now(), projectId);
+  return result.changes > 0;
 }
 
 /** container_id ของ deployment ที่ succeeded ล่าสุดของ project — ใช้ตอน activate (หา "ของเก่า") และ restart/stop */

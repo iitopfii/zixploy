@@ -52,13 +52,14 @@
 | Secret รั่วผ่าน API | ไม่มี endpoint คืน plaintext; ตอบ `hasValue: true` เท่านั้น |
 | Secret รั่วผ่าน log | Redaction pipeline ก่อน persist/stream ทุกทาง รองรับ secret ข้าม chunk; ไม่ log env map/Docker create request |
 | GitHub token ระยะยาวรั่ว | ไม่มี PAT — App JWT + installation token อายุสั้น cache ใน memory เท่านั้น |
+| GitHub App credentials ใน DB รั่ว (backup หลุด) | PEM/webhook secret/client secret เข้ารหัส AES-256-GCM envelope พร้อม AAD ผูก app+field; master key อยู่นอก DB — ดู [encryption.md](encryption.md) |
 | Session hijack | httpOnly + Secure + SameSite cookie, session expiry, CSRF token สำหรับ mutation |
 | Login brute force | Argon2id + rate limit + บันทึก failed attempts (ไม่เก็บ password ที่ลองผิด) |
 
 ## Attack Surface สาธารณะ (ตั้งใจให้เหลือน้อยที่สุด)
 
 1. Traefik ports 80/443 → route ไป user apps + dashboard
-2. `POST /api/v1/github/webhooks` (ผ่าน Traefik)
+2. `POST /api/v1/github/webhooks/:appId` (ผ่าน Traefik — secret เฉพาะต่อ app)
 3. GitHub callback/setup URL
 4. SSH ของ operator (นอก scope ระบบ แต่อยู่ใน checklist Phase 8)
 

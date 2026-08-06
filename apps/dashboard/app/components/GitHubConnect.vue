@@ -1,28 +1,16 @@
 <script setup lang="ts">
 /**
- * GitHub App connection component
+ * GitHub App connection prompt — แสดงในหน้า project เมื่อยังไม่มี installation
  *
  * States:
- * - not-configured: ZIXPLOY_GITHUB_* env vars ไม่ได้ตั้งค่า
- * - loading: กำลังดึงข้อมูล
- * - no-installations: ยังไม่มี installation
- * - has-installations: มี installation พร้อมใช้
- * - error: ไม่สามารถดึงข้อมูลได้
+ * - no-master-key: ZIXPLOY_MASTER_KEY_FILE ไม่ได้ตั้งค่า → สร้าง app ไม่ได้
+ * - no-app: ยังไม่มี GitHub App → ชวนไปหน้า settings เพื่อสร้าง
+ * - no-installation: มี app แล้วแต่ยังไม่ได้ install → ปุ่ม Install
+ * - has-installations: พร้อมใช้ — แสดงรายการ account
+ *
+ * การสร้าง/ลบ GitHub App ทำที่ /settings/github
  */
 const api = useApi();
-const route = useRoute();
-
-// ตรวจสอบ github query param หลัง callback
-const githubParam = computed(() => route.query.github as string | undefined);
-const callbackMessage = computed(() => {
-  if (githubParam.value === "installed") {
-    const account = route.query.account as string | undefined;
-    return account ? `เชื่อม GitHub App กับ ${account} สำเร็จ` : "เชื่อม GitHub App สำเร็จ";
-  }
-  if (githubParam.value === "error") return "เชื่อม GitHub App ไม่สำเร็จ — ลองใหม่อีกครั้ง";
-  if (githubParam.value === "not-configured") return "GitHub App ยังไม่ได้ configure บนเซิร์ฟเวอร์";
-  return null;
-});
 
 const {
   data: status,
@@ -33,6 +21,16 @@ const {
   async () => {
     const { data, error } = await api.api.v1.github.status.get();
     if (error) throw new Error("status error");
+    return data;
+  },
+  { server: false },
+);
+
+const { data: appsData, pending: appsPending } = await useAsyncData(
+  "github-apps-connect",
+  async () => {
+    const { data, error } = await api.api.v1.github.apps.get();
+    if (error) return null;
     return data;
   },
   { server: false },
@@ -52,29 +50,30 @@ const {
   { server: false },
 );
 
-const connectLoading = ref(false);
-const connectError = ref("");
+const installLoading = ref(false);
+const installError = ref("");
 
-async function connectGitHub() {
-  connectLoading.value = true;
-  connectError.value = "";
+async function installApp(appId: string) {
+  installLoading.value = true;
+  installError.value = "";
   try {
-    const { data, error } = await api.api.v1.github["install-url"].get();
+    const { data, error } = await api.api.v1.github.apps({ id: appId })["install-url"].get();
     if (error || !data?.url) {
-      connectError.value = "ไม่สามารถสร้าง install URL ได้";
+      installError.value = "ไม่สามารถสร้าง install URL ได้";
       return;
     }
     // เปิดหน้า GitHub ใน tab เดิม — GitHub จะ redirect กลับมา
     window.location.href = data.url;
   } catch {
-    connectError.value = "ติดต่อ API ไม่ได้";
+    installError.value = "ติดต่อ API ไม่ได้";
   } finally {
-    connectLoading.value = false;
+    installLoading.value = false;
   }
 }
 
-const loading = computed(() => statusPending.value || installPending.value);
-const configured = computed(() => status.value?.configured ?? false);
+const loading = computed(() => statusPending.value || installPending.value || appsPending.value);
+const masterKeyReady = computed(() => status.value?.masterKeyConfigured ?? false);
+const apps = computed(() => appsData.value?.items ?? []);
 const activeInstallations = computed(
   () => installations.value?.items.filter((i) => i.status === "active") ?? [],
 );
@@ -82,72 +81,71 @@ const activeInstallations = computed(
 
 <template>
   <div class="github-connect">
-    <!-- callback message -->
-    <p v-if="callbackMessage" :class="githubParam === 'error' || githubParam === 'not-configured' ? 'error-text' : 'ok-text'" class="callback-msg">
-      {{ callbackMessage }}
-    </p>
-
     <template v-if="loading">
       <p class="muted">กำลังโหลด GitHub integration status…</p>
     </template>
 
-    <template v-else-if="statusError || !configured">
+    <!-- Master key ยังไม่ configure -->
+    <template v-else-if="statusError || !masterKeyReady">
       <div class="not-configured">
         <p class="muted">
-          GitHub App ยังไม่ได้ configure — ตั้งค่า environment variables บนเซิร์ฟเวอร์
+          Master key ยังไม่ได้ configure — GitHub App credentials ต้องเข้ารหัสก่อนเก็บ
         </p>
-        <ul class="env-list">
-          <li><code>ZIXPLOY_GITHUB_APP_ID</code></li>
-          <li><code>ZIXPLOY_GITHUB_APP_SLUG</code></li>
-          <li><code>ZIXPLOY_GITHUB_APP_PRIVATE_KEY_FILE</code></li>
-          <li><code>ZIXPLOY_GITHUB_WEBHOOK_SECRET</code></li>
-        </ul>
+        <p class="muted small">
+          ตั้งค่า <code>ZIXPLOY_MASTER_KEY_FILE</code> บนเซิร์ฟเวอร์แล้ว restart Control API
+        </p>
+        <NuxtLink to="/settings/github" class="small">ดูรายละเอียดที่ GitHub Apps settings →</NuxtLink>
       </div>
     </template>
 
-    <template v-else>
-      <!-- no installation yet -->
-      <template v-if="activeInstallations.length === 0">
-        <p class="muted">ยังไม่มี GitHub installation — คลิกด้านล่างเพื่อ install GitHub App</p>
-        <p v-if="connectError" class="error-text">{{ connectError }}</p>
-        <button class="primary" :disabled="connectLoading" @click="connectGitHub">
-          {{ connectLoading ? "กำลัง redirect…" : "Install GitHub App" }}
+    <!-- ยังไม่มี GitHub App -->
+    <template v-else-if="apps.length === 0">
+      <div class="no-app">
+        <p class="muted">ยังไม่มี GitHub App — สร้าง app จากหน้า settings เพื่อเชื่อมต่อ repository</p>
+        <NuxtLink to="/settings/github" class="btn-link primary">สร้าง GitHub App</NuxtLink>
+      </div>
+    </template>
+
+    <!-- มี app แล้วแต่ยังไม่ได้ install -->
+    <template v-else-if="activeInstallations.length === 0">
+      <p class="muted">มี GitHub App แล้ว แต่ยังไม่ได้ติดตั้งกับ account ใด</p>
+      <p v-if="installError" class="error-text">{{ installError }}</p>
+      <div class="app-buttons">
+        <button
+          v-for="app in apps"
+          :key="app.id"
+          class="primary"
+          :disabled="installLoading"
+          @click="installApp(app.id)"
+        >
+          {{ installLoading ? "กำลัง redirect…" : `Install ${app.name}` }}
         </button>
-      </template>
+      </div>
+    </template>
 
-      <!-- has installations -->
-      <template v-else>
-        <div class="install-list">
-          <div
-            v-for="install in activeInstallations"
-            :key="install.id"
-            class="install-item"
-          >
-            <img
-              v-if="install.accountAvatarUrl"
-              :src="install.accountAvatarUrl"
-              :alt="install.accountLogin"
-              class="avatar"
-              width="24"
-              height="24"
-            />
-            <span class="account-name">{{ install.accountLogin }}</span>
-            <span class="account-type muted">{{ install.accountType }}</span>
-          </div>
+    <!-- พร้อมใช้ -->
+    <template v-else>
+      <div class="install-list">
+        <div v-for="install in activeInstallations" :key="install.id" class="install-item">
+          <img
+            v-if="install.accountAvatarUrl"
+            :src="install.accountAvatarUrl"
+            :alt="install.accountLogin"
+            class="avatar"
+            width="24"
+            height="24"
+          />
+          <span class="account-name">{{ install.accountLogin }}</span>
+          <span class="account-type muted">{{ install.accountType }}</span>
+          <span v-if="install.appName" class="muted small">via {{ install.appName }}</span>
         </div>
+      </div>
 
-        <div class="add-more">
-          <button
-            class="secondary small"
-            :disabled="connectLoading"
-            @click="connectGitHub"
-          >
-            {{ connectLoading ? "กำลัง redirect…" : "เพิ่ม installation ใหม่" }}
-          </button>
-          <button class="secondary small" @click="() => refreshInstallations()">รีเฟรช</button>
-        </div>
-        <p v-if="connectError" class="error-text">{{ connectError }}</p>
-      </template>
+      <div class="add-more">
+        <NuxtLink to="/settings/github" class="btn-link secondary small">จัดการ GitHub Apps</NuxtLink>
+        <button class="secondary small" @click="() => refreshInstallations()">รีเฟรช</button>
+      </div>
+      <p v-if="installError" class="error-text">{{ installError }}</p>
     </template>
   </div>
 </template>
@@ -158,28 +156,38 @@ const activeInstallations = computed(
   flex-direction: column;
   gap: 0.75rem;
 }
-.callback-msg {
-  padding: 0.5rem 0.75rem;
-  border-radius: var(--radius);
-  background: var(--surface-alt, var(--surface));
-  margin: 0;
-}
-.not-configured {
-  color: var(--muted);
-}
-.env-list {
-  list-style: none;
-  padding: 0;
-  margin: 0.5rem 0 0;
+.not-configured,
+.no-app {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.5rem;
+  align-items: flex-start;
 }
-.env-list code {
+.not-configured code {
   font-size: 0.8125rem;
   background: var(--surface-alt, var(--surface));
   padding: 0.15rem 0.4rem;
   border-radius: 3px;
+}
+.btn-link {
+  display: inline-block;
+  padding: 0.4rem 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  text-decoration: none;
+}
+.btn-link.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn-link:hover {
+  text-decoration: none;
+}
+.app-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 .install-list {
   display: flex;
@@ -205,10 +213,14 @@ const activeInstallations = computed(
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+  align-items: center;
   margin-top: 0.25rem;
 }
 .small {
   font-size: 0.8125rem;
+  padding: 0.3rem 0.75rem;
+}
+.btn-link.small {
   padding: 0.3rem 0.75rem;
 }
 </style>

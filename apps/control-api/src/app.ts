@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { Elysia } from "elysia";
-import type { GitHubService } from "./github/service";
+import type { GitHubAppRegistry } from "./github/registry";
+import { RealGitHubAppRegistry } from "./github/registry";
 import { bodyLimit } from "./plugins/body-limit";
 import { errorHandler } from "./plugins/error-handler";
 import { requestId } from "./plugins/request-id";
@@ -16,18 +17,23 @@ import { webhookRoutes } from "./routes/webhook";
  * ประกอบ Elysia app จาก plugins + route modules
  * แยกจาก index.ts เพื่อให้ tests เรียก app.handle() ได้โดยไม่เปิด listener
  *
- * github: null = GitHub App ยังไม่ได้ configure — Phase 1 functionality ยังทำงานได้
- * webhookSecret: ส่งแยกจาก GitHubService เพราะ webhook endpoint เป็น public
- *   และอาจรัน/ทดสอบแยกจาก service ได้
+ * registry: จัดการ GitHub Apps ที่สร้างผ่าน manifest flow
+ *   - ไม่ระบุ → สร้าง registry เปล่า (ไม่มี master key) — Phase 1 functionality ยังทำงานได้
+ *   - tests ฉีด mock registry ได้
  */
 export interface AppOptions {
-  github?: GitHubService | null;
-  webhookSecret?: string;
+  registry?: GitHubAppRegistry;
+  /** Public base URL — ใช้สร้าง webhook/setup URL ใน manifest (default: localhost) */
+  baseUrl?: string;
 }
 
 export function buildApp(db: Database, options: AppOptions = {}) {
-  const github = options.github ?? null;
-  const webhookSecret = options.webhookSecret;
+  const registry =
+    options.registry ??
+    new RealGitHubAppRegistry(db, {
+      baseUrl: options.baseUrl ?? "http://localhost:3001",
+      masterKeys: null,
+    });
 
   return new Elysia()
     .use(requestId)
@@ -38,8 +44,8 @@ export function buildApp(db: Database, options: AppOptions = {}) {
     .use(systemRoutes(db))
     .use(authRoutes(db))
     .use(projectRoutes(db))
-    .use(githubRoutes(db, github))
-    .use(webhookRoutes(db, github, webhookSecret));
+    .use(githubRoutes(db, registry))
+    .use(webhookRoutes(db, registry));
 }
 
 export type App = ReturnType<typeof buildApp>;

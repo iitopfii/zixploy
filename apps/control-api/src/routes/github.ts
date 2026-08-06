@@ -1,22 +1,26 @@
 /**
- * GitHub App integration routes
+ * GitHub App integration routes — manifest flow (สร้าง app จากระบบเราเอง)
  *
- * GET  /api/v1/github/status                          — public, configuration status
- * GET  /api/v1/github/install-url                     — auth, URL เพื่อ install GitHub App
- * GET  /api/v1/github/callback                        — auth (session cookie), post-install callback
- * GET  /api/v1/github/installations                   — auth, list stored installations
- * GET  /api/v1/github/installations/:id/repositories  — auth, live from GitHub API
- * GET  /api/v1/github/branches                        — auth, query: installationId, repo
- * POST /api/v1/projects/:id/source                    — auth + CSRF, connect repository
- * DELETE /api/v1/projects/:id/source                  — auth + CSRF, disconnect repository
+ * GET    /api/v1/github/status                          — public, configuration status
+ * GET    /api/v1/github/apps                            — auth, list apps
+ * POST   /api/v1/github/apps/manifest                   — auth+CSRF, สร้าง manifest form
+ * GET    /api/v1/github/apps/callback                   — auth, manifest redirect (code+state)
+ * GET    /api/v1/github/apps/:id/install-url            — auth
+ * GET    /api/v1/github/apps/:id/setup                  — auth, post-install callback
+ * DELETE /api/v1/github/apps/:id                        — auth+CSRF, ลบ app
+ * GET    /api/v1/github/installations                   — auth, list stored installations
+ * GET    /api/v1/github/installations/:id/repositories  — auth, live from GitHub API
+ * GET    /api/v1/github/branches                        — auth, query: installationId, repo
+ * POST   /api/v1/projects/:id/source                    — auth + CSRF, connect repository
+ * DELETE /api/v1/projects/:id/source                    — auth + CSRF, disconnect repository
  *
- * ห้าม endpoint ใดส่ง installation token หรือ JWT ออก response
+ * ห้าม endpoint ใดส่ง private key, webhook secret, installation token หรือ JWT ออก response
  */
 
 import type { Database } from "bun:sqlite";
 import { API_PREFIX, AppError, isUlid, ulid } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
-import type { GitHubService } from "../github/service";
+import type { GitHubAppRegistry } from "../github/registry";
 import { log } from "../logger";
 import { authPlugin, requireAuthenticated } from "../plugins/auth";
 
@@ -27,6 +31,7 @@ interface InstallationRow {
   account_type: string;
   account_avatar_url: string;
   status: string;
+  github_app_id: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -38,20 +43,20 @@ const installationSchema = t.Object({
   accountType: t.Union([t.Literal("User"), t.Literal("Organization")]),
   accountAvatarUrl: t.String(),
   status: t.Union([t.Literal("active"), t.Literal("suspended"), t.Literal("deleted")]),
+  appId: t.Nullable(t.String()),
+  appName: t.Nullable(t.String()),
   createdAt: t.Number(),
 });
 
-function toInstallation(row: InstallationRow) {
-  return {
-    id: row.id,
-    installationId: row.installation_id,
-    accountLogin: row.account_login,
-    accountType: row.account_type as "User" | "Organization",
-    accountAvatarUrl: row.account_avatar_url,
-    status: row.status as "active" | "suspended" | "deleted",
-    createdAt: row.created_at,
-  };
-}
+const appSchema = t.Object({
+  id: t.String(),
+  appId: t.Number(),
+  slug: t.String(),
+  name: t.String(),
+  htmlUrl: t.String(),
+  ownerLogin: t.Nullable(t.String()),
+  createdAt: t.Number(),
+});
 
 const repoSchema = t.Object({
   id: t.Number(),
@@ -107,9 +112,9 @@ function assertValidRepoFullName(name: string): void {
   }
 }
 
-export function githubRoutes(db: Database, github: GitHubService | null) {
+export function githubRoutes(db: Database, registry: GitHubAppRegistry) {
   /**
-   * GitHub app routes — fully chained so Eden treaty picks up all route types.
+   * Fully chained so Eden treaty picks up all route types.
    *
    * IMPORTANT: Each .get()/.post()/.delete() must be chained (not assigned to a variable
    * and then mutated) — Elysia types each call's return value; mutation-style registration
@@ -122,19 +127,25 @@ export function githubRoutes(db: Database, github: GitHubService | null) {
     .get(
       "/status",
       () => {
-        const configured = github !== null;
-        const count = configured
-          ? (db
-              .query<{ count: number }, []>(
-                "SELECT COUNT(*) as count FROM github_installations WHERE status = 'active'",
-              )
-              .get()?.count ?? 0)
-          : 0;
-        return { configured, activeInstallationCount: count };
+        const apps = registry.listApps();
+        const count =
+          db
+            .query<{ count: number }, []>(
+              "SELECT COUNT(*) as count FROM github_installations WHERE status = 'active'",
+            )
+            .get()?.count ?? 0;
+        return {
+          configured: apps.length > 0,
+          masterKeyConfigured: registry.isReady(),
+          appCount: apps.length,
+          activeInstallationCount: count,
+        };
       },
       {
         response: t.Object({
           configured: t.Boolean(),
+          masterKeyConfigured: t.Boolean(),
+          appCount: t.Number(),
           activeInstallationCount: t.Number(),
         }),
       },
@@ -143,92 +154,189 @@ export function githubRoutes(db: Database, github: GitHubService | null) {
     // === Auth-required endpoints ===
     .guard({ beforeHandle: requireAuthenticated })
 
-    // install URL
-    .get(
-      "/install-url",
-      () => {
-        if (!github) {
-          throw new AppError(
-            "GITHUB_UNAVAILABLE",
-            "GitHub App ยังไม่ได้ configure — ตั้งค่า ZIXPLOY_GITHUB_* environment variables",
-          );
-        }
-        return { url: github.getInstallUrl() };
+    // list GitHub Apps
+    .get("/apps", () => ({ items: registry.listApps() }), {
+      response: t.Object({ items: t.Array(appSchema) }),
+    })
+
+    // สร้าง manifest form — browser POST ไป GitHub เพื่อสร้าง app
+    .post(
+      "/apps/manifest",
+      ({ body }) => {
+        const form = registry.createManifest(body.name, body.organization);
+        return { action: form.action, manifest: form.manifest, state: form.state };
       },
-      { response: t.Object({ url: t.String() }) },
+      {
+        body: t.Object({
+          name: t.String({ minLength: 1, maxLength: 34 }),
+          organization: t.Optional(t.String({ minLength: 1, maxLength: 100 })),
+        }),
+        response: t.Object({
+          action: t.String(),
+          manifest: t.String(),
+          state: t.String(),
+        }),
+      },
     )
 
-    // callback หลัง install GitHub App
+    // manifest redirect callback — GitHub ส่ง code+state กลับมา
     .get(
-      "/callback",
+      "/apps/callback",
       async ({ query, set }) => {
-        if (!github) {
+        const { code, state } = query;
+        if (!code || !state) {
           set.status = 302;
-          set.headers = { location: "/#github=not-configured" };
+          set.headers = { location: "/settings/github#github=manifest-error" };
+          return;
+        }
+
+        try {
+          const created = await registry.completeManifest(code, state);
+          set.status = 302;
+          set.headers = {
+            location: `/settings/github?github=app-created&app=${encodeURIComponent(created.name)}&id=${created.id}`,
+          };
+        } catch (err) {
+          log.error("github manifest callback failed", {
+            reason: err instanceof AppError ? err.code : "unknown",
+          });
+          set.status = 302;
+          set.headers = { location: "/settings/github#github=manifest-error" };
+        }
+      },
+      {
+        query: t.Object({
+          code: t.Optional(t.String()),
+          state: t.Optional(t.String()),
+        }),
+      },
+    )
+
+    // install URL ของ app
+    .get(
+      "/apps/:id/install-url",
+      ({ params }) => {
+        const url = registry.getInstallUrl(params.id);
+        if (!url) {
+          throw new AppError("INSTALLATION_NOT_FOUND", "ไม่พบ GitHub App นี้");
+        }
+        return { url };
+      },
+      {
+        params: t.Object({ id: t.String() }),
+        response: t.Object({ url: t.String() }),
+      },
+    )
+
+    // post-install setup callback — GitHub ส่ง installation_id มา
+    .get(
+      "/apps/:id/setup",
+      async ({ params, query, set }) => {
+        const appRow = registry.getApp(params.id);
+        if (!appRow) {
+          set.status = 302;
+          set.headers = { location: "/settings/github#github=error" };
           return;
         }
 
         const installationId = Number(query.installation_id);
         if (!installationId || Number.isNaN(installationId)) {
           set.status = 302;
-          set.headers = { location: "/#github=error" };
+          set.headers = { location: "/settings/github#github=error" };
           return;
         }
 
         try {
-          const data = await github.fetchInstallation(installationId);
+          const service = await registry.getService(params.id);
+          if (!service) {
+            set.status = 302;
+            set.headers = { location: "/settings/github#github=error" };
+            return;
+          }
+          const data = await service.fetchInstallation(installationId);
 
           // upsert — ถ้า reinstall เดิม ให้ update ไม่สร้างซ้ำ
           const existing = db
-            .query<{ id: string; status: string }, [number]>(
-              "SELECT id, status FROM github_installations WHERE installation_id = ?",
+            .query<{ id: string }, [number]>(
+              "SELECT id FROM github_installations WHERE installation_id = ?",
             )
             .get(installationId);
 
           const now = Date.now();
           if (existing) {
             db.query(
-              "UPDATE github_installations SET account_login = ?, account_type = ?, account_avatar_url = ?, status = 'active', updated_at = ? WHERE id = ?",
-            ).run(data.accountLogin, data.accountType, data.accountAvatarUrl, now, existing.id);
+              `UPDATE github_installations
+               SET account_login = ?, account_type = ?, account_avatar_url = ?,
+                   status = 'active', github_app_id = ?, updated_at = ?
+               WHERE id = ?`,
+            ).run(
+              data.accountLogin,
+              data.accountType,
+              data.accountAvatarUrl,
+              params.id,
+              now,
+              existing.id,
+            );
             log.info("github installation updated", {
               installationId,
               accountLogin: data.accountLogin,
+              appRowId: params.id,
             });
           } else {
             const id = ulid();
             db.query(
-              "INSERT INTO github_installations (id, installation_id, account_login, account_type, account_avatar_url, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)",
+              `INSERT INTO github_installations
+                (id, installation_id, account_login, account_type, account_avatar_url, status, github_app_id, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
             ).run(
               id,
               installationId,
               data.accountLogin,
               data.accountType,
               data.accountAvatarUrl,
+              params.id,
               now,
               now,
             );
             log.info("github installation stored", {
               installationId,
               accountLogin: data.accountLogin,
+              appRowId: params.id,
             });
           }
 
           set.status = 302;
-          set.headers = { location: `/?github=installed&account=${data.accountLogin}` };
+          set.headers = {
+            location: `/settings/github?github=installed&account=${encodeURIComponent(data.accountLogin)}`,
+          };
         } catch (err) {
-          log.error("github callback failed", {
+          log.error("github setup callback failed", {
             installationId,
             reason: err instanceof Error ? err.message : String(err),
           });
           set.status = 302;
-          set.headers = { location: "/#github=error" };
+          set.headers = { location: "/settings/github#github=error" };
         }
       },
       {
+        params: t.Object({ id: t.String() }),
         query: t.Object({
           installation_id: t.Optional(t.String()),
           setup_action: t.Optional(t.String()),
         }),
+      },
+    )
+
+    // ลบ GitHub App
+    .delete(
+      "/apps/:id",
+      ({ params }) => {
+        registry.deleteApp(params.id);
+        return { ok: true };
+      },
+      {
+        params: t.Object({ id: t.String() }),
+        response: t.Object({ ok: t.Boolean() }),
       },
     )
 
@@ -237,14 +345,29 @@ export function githubRoutes(db: Database, github: GitHubService | null) {
       "/installations",
       () => {
         const rows = db
-          .query<InstallationRow, []>(
-            `SELECT id, installation_id, account_login, account_type, account_avatar_url, status, created_at, updated_at
-             FROM github_installations
-             WHERE status != 'deleted'
-             ORDER BY created_at DESC`,
+          .query<InstallationRow & { app_name: string | null }, []>(
+            `SELECT gi.id, gi.installation_id, gi.account_login, gi.account_type,
+                    gi.account_avatar_url, gi.status, gi.github_app_id, gi.created_at, gi.updated_at,
+                    ga.name as app_name
+             FROM github_installations gi
+             LEFT JOIN github_apps ga ON gi.github_app_id = ga.id
+             WHERE gi.status != 'deleted'
+             ORDER BY gi.created_at DESC`,
           )
           .all();
-        return { items: rows.map(toInstallation) };
+        return {
+          items: rows.map((row) => ({
+            id: row.id,
+            installationId: row.installation_id,
+            accountLogin: row.account_login,
+            accountType: row.account_type as "User" | "Organization",
+            accountAvatarUrl: row.account_avatar_url,
+            status: row.status as "active" | "suspended" | "deleted",
+            appId: row.github_app_id,
+            appName: row.app_name,
+            createdAt: row.created_at,
+          })),
+        };
       },
       { response: t.Object({ items: t.Array(installationSchema) }) },
     )
@@ -253,10 +376,6 @@ export function githubRoutes(db: Database, github: GitHubService | null) {
     .get(
       "/installations/:installationId/repositories",
       async ({ params, query }) => {
-        if (!github) {
-          throw new AppError("GITHUB_UNAVAILABLE", "GitHub App ยังไม่ได้ configure");
-        }
-
         const installationId = Number(params.installationId);
         if (!installationId || Number.isNaN(installationId)) {
           throw new AppError("VALIDATION_ERROR", "installationId ไม่ถูกต้อง");
@@ -264,8 +383,8 @@ export function githubRoutes(db: Database, github: GitHubService | null) {
 
         // ตรวจว่า installation นี้อยู่ในระบบของเรา
         const row = db
-          .query<{ status: string }, [number]>(
-            "SELECT status FROM github_installations WHERE installation_id = ?",
+          .query<{ status: string; github_app_id: string | null }, [number]>(
+            "SELECT status, github_app_id FROM github_installations WHERE installation_id = ?",
           )
           .get(installationId);
 
@@ -282,10 +401,15 @@ export function githubRoutes(db: Database, github: GitHubService | null) {
           throw new AppError("INSTALLATION_NOT_FOUND", "GitHub installation นี้ถูกถอนการติดตั้งแล้ว");
         }
 
+        const service = await registry.getServiceForInstallation(installationId);
+        if (!service) {
+          throw new AppError("GITHUB_UNAVAILABLE", "GitHub App ของ installation นี้ไม่พร้อมใช้งาน");
+        }
+
         const page = Math.max(1, Number(query.page ?? 1));
         const perPage = Math.min(100, Math.max(1, Number(query.per_page ?? 30)));
 
-        const result = await github.listRepos(installationId, { page, perPage });
+        const result = await service.listRepos(installationId, { page, perPage });
         return {
           items: result.items,
           totalCount: result.totalCount,
@@ -312,10 +436,6 @@ export function githubRoutes(db: Database, github: GitHubService | null) {
     .get(
       "/branches",
       async ({ query }) => {
-        if (!github) {
-          throw new AppError("GITHUB_UNAVAILABLE", "GitHub App ยังไม่ได้ configure");
-        }
-
         const installationId = Number(query.installationId);
         if (!installationId || Number.isNaN(installationId)) {
           throw new AppError("VALIDATION_ERROR", "installationId ไม่ถูกต้อง");
@@ -327,10 +447,15 @@ export function githubRoutes(db: Database, github: GitHubService | null) {
         }
         assertValidRepoFullName(repo);
 
+        const service = await registry.getServiceForInstallation(installationId);
+        if (!service) {
+          throw new AppError("GITHUB_UNAVAILABLE", "GitHub App ของ installation นี้ไม่พร้อมใช้งาน");
+        }
+
         const page = Math.max(1, Number(query.page ?? 1));
         const perPage = Math.min(100, Math.max(1, Number(query.per_page ?? 100)));
 
-        const branches = await github.listBranches(installationId, repo, { page, perPage });
+        const branches = await service.listBranches(installationId, repo, { page, perPage });
         return { items: branches };
       },
       {
@@ -353,10 +478,6 @@ export function githubRoutes(db: Database, github: GitHubService | null) {
     .post(
       "/:id/source",
       async ({ params, body }) => {
-        if (!github) {
-          throw new AppError("GITHUB_UNAVAILABLE", "GitHub App ยังไม่ได้ configure");
-        }
-
         if (!isUlid(params.id)) {
           throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
         }
@@ -391,8 +512,13 @@ export function githubRoutes(db: Database, github: GitHubService | null) {
           );
         }
 
+        const service = await registry.getServiceForInstallation(body.installationId);
+        if (!service) {
+          throw new AppError("GITHUB_UNAVAILABLE", "GitHub App ของ installation นี้ไม่พร้อมใช้งาน");
+        }
+
         // validate repo access ผ่าน GitHub API
-        const validatedRepo = await github.validateRepo(body.installationId, body.repoFullName);
+        const validatedRepo = await service.validateRepo(body.installationId, body.repoFullName);
         if (validatedRepo.id !== body.repoId) {
           throw new AppError(
             "VALIDATION_ERROR",
@@ -402,7 +528,7 @@ export function githubRoutes(db: Database, github: GitHubService | null) {
         }
 
         // validate branch
-        await github.validateBranch(body.installationId, body.repoFullName, body.branch);
+        await service.validateBranch(body.installationId, body.repoFullName, body.branch);
 
         // อัปเดต project
         const now = Date.now();

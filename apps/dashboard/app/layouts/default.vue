@@ -16,6 +16,7 @@ async function logout() {
       <NuxtLink to="/" class="brand">Zixploy</NuxtLink>
       <nav>
         <NuxtLink to="/">Projects</NuxtLink>
+        <NuxtLink to="/settings/github">GitHub Apps</NuxtLink>
       </nav>
       <div class="right">
         <SystemHealth />

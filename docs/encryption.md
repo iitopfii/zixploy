@@ -40,4 +40,18 @@ Runbook ฉบับเต็มเขียนใน Phase 4 (`docs/runbooks/ro
 
 - **ไม่มี API export plaintext secret** ใน MVP — เปลี่ยนค่าด้วย replace เท่านั้น
 - Backup ฐานข้อมูลรวม ciphertext ได้ แต่ master key file ต้อง backup **แยกช่องทาง** — เก็บรวมกันทำให้ encryption ไร้ความหมาย
-- Secret อื่นของระบบ (GitHub App private key, webhook secret) เก็บเป็นไฟล์/environment ของ control plane ไม่เก็บใน DB
+
+## GitHub App credentials (Phase 2 — implemented)
+
+GitHub Apps สร้างผ่าน **manifest flow** จาก UI ของระบบเอง (ไม่ใช่ env var) — GitHub ส่ง
+private key, webhook secret และ client secret กลับมาครั้งเดียวตอน conversion จึงต้องเก็บลง DB
+
+- ตาราง `github_apps`: `pem_ciphertext`, `webhook_secret_ciphertext`, `client_secret_ciphertext`
+- ใช้ envelope format เดียวกับด้านบน (AES-256-GCM, key rotation ผ่าน `key_id`)
+- AAD: `"github_app:<row_id>:<field>"` — ciphertext ย้ายข้าม app หรือข้าม field ไม่ได้
+- Decrypt เฉพาะเมื่อใช้งาน (sign JWT, verify webhook signature) ไม่ cache plaintext ลง disk
+- ไม่มี API endpoint ใดคืนค่าเหล่านี้ — response มีแค่ app ID, slug, name, html_url, owner
+- **Installation token และ App JWT ยังคงไม่เก็บลง DB** — cache ใน memory เท่านั้น
+
+Master key ไม่ configure → สร้าง GitHub App ไม่ได้ (fail closed) แต่ Phase 1 functionality
+ยังทำงานได้ปกติ

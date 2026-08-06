@@ -20,7 +20,7 @@
 import type { Database } from "bun:sqlite";
 import { API_PREFIX, AppError, ulid } from "@zixploy/shared";
 import { Elysia } from "elysia";
-import type { GitHubService } from "../github/service";
+import type { GitHubAppRegistry } from "../github/registry";
 import {
   type InstallationEventPayload,
   type InstallationRepositoriesEventPayload,
@@ -45,10 +45,10 @@ const MAX_WEBHOOK_ATTEMPTS = 3;
  */
 const PROCESSING_LEASE_MS = 30_000;
 
-export function webhookRoutes(db: Database, github: GitHubService | null, webhookSecret?: string) {
+export function webhookRoutes(db: Database, registry: GitHubAppRegistry) {
   return new Elysia({ prefix: `${API_PREFIX}/github` }).post(
-    "/webhooks",
-    async ({ request, set }) => {
+    "/webhooks/:appId",
+    async ({ params, request, set }) => {
       // --- 1. อ่าน raw body ก่อน parse ---
       const contentLength = Number(request.headers.get("content-length") ?? 0);
       if (contentLength > MAX_WEBHOOK_BYTES) {
@@ -62,15 +62,28 @@ export function webhookRoutes(db: Database, github: GitHubService | null, webhoo
         return { ok: false, reason: "payload ใหญ่เกิน" };
       }
 
-      // --- 2. ตรวจ signature ---
+      // --- 2. ตรวจ signature ด้วย secret เฉพาะของ app นี้ ---
       const signature = request.headers.get("x-hub-signature-256");
       const deliveryId = request.headers.get("x-github-delivery");
       const eventName = request.headers.get("x-github-event");
 
-      if (!webhookSecret) {
-        // ไม่ configure — reject ทั้งหมด ป้องกัน open webhook
+      // แต่ละ app มี webhook secret ของตัวเอง (decrypt จาก DB)
+      let webhookSecret: string | null;
+      try {
+        webhookSecret = await registry.getWebhookSecret(params.appId);
+      } catch (err) {
+        log.error("webhook secret decrypt failed", {
+          appRowId: params.appId,
+          reason: err instanceof Error ? err.message : String(err),
+        });
         set.status = 503;
-        return { ok: false, reason: "webhook ยังไม่ได้ configure" };
+        return { ok: false, reason: "webhook secret ไม่พร้อมใช้งาน" };
+      }
+
+      if (!webhookSecret) {
+        // ไม่พบ app หรือ master key ไม่ได้ configure — reject ป้องกัน open webhook
+        set.status = 404;
+        return { ok: false, reason: "ไม่พบ GitHub App สำหรับ webhook นี้" };
       }
 
       const valid = await verifyWebhookSignature(rawBody, signature, webhookSecret);
@@ -185,7 +198,7 @@ export function webhookRoutes(db: Database, github: GitHubService | null, webhoo
         if (eventName === "push") {
           await handlePush(db, payload as PushEventPayload, deliveryId);
         } else if (eventName === "installation") {
-          await handleInstallation(db, payload as InstallationEventPayload, github);
+          await handleInstallation(db, payload as InstallationEventPayload, registry, params.appId);
         } else if (eventName === "installation_repositories") {
           await handleInstallationRepositories(db, payload as InstallationRepositoriesEventPayload);
         }
@@ -315,11 +328,15 @@ async function handlePush(
   }
 }
 
-/** Handle installation lifecycle events */
+/**
+ * Handle installation lifecycle events
+ * appRowId = GitHub App ที่ส่ง webhook นี้มา (จาก URL path) — ผูก installation กับ app
+ */
 async function handleInstallation(
   db: Database,
   payload: InstallationEventPayload,
-  github: GitHubService | null,
+  registry: GitHubAppRegistry,
+  appRowId: string,
 ): Promise<void> {
   const { action, installation } = payload;
   const { id: installationId } = installation;
@@ -342,7 +359,7 @@ async function handleInstallation(
         row.id,
       );
     }
-    if (github) github.invalidateToken(installationId);
+    registry.invalidateToken(installationId);
     log.info("github installation deleted", { installationId });
   } else if (action === "suspend") {
     if (row) {
@@ -354,7 +371,7 @@ async function handleInstallation(
         row.id,
       );
     }
-    if (github) github.invalidateToken(installationId);
+    registry.invalidateToken(installationId);
     log.info("github installation suspended", { installationId });
   } else if (action === "unsuspend") {
     if (row) {
@@ -364,12 +381,22 @@ async function handleInstallation(
     }
     log.info("github installation unsuspended", { installationId });
   } else if (action === "created" && !row) {
-    // Installation ใหม่ผ่าน webhook (นอกจาก callback flow)
+    // Installation ใหม่ผ่าน webhook (นอกจาก setup callback flow)
     const id = ulid();
     db.query(
-      "INSERT INTO github_installations (id, installation_id, account_login, account_type, account_avatar_url, status, created_at, updated_at) VALUES (?, ?, ?, ?, '', 'active', ?, ?)",
-    ).run(id, installationId, installation.account.login, installation.account.type, now, now);
-    log.info("github installation created via webhook", { installationId });
+      `INSERT INTO github_installations
+        (id, installation_id, account_login, account_type, account_avatar_url, status, github_app_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, '', 'active', ?, ?, ?)`,
+    ).run(
+      id,
+      installationId,
+      installation.account.login,
+      installation.account.type,
+      appRowId,
+      now,
+      now,
+    );
+    log.info("github installation created via webhook", { installationId, appRowId });
   }
 }
 

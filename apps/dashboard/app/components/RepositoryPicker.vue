@@ -1,13 +1,11 @@
 <script setup lang="ts">
 /**
- * Repository picker — เลือก repository จาก GitHub installation
+ * Source picker — เลือก GitHub App → repository → branch
  *
- * States:
- * - ยังไม่มี installation: แสดง GitHubConnect
- * - loading: กำลังดึง repos
- * - empty: ไม่มี repo ที่เข้าถึงได้
- * - error: GitHub API error
- * - success: แสดงรายการ repos พร้อม search + pagination
+ * Steps:
+ * 1. app: เลือก GitHub App และ account ที่ติดตั้ง (ข้ามอัตโนมัติถ้ามีตัวเลือกเดียว)
+ * 2. repo: เลือก repository (search + pagination)
+ * 3. branch: เลือก branch (search)
  */
 const api = useApi();
 
@@ -18,6 +16,8 @@ export interface PickerInstallation {
   accountType: "User" | "Organization";
   accountAvatarUrl: string;
   status: "active" | "suspended" | "deleted";
+  appId: string | null;
+  appName: string | null;
 }
 
 export interface PickedRepo {
@@ -35,7 +35,49 @@ const emit = defineEmits<{
   pick: [value: PickedRepo];
 }>();
 
-const selectedInstallation = ref<PickerInstallation | null>(props.installations[0] ?? null);
+/** จัดกลุ่ม installations ตาม GitHub App */
+const appGroups = computed(() => {
+  const groups = new Map<string, { appId: string; appName: string; items: PickerInstallation[] }>();
+  for (const inst of props.installations) {
+    const key = inst.appId ?? "__unlinked__";
+    const existing = groups.get(key);
+    if (existing) {
+      existing.items.push(inst);
+    } else {
+      groups.set(key, {
+        appId: key,
+        appName: inst.appName ?? "GitHub App (ไม่ระบุ)",
+        items: [inst],
+      });
+    }
+  }
+  return Array.from(groups.values());
+});
+
+// ถ้ามีตัวเลือกเดียวให้เลือกอัตโนมัติ — ผู้ใช้ไม่ต้องคลิกเปล่า
+const selectedInstallation = ref<PickerInstallation | null>(
+  props.installations.length === 1 ? (props.installations[0] ?? null) : null,
+);
+
+const step = computed<"app" | "repo" | "branch">(() => {
+  if (!selectedInstallation.value) return "app";
+  if (!selectedRepo.value) return "repo";
+  return "branch";
+});
+
+function selectInstallation(inst: PickerInstallation) {
+  selectedInstallation.value = inst;
+  page.value = 1;
+  searchQuery.value = "";
+}
+
+function backToApps() {
+  selectedInstallation.value = null;
+  selectedRepo.value = null;
+  selectedBranch.value = null;
+}
+
+// === Step 2: Repository ===
 const searchQuery = ref("");
 const page = ref(1);
 const perPage = 30;
@@ -73,13 +115,6 @@ const totalPages = computed(() => Math.ceil(totalCount.value / perPage));
 const hasNext = computed(() => page.value < totalPages.value);
 const hasPrev = computed(() => page.value > 1);
 
-function selectInstallation(install: PickerInstallation) {
-  selectedInstallation.value = install;
-  page.value = 1;
-  searchQuery.value = "";
-}
-
-// Selected repo (step 1)
 const selectedRepo = ref<(typeof filteredRepos.value)[number] | null>(null);
 
 function pickRepo(repo: (typeof filteredRepos.value)[number]) {
@@ -88,7 +123,7 @@ function pickRepo(repo: (typeof filteredRepos.value)[number]) {
   searchBranch.value = "";
 }
 
-// Branch picker (step 2)
+// === Step 3: Branch ===
 const selectedBranch = ref<string | null>(null);
 const searchBranch = ref("");
 
@@ -132,29 +167,77 @@ function confirmPick(branch: string) {
 
 <template>
   <div class="repo-picker">
-    <!-- Installation selector (ถ้ามีหลาย installation) -->
-    <div v-if="installations.length > 1" class="install-selector">
+    <!-- Breadcrumb -->
+    <div class="breadcrumb">
       <button
-        v-for="install in installations"
-        :key="install.id"
-        :class="{ active: selectedInstallation?.id === install.id }"
-        class="install-btn"
-        @click="selectInstallation(install)"
+        class="crumb"
+        :class="{ active: step === 'app' }"
+        :disabled="step === 'app'"
+        @click="backToApps"
       >
-        {{ install.accountLogin }}
+        1. App
       </button>
+      <span class="sep">›</span>
+      <button
+        class="crumb"
+        :class="{ active: step === 'repo' }"
+        :disabled="step !== 'branch'"
+        @click="selectedRepo = null"
+      >
+        2. Repository
+      </button>
+      <span class="sep">›</span>
+      <span class="crumb" :class="{ active: step === 'branch' }">3. Branch</span>
     </div>
 
-    <!-- Revoked installation warning -->
-    <p
-      v-if="selectedInstallation?.status === 'suspended'"
-      class="warn-text"
-    >
-      ⚠️ GitHub installation นี้ถูก suspend — unsuspend ผ่าน GitHub App settings ก่อน
-    </p>
+    <!-- Step 1: เลือก App + account -->
+    <template v-if="step === 'app'">
+      <p v-if="appGroups.length === 0" class="muted">
+        ยังไม่มี GitHub App ที่ติดตั้ง — สร้างและติดตั้งที่หน้า settings ก่อน
+      </p>
 
-    <!-- Step 1: Repository list -->
-    <template v-if="!selectedRepo">
+      <div v-for="group in appGroups" :key="group.appId" class="app-group">
+        <div class="app-group-head">
+          <strong>{{ group.appName }}</strong>
+          <span class="muted small">{{ group.items.length }} account</span>
+        </div>
+        <ul class="account-list">
+          <li
+            v-for="inst in group.items"
+            :key="inst.id"
+            class="account-item"
+            :class="{ suspended: inst.status === 'suspended' }"
+            @click="inst.status === 'active' && selectInstallation(inst)"
+          >
+            <img
+              v-if="inst.accountAvatarUrl"
+              :src="inst.accountAvatarUrl"
+              :alt="inst.accountLogin"
+              class="avatar"
+              width="22"
+              height="22"
+            />
+            <span class="account-name">{{ inst.accountLogin }}</span>
+            <span class="muted small">{{ inst.accountType }}</span>
+            <span v-if="inst.status === 'suspended'" class="badge warn">Suspended</span>
+          </li>
+        </ul>
+      </div>
+    </template>
+
+    <!-- Step 2: Repository -->
+    <template v-else-if="step === 'repo'">
+      <div class="selected-context">
+        <button class="back-btn secondary small" @click="backToApps">← เปลี่ยน app</button>
+        <span class="muted small">
+          {{ selectedInstallation?.appName }} / {{ selectedInstallation?.accountLogin }}
+        </span>
+      </div>
+
+      <p v-if="selectedInstallation?.status === 'suspended'" class="warn-text">
+        ⚠️ GitHub installation นี้ถูก suspend — unsuspend ผ่าน GitHub App settings ก่อน
+      </p>
+
       <div class="search-bar">
         <input
           v-model="searchQuery"
@@ -201,12 +284,14 @@ function confirmPick(branch: string) {
       <p v-else class="muted">ไม่มี repository ที่เข้าถึงได้ — ตรวจสอบ GitHub App permissions</p>
     </template>
 
-    <!-- Step 2: Branch selection -->
+    <!-- Step 3: Branch -->
     <template v-else>
-      <div class="repo-selected">
-        <button class="back-btn secondary small" @click="selectedRepo = null">← เปลี่ยน repository</button>
-        <strong>{{ selectedRepo.fullName }}</strong>
-        <span v-if="selectedRepo.private" class="badge private">Private</span>
+      <div class="selected-context">
+        <button class="back-btn secondary small" @click="selectedRepo = null">
+          ← เปลี่ยน repository
+        </button>
+        <strong>{{ selectedRepo?.fullName }}</strong>
+        <span v-if="selectedRepo?.private" class="badge private">Private</span>
       </div>
 
       <div class="search-bar">
@@ -236,7 +321,7 @@ function confirmPick(branch: string) {
             <span class="branch-name">{{ branch.name }}</span>
             <span v-if="branch.protected" class="badge protected">Protected</span>
             <span
-              v-if="branch.name === selectedRepo.defaultBranch"
+              v-if="branch.name === selectedRepo?.defaultBranch"
               class="badge default"
             >Default</span>
           </li>
@@ -264,19 +349,81 @@ function confirmPick(branch: string) {
   flex-direction: column;
   gap: 0.75rem;
 }
-.install-selector {
+.breadcrumb {
   display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8125rem;
+}
+.crumb {
+  background: none;
+  border: none;
+  padding: 0.15rem 0.35rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+.crumb:disabled {
+  cursor: default;
+}
+.crumb.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+.sep {
+  color: var(--muted);
+}
+.app-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.65rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.app-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+.account-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.account-item {
+  display: flex;
+  align-items: center;
   gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.account-item:hover {
+  background: var(--surface-alt, color-mix(in srgb, var(--surface) 80%, var(--accent)));
+}
+.account-item.suspended {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.account-name {
+  font-weight: 500;
+}
+.avatar {
+  border-radius: 50%;
+  object-fit: cover;
+}
+.selected-context {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   flex-wrap: wrap;
 }
-.install-btn {
-  font-size: 0.875rem;
-  padding: 0.3rem 0.75rem;
-}
-.install-btn.active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
+.back-btn {
+  font-size: 0.8125rem;
 }
 .search-bar {
   display: flex;
@@ -354,20 +501,15 @@ function confirmPick(branch: string) {
   background: color-mix(in srgb, var(--ok) 15%, transparent);
   color: var(--ok);
 }
+.badge.warn {
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+  color: var(--warn);
+}
 .pagination {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.75rem;
-}
-.repo-selected {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-.back-btn {
-  font-size: 0.8125rem;
 }
 .branch-actions {
   display: flex;
@@ -386,5 +528,9 @@ function confirmPick(branch: string) {
 .small {
   font-size: 0.8125rem;
   padding: 0.3rem 0.75rem;
+}
+.muted.small,
+span.small {
+  padding: 0;
 }
 </style>

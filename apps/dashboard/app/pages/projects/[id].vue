@@ -278,9 +278,7 @@ const installationStatus = computed(() => {
               </template>
               <template v-else-if="!gitHubStatus?.configured">
                 <div class="not-configured-msg">
-                  <p class="muted">
-                    GitHub App ยังไม่ได้ configure — ติดต่อผู้ดูแลระบบเพื่อตั้งค่า ZIXPLOY_GITHUB_* environment variables
-                  </p>
+                  <GitHubConnect />
                 </div>
               </template>
 

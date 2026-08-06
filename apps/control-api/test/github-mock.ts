@@ -1,12 +1,13 @@
 /**
- * Mock GitHubService สำหรับเทสต์ — ไม่เรียก GitHub API จริง
+ * Mock GitHubService + GitHubAppRegistry สำหรับเทสต์ — ไม่เรียก GitHub API จริง
  *
  * ออกแบบให้ configure ได้ต่อ test case:
- *   const mock = createMockGitHub({ repos: [...], failRepo: "owner/bad" })
- *   const app = buildApp(db, { github: mock, webhookSecret: "test-secret" })
+ *   const registry = createMockRegistry({ repos: [...], forbiddenRepos: ["owner/bad"] })
+ *   const app = buildApp(db, { registry })
  */
 
 import { AppError } from "@zixploy/shared";
+import type { GitHubAppRegistry, GitHubAppSummary } from "../src/github/registry";
 import type {
   Branch,
   GitHubService,
@@ -101,7 +102,7 @@ export function createMockGitHub(options: MockGitHubOptions = {}): GitHubService
     },
 
     async validateBranch(
-      installationId: number,
+      _installationId: number,
       repoFullName: string,
       branchName: string,
     ): Promise<Branch> {
@@ -125,6 +126,102 @@ export function createMockGitHub(options: MockGitHubOptions = {}): GitHubService
 
     invalidateToken(installationId: number): void {
       invalidatedTokens.push(installationId);
+    },
+  };
+}
+
+export interface MockRegistryOptions extends MockGitHubOptions {
+  /** apps ที่ registry คืน — default: 1 app */
+  apps?: GitHubAppSummary[];
+  /** webhook secret ต่อ app row ID — default: ทุก app ใช้ defaultWebhookSecret */
+  webhookSecrets?: Record<string, string>;
+  defaultWebhookSecret?: string;
+  /** master key configure แล้วหรือยัง */
+  ready?: boolean;
+  /** getService/getServiceForInstallation คืน null (จำลอง app ไม่พร้อม) */
+  serviceUnavailable?: boolean;
+  /** getWebhookSecret โยน error (จำลอง decrypt fail) */
+  webhookSecretError?: boolean;
+}
+
+export const MOCK_APP_ID = "01JBQZX0000000000000000000";
+
+export function createMockRegistry(options: MockRegistryOptions = {}): GitHubAppRegistry & {
+  service: ReturnType<typeof createMockGitHub>;
+  invalidatedTokens: number[];
+} {
+  const service = createMockGitHub(options);
+  const defaultApp: GitHubAppSummary = {
+    id: MOCK_APP_ID,
+    appId: 123456,
+    slug: "test-app",
+    name: "Test App",
+    htmlUrl: "https://github.com/apps/test-app",
+    ownerLogin: "test-org",
+    createdAt: 1700000000000,
+  };
+  const apps = options.apps ?? [defaultApp];
+  const ready = options.ready ?? true;
+
+  return {
+    service,
+    invalidatedTokens: service.invalidatedTokens,
+
+    isReady: () => ready,
+    listApps: () => apps,
+    getApp: (id: string) => apps.find((a) => a.id === id) ?? null,
+
+    createManifest(name: string, organization?: string) {
+      if (!ready) {
+        throw new AppError("GITHUB_UNAVAILABLE", "Master key ยังไม่ได้ configure");
+      }
+      const action = organization
+        ? `https://github.com/organizations/${organization}/settings/apps/new?state=mock-state`
+        : "https://github.com/settings/apps/new?state=mock-state";
+      return { action, manifest: JSON.stringify({ name }), state: "mock-state" };
+    },
+
+    async completeManifest(_code: string, state: string): Promise<GitHubAppSummary> {
+      if (state !== "mock-state") {
+        throw new AppError("VALIDATION_ERROR", "manifest state ไม่ถูกต้องหรือหมดอายุ");
+      }
+      return apps[0] ?? defaultApp;
+    },
+
+    deleteApp(id: string): void {
+      if (!apps.some((a) => a.id === id)) {
+        throw new AppError("INSTALLATION_NOT_FOUND", "ไม่พบ GitHub App นี้");
+      }
+    },
+
+    getInstallUrl(id: string) {
+      const app = apps.find((a) => a.id === id);
+      return app ? `https://github.com/apps/${app.slug}/installations/new` : null;
+    },
+
+    async getService(appRowId: string): Promise<GitHubService | null> {
+      if (options.serviceUnavailable) return null;
+      return apps.some((a) => a.id === appRowId) ? service : null;
+    },
+
+    async getServiceForInstallation(_installationId: number): Promise<GitHubService | null> {
+      if (options.serviceUnavailable) return null;
+      return service;
+    },
+
+    async getWebhookSecret(appRowId: string): Promise<string | null> {
+      if (options.webhookSecretError) {
+        throw new Error("decrypt ไม่สำเร็จ (mock)");
+      }
+      if (options.webhookSecrets) {
+        return options.webhookSecrets[appRowId] ?? null;
+      }
+      if (!apps.some((a) => a.id === appRowId)) return null;
+      return options.defaultWebhookSecret ?? null;
+    },
+
+    invalidateToken(installationId: number): void {
+      service.invalidateToken(installationId);
     },
   };
 }

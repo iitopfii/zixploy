@@ -4,9 +4,23 @@ import { ulid } from "@zixploy/shared";
 import { buildApp } from "../src/app";
 import { hashPassword } from "../src/auth/password";
 import { constantTimeEqual, parsePushBranch, verifyWebhookSignature } from "../src/github/webhook";
-import { createMockGitHub, signWebhook } from "./github-mock";
+import { createMockRegistry, MOCK_APP_ID, signWebhook } from "./github-mock";
 
 const WEBHOOK_SECRET = "test-webhook-secret-at-least-20-chars";
+const WEBHOOK_PATH = `/api/v1/github/webhooks/${MOCK_APP_ID}`;
+
+/** สร้าง github_apps row ให้ FK ของ github_installations.github_app_id ผ่าน */
+function insertApp(db: ReturnType<typeof openDatabase>, id = MOCK_APP_ID) {
+  const now = Date.now();
+  db.query(
+    `INSERT INTO github_apps
+      (id, app_id, slug, name, html_url, owner_login, client_id,
+       pem_ciphertext, webhook_secret_ciphertext, client_secret_ciphertext, created_at, updated_at)
+     VALUES (?, 123456, 'test-app', 'Test App', 'https://github.com/apps/test-app', 'test-org', 'Iv1.test',
+             ?, ?, ?, ?, ?)`,
+  ).run(id, new Uint8Array([1]), new Uint8Array([1]), new Uint8Array([1]), now, now);
+  return id;
+}
 
 async function setup() {
   const db = openDatabase({ path: ":memory:" });
@@ -18,9 +32,11 @@ async function setup() {
     "INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
   ).run(userId, "admin", await hashPassword("correct horse battery staple"), now, now);
 
-  const mock = createMockGitHub();
-  const app = buildApp(db, { github: mock, webhookSecret: WEBHOOK_SECRET });
-  return { db, app, userId, mock };
+  insertApp(db);
+
+  const registry = createMockRegistry({ defaultWebhookSecret: WEBHOOK_SECRET });
+  const app = buildApp(db, { registry });
+  return { db, app, userId, registry, mock: registry.service };
 }
 
 // Helper: สร้าง installation ใน DB
@@ -28,8 +44,19 @@ function insertInstallation(db: ReturnType<typeof openDatabase>, installationId:
   const id = ulid();
   const now = Date.now();
   db.query(
-    "INSERT INTO github_installations (id, installation_id, account_login, account_type, account_avatar_url, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)",
-  ).run(id, installationId, "test-org", "Organization", "https://example.com/avatar.png", now, now);
+    `INSERT INTO github_installations
+      (id, installation_id, account_login, account_type, account_avatar_url, status, github_app_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+  ).run(
+    id,
+    installationId,
+    "test-org",
+    "Organization",
+    "https://example.com/avatar.png",
+    MOCK_APP_ID,
+    now,
+    now,
+  );
   return id;
 }
 
@@ -88,7 +115,7 @@ async function sendWebhook(
   return {
     deliveryId,
     response: await app.handle(
-      new Request("http://localhost/api/v1/github/webhooks", {
+      new Request(`http://localhost${WEBHOOK_PATH}`, {
         method: "POST",
         headers,
         body,
@@ -581,7 +608,7 @@ describe("webhook processing state machine — atomic idempotency", () => {
     const sig = await signWebhook(badBody, WEBHOOK_SECRET);
 
     const response = await app.handle(
-      new Request("http://localhost/api/v1/github/webhooks", {
+      new Request(`http://localhost${WEBHOOK_PATH}`, {
         method: "POST",
         headers: {
           "content-type": "text/plain",

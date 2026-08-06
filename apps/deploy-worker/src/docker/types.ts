@@ -27,6 +27,10 @@ export interface ContainerInspect {
   };
   /** top-level field ใน `docker inspect` — ไม่ได้อยู่ใต้ State (ตรวจสอบจริงกับ Docker Desktop) */
   RestartCount: number;
+  NetworkSettings: {
+    /** key = network name — ตรวจสอบจริงกับ Docker Desktop */
+    Networks: Record<string, { IPAddress: string }>;
+  };
 }
 
 export interface ImageInspect {

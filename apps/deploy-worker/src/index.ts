@@ -1,13 +1,11 @@
 /**
  * Deploy Worker — process แยกจาก Control API (ADR-0002)
- * ผู้เดียวในระบบที่จะได้สิทธิ์ Docker Engine (phase 3 เป็นต้นไป)
+ * ผู้เดียวในระบบที่จะได้สิทธิ์ Docker Engine
  *
  * Phase 0-1: entrypoint + heartbeat + graceful shutdown
- * Phase 3 M2: job claim loop (lease/transaction) เพิ่มเข้ามาแล้ว — processJob ยังเป็น stub
- * (M6 จะเสียบ pipeline dispatcher จริงเข้ามาแทน)
+ * Phase 3 M2: job claim loop (lease/transaction)
+ * Phase 3 M6: pipeline dispatcher จริง (clone→build→start→health→activate→rollback/restart/stop)
  */
-
-import type { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import {
   assertMigrated,
@@ -17,16 +15,11 @@ import {
   openDatabase,
 } from "@zixploy/db";
 import { createLogger, DEPLOY_QUEUE, type LogLevel, ulid } from "@zixploy/shared";
+import { DockerCliClient } from "./docker/cli-client";
+import { loadMasterKeys } from "./github/master-key";
 import { heartbeatLoop } from "./heartbeat";
-import {
-  type ClaimedJob,
-  claimNextJob,
-  completeJob,
-  failJob,
-  type JobOutcome,
-  LeaseLostError,
-  withLeaseRenewal,
-} from "./queue";
+import { createDispatcher } from "./pipeline/dispatch";
+import { claimNextJob, completeJob, failJob, LeaseLostError, withLeaseRenewal } from "./queue";
 
 const workerId = `worker-${ulid()}`;
 const log = createLogger({
@@ -70,6 +63,29 @@ try {
   process.exit(1);
 }
 
+/**
+ * Master key สำหรับ decrypt GitHub App PEM (ดู github/master-key.ts) — worker ต้อง mint
+ * installation token เอง ไม่ผ่าน control-api (ADR-0002) ไม่ตั้งค่า → build job จะ fail ตอน mint token
+ * เท่านั้น (queue mechanics/restart/stop ยังทำงานได้ตามปกติ)
+ */
+const masterKeys = await loadMasterKeys();
+if (masterKeys) {
+  log.info("master key loaded", { workerId, activeKeyId: masterKeys.active });
+} else {
+  log.info("master key not configured — build job ที่ต้อง clone repo จะ fail ตอน mint token", {
+    workerId,
+  });
+}
+
+const docker = new DockerCliClient();
+
+const processJob = createDispatcher({
+  db,
+  masterKeys,
+  docker,
+  onLog: (line) => log.debug("build output", { workerId, line }),
+});
+
 const controller = new AbortController();
 
 function shutdown(reason: string) {
@@ -83,24 +99,6 @@ function shutdown(reason: string) {
 
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
-
-/**
- * ประมวลผลงานหนึ่งชิ้น — M2 เป็น stub (mark done ทันที) เพื่อทดสอบ queue mechanics
- * โดยไม่ต้องมี Docker/git pipeline จริง M6 จะแทนที่ด้วย pipeline dispatcher
- */
-async function processJob(
-  _db: Database,
-  job: ClaimedJob,
-  _signal: AbortSignal,
-): Promise<JobOutcome> {
-  log.info("processing job (stub — M6 จะเพิ่ม pipeline จริง)", {
-    workerId,
-    jobId: job.id,
-    type: job.type,
-    projectId: job.projectId,
-  });
-  return { outcome: "done" };
-}
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {

@@ -1,0 +1,251 @@
+# Zixploy — Production Control Plane
+# Phase 8 M6: docs/phase-08-production.md
+#
+# ใช้งาน:
+#   cp deploy/control-plane/.env.production.example deploy/control-plane/.env
+#   # แก้ไข .env ให้ครบก่อน start
+#   docker compose -f deploy/control-plane/docker-compose.prod.yml --env-file deploy/control-plane/.env up -d
+#
+# ข้อกำหนดก่อน deploy:
+#   - DNS ชี้มาที่ server แล้ว (A record สำหรับ ZIXPLOY_DOMAIN และ domain ใน project)
+#   - Firewall เปิดเฉพาะ 22, 80, 443 (Docker API ไม่ expose)
+#   - สร้าง master key ไว้แล้ว: openssl rand -base64 32 > /etc/zixploy/master.key && chmod 600 /etc/zixploy/master.key
+#   - ตรวจสอบ release-checklist.md ก่อน go-live
+
+services:
+
+  # -------------------------------------------------------------------------
+  # Traefik — reverse proxy + TLS termination + ACME (Let's Encrypt)
+  # -------------------------------------------------------------------------
+  traefik:
+    image: traefik:v3.6
+    container_name: zixploy-traefik
+    restart: unless-stopped
+    command:
+      # Docker provider — อ่าน labels เพื่อ route
+      - --providers.docker=true
+      - --providers.docker.exposedByDefault=false
+      - --providers.docker.network=zixploy-proxy
+      # Entrypoints
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.web.http.redirections.entrypoint.permanent=true
+      - --entrypoints.websecure.address=:443
+      # ACME — Let's Encrypt production
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json
+      - --certificatesresolvers.letsencrypt.acme.tlschallenge=true
+      # ปิด dashboard ใน production — เข้าถึงผ่าน exec แทน
+      - --api=false
+      - --log.level=WARN
+      - --accesslog=true
+      - --accesslog.filepath=/var/log/traefik/access.log
+      - --accesslog.format=json
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-acme:/acme
+      - traefik-logs:/var/log/traefik
+    networks:
+      - zixploy-proxy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.5"
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # -------------------------------------------------------------------------
+  # Control API — Elysia HTTP server + auth + project/deployment management
+  # -------------------------------------------------------------------------
+  control-api:
+    image: zixploy/control-api:${ZIXPLOY_VERSION:-latest}
+    container_name: zixploy-control-api
+    restart: unless-stopped
+    environment:
+      ZIXPLOY_DB_PATH: /var/lib/zixploy/control.db
+      ZIXPLOY_API_PORT: "3001"
+      ZIXPLOY_LOG_LEVEL: info
+      ZIXPLOY_BASE_URL: https://${ZIXPLOY_DOMAIN}
+      ZIXPLOY_MASTER_KEY_FILE: /run/secrets/master_key
+      ZIXPLOY_ACME_FILE: /acme/acme.json
+      ZIXPLOY_BACKUP_DB_DIR: /var/backups/zixploy/db
+      ZIXPLOY_BACKUP_KEYS_DIR: /var/backups/zixploy/keys
+      ZIXPLOY_BACKUP_ACME_DIR: /var/backups/zixploy/acme
+      ZIXPLOY_BACKUP_RETENTION: "14"
+    volumes:
+      - zixploy-data:/var/lib/zixploy
+      - zixploy-backups:/var/backups/zixploy
+      # ACME storage shared กับ Traefik (read-only จาก API)
+      - traefik-acme:/acme:ro
+      # Master key (ไม่ใช้ Docker secrets เพื่อลด complexity — ใช้ bind mount จาก /etc)
+      - /etc/zixploy/master.key:/run/secrets/master_key:ro
+    networks:
+      - zixploy-internal
+      - zixploy-proxy        # สำหรับรับ request จาก Traefik
+    expose:
+      - "3001"
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.control-api.rule: "Host(`${ZIXPLOY_DOMAIN}`) && PathPrefix(`/api/`)"
+      traefik.http.routers.control-api.entrypoints: websecure
+      traefik.http.routers.control-api.tls.certresolver: letsencrypt
+      traefik.http.services.control-api.loadbalancer.server.port: "3001"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/v1/system/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # -------------------------------------------------------------------------
+  # Deploy Worker — Bun process ที่มีสิทธิ์เข้าถึง Docker socket เท่านั้น
+  # control-api ไม่มีสิทธิ์เข้าถึง Docker socket (ADR-0002, architecture.test.ts)
+  # -------------------------------------------------------------------------
+  deploy-worker:
+    image: zixploy/deploy-worker:${ZIXPLOY_VERSION:-latest}
+    container_name: zixploy-deploy-worker
+    restart: unless-stopped
+    environment:
+      ZIXPLOY_DB_PATH: /var/lib/zixploy/control.db
+      ZIXPLOY_LOG_LEVEL: info
+      ZIXPLOY_MASTER_KEY_FILE: /run/secrets/master_key
+    volumes:
+      - zixploy-data:/var/lib/zixploy
+      # Docker socket — worker เท่านั้นที่เข้าถึง
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Master key
+      - /etc/zixploy/master.key:/run/secrets/master_key:ro
+      # Workspace สำหรับ git clone + build (ขนาดใหญ่ — ดู workspace.ts limit)
+      - zixploy-workspaces:/var/lib/zixploy/workspaces
+    environment:
+      ZIXPLOY_DB_PATH: /var/lib/zixploy/control.db
+      ZIXPLOY_WORKSPACES_DIR: /var/lib/zixploy/workspaces
+      ZIXPLOY_LOG_LEVEL: info
+      ZIXPLOY_MASTER_KEY_FILE: /run/secrets/master_key
+    networks:
+      - zixploy-internal
+      # Worker ต้องการ zixploy-proxy เพื่อ connect container ที่ build เสร็จเข้า network
+      - zixploy-proxy
+    deploy:
+      resources:
+        limits:
+          # Worker รัน build — ให้ memory/cpu มากกว่า control-api
+          memory: 2G
+          cpus: "2.0"
+    # Worker ไม่ expose port ใด ๆ
+    healthcheck:
+      test: ["CMD", "test", "-f", "/var/lib/zixploy/control.db"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # -------------------------------------------------------------------------
+  # Dashboard — Nuxt SSR / SPA served ผ่าน Traefik
+  # -------------------------------------------------------------------------
+  dashboard:
+    image: zixploy/dashboard:${ZIXPLOY_VERSION:-latest}
+    container_name: zixploy-dashboard
+    restart: unless-stopped
+    environment:
+      # Nuxt ส่ง API request ไปยัง control-api ผ่าน internal network
+      NUXT_PUBLIC_API_BASE: https://${ZIXPLOY_DOMAIN}
+    networks:
+      - zixploy-internal
+      - zixploy-proxy
+    expose:
+      - "3000"
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.dashboard.rule: "Host(`${ZIXPLOY_DOMAIN}`)"
+      traefik.http.routers.dashboard.entrypoints: websecure
+      traefik.http.routers.dashboard.tls.certresolver: letsencrypt
+      traefik.http.services.dashboard.loadbalancer.server.port: "3000"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ---------------------------------------------------------------------------
+# Networks
+# ---------------------------------------------------------------------------
+networks:
+  zixploy-proxy:
+    # Shared network กับ Traefik — container ที่ต้องรับ traffic จากภายนอก join network นี้
+    name: zixploy-proxy
+    driver: bridge
+
+  zixploy-internal:
+    # Internal communication — ไม่มี service ภายนอก join
+    name: zixploy-internal
+    driver: bridge
+    internal: true
+
+# ---------------------------------------------------------------------------
+# Volumes
+# ---------------------------------------------------------------------------
+volumes:
+  zixploy-data:
+    # SQLite database + worker state
+    name: zixploy-data
+
+  zixploy-workspaces:
+    # Git clone + build workspace (ephemeral แต่ต้องการ disk ขนาดใหญ่)
+    name: zixploy-workspaces
+
+  zixploy-backups:
+    # Backup snapshots (DB + keys + ACME) — แนะนำ mount ไปยัง external storage จริง
+    # driver: local
+    # driver_opts:
+    #   type: nfs
+    #   o: addr=nas.example.com,rw
+    #   device: ":/backups/zixploy"
+    name: zixploy-backups
+
+  traefik-acme:
+    # Let's Encrypt certificate storage — shared กับ control-api (read-only) สำหรับ backup
+    name: zixploy-traefik-acme
+
+  traefik-logs:
+    name: zixploy-traefik-logs

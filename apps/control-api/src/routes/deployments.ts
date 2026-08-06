@@ -16,6 +16,7 @@
 import type { Database } from "bun:sqlite";
 import { API_PREFIX, AppError, type DeploymentStatus, isUlid } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
+import { getClientIp, recordAuditEvent } from "../audit/log";
 import {
   cancelDeployment,
   type DeployJobPayload,
@@ -227,7 +228,8 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
 
     .post(
       "/:id/deploy",
-      async ({ params, set }) => {
+      async ({ params, set, request, requireSession }) => {
+        const session = requireSession();
         const project = loadProjectForDeploy(db, params.id);
         assertProjectHasSource(project);
         const { installationId } = loadInstallationForProject(db, project.installation_id);
@@ -259,6 +261,14 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
           commitAuthor: null,
           payload,
         });
+        recordAuditEvent(db, {
+          actorUserId: session.userId,
+          action: "deploy_triggered",
+          resourceType: "deployment",
+          resourceId: deploymentId,
+          metadata: { projectId: params.id, trigger: "manual", commitSha: branch.commitSha },
+          ip: getClientIp(request),
+        });
 
         set.status = 201;
         return toDeployment(loadDeployment(db, deploymentId));
@@ -268,7 +278,8 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
 
     .post(
       "/:id/redeploy",
-      ({ params, set }) => {
+      ({ params, set, request, requireSession }) => {
+        const session = requireSession();
         const project = loadProjectForDeploy(db, params.id);
         assertProjectHasSource(project);
         const { installationId } = loadInstallationForProject(db, project.installation_id);
@@ -302,6 +313,14 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
           commitAuthor: last.commit_author,
           payload,
         });
+        recordAuditEvent(db, {
+          actorUserId: session.userId,
+          action: "deploy_triggered",
+          resourceType: "deployment",
+          resourceId: deploymentId,
+          metadata: { projectId: params.id, trigger: "redeploy", commitSha: last.commit_sha },
+          ip: getClientIp(request),
+        });
 
         set.status = 201;
         return toDeployment(loadDeployment(db, deploymentId));
@@ -311,9 +330,17 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
 
     .post(
       "/:id/restart",
-      ({ params }) => {
+      ({ params, request, requireSession }) => {
+        const session = requireSession();
         loadProjectForDeploy(db, params.id);
         const { jobId } = enqueueOperation(db, params.id, "restart");
+        recordAuditEvent(db, {
+          actorUserId: session.userId,
+          action: "restart_triggered",
+          resourceType: "project",
+          resourceId: params.id,
+          ip: getClientIp(request),
+        });
         return { jobId };
       },
       { response: t.Object({ jobId: t.String() }) },
@@ -321,9 +348,17 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
 
     .post(
       "/:id/stop",
-      ({ params }) => {
+      ({ params, request, requireSession }) => {
+        const session = requireSession();
         loadProjectForDeploy(db, params.id);
         const { jobId } = enqueueOperation(db, params.id, "stop");
+        recordAuditEvent(db, {
+          actorUserId: session.userId,
+          action: "stop_triggered",
+          resourceType: "project",
+          resourceId: params.id,
+          ip: getClientIp(request),
+        });
         return { jobId };
       },
       { response: t.Object({ jobId: t.String() }) },
@@ -331,7 +366,8 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
 
     .post(
       "/:id/rollback",
-      ({ params, body, set }) => {
+      ({ params, body, set, request, requireSession }) => {
+        const session = requireSession();
         loadProjectForDeploy(db, params.id);
         const target = db
           .query<DeploymentRow, [string, string]>(
@@ -359,6 +395,14 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
           commitMessage: target.commit_message,
           commitAuthor: target.commit_author,
           payload,
+        });
+        recordAuditEvent(db, {
+          actorUserId: session.userId,
+          action: "rollback_triggered",
+          resourceType: "deployment",
+          resourceId: deploymentId,
+          metadata: { projectId: params.id, targetDeploymentId: target.id },
+          ip: getClientIp(request),
         });
 
         set.status = 201;
@@ -424,9 +468,17 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
 
     .post(
       "/:id/cancel",
-      ({ params }) => {
+      ({ params, request, requireSession }) => {
+        const session = requireSession();
         loadDeployment(db, params.id); // throws DEPLOYMENT_NOT_FOUND ถ้าไม่มี
         cancelDeployment(db, params.id);
+        recordAuditEvent(db, {
+          actorUserId: session.userId,
+          action: "deploy_cancelled",
+          resourceType: "deployment",
+          resourceId: params.id,
+          ip: getClientIp(request),
+        });
         return toDeployment(loadDeployment(db, params.id));
       },
       { response: deploymentSchema },

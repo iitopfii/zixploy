@@ -8,6 +8,7 @@ import { errorHandler } from "./plugins/error-handler";
 import { requestId } from "./plugins/request-id";
 import { requestLog } from "./plugins/request-log";
 import { securityHeaders } from "./plugins/security-headers";
+import { auditRoutes } from "./routes/audit";
 import { authRoutes } from "./routes/auth";
 import { deploymentRoutes } from "./routes/deployments";
 import { domainRoutes } from "./routes/domains";
@@ -63,7 +64,8 @@ export function buildApp(db: Database, options: AppOptions = {}) {
     .use(environmentRoutes(db, masterKeys))
     .use(domainRoutes(db))
     .use(logRoutes(db))
-    .use(volumeRoutes(db));
+    .use(volumeRoutes(db))
+    .use(auditRoutes(db));
 }
 
 export type App = ReturnType<typeof buildApp>;

@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { API_PREFIX, AppError } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
+import { getClientIp, recordAuditEvent } from "../audit/log";
 import { verifyPassword } from "../auth/password";
 import { clearFailedLogins, isLoginRateLimited, recordFailedLogin } from "../auth/rate-limit";
 import {
@@ -63,11 +64,24 @@ export function authRoutes(db: Database) {
         const ok = user ? await verifyPassword(body.password, user.password_hash) : false;
         if (!user || !ok) {
           recordFailedLogin(db, body.username, key);
+          recordAuditEvent(db, {
+            actorUsername: body.username,
+            action: "login_failed",
+            resourceType: "session",
+            ip: getClientIp(request),
+          });
           throw new AppError("INVALID_CREDENTIALS", "username หรือ password ไม่ถูกต้อง");
         }
 
         clearFailedLogins(db, key);
         const session = createSession(db, user.id);
+        recordAuditEvent(db, {
+          actorUserId: user.id,
+          actorUsername: user.username,
+          action: "login_succeeded",
+          resourceType: "session",
+          ip: getClientIp(request),
+        });
 
         cookie[SESSION_COOKIE]?.set({
           value: session.token,
@@ -94,10 +108,19 @@ export function authRoutes(db: Database) {
     )
     .post(
       "/logout",
-      ({ cookie, assertCsrf }) => {
+      ({ cookie, assertCsrf, request, session }) => {
         assertCsrf();
         const token = cookieValue(cookie[SESSION_COOKIE]);
         if (token) revokeSession(db, token);
+        if (session) {
+          recordAuditEvent(db, {
+            actorUserId: session.userId,
+            action: "logout",
+            resourceType: "session",
+            resourceId: session.sessionId,
+            ip: getClientIp(request),
+          });
+        }
         cookie[SESSION_COOKIE]?.remove();
         cookie[CSRF_COOKIE]?.remove();
         return { authenticated: false };

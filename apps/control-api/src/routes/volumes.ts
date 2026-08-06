@@ -19,6 +19,7 @@
 import type { Database } from "bun:sqlite";
 import { API_PREFIX, AppError, isUlid } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
+import { getClientIp, recordAuditEvent } from "../audit/log";
 import { authPlugin, requireAuthenticated } from "../plugins/auth";
 import {
   createVolume,
@@ -167,10 +168,19 @@ export function volumeRoutes(db: Database) {
       // ตั้ง lifecycle = 'deletion_pending'; Worker ทำ docker volume rm จริงใน reconcile loop
       .delete(
         `${API_PREFIX}/projects/:id/volumes/:volumeId`,
-        ({ params }) => {
+        ({ params, request, requireSession }) => {
+          const session = requireSession();
           requireProject(db, params.id);
           requireVolume(db, params.volumeId, params.id);
           markVolumeForDeletion(db, params.volumeId, params.id);
+          recordAuditEvent(db, {
+            actorUserId: session.userId,
+            action: "volume_delete_requested",
+            resourceType: "volume",
+            resourceId: params.volumeId,
+            metadata: { projectId: params.id },
+            ip: getClientIp(request),
+          });
           return { ok: true };
         },
         { response: t.Object({ ok: t.Boolean() }) },

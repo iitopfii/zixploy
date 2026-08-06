@@ -150,7 +150,7 @@
 
 - [x] M1: Untrusted build resource sandbox — `--resource memory/cpu-quota/cpu-period` + `--ulimit nproc` บน `docker buildx build` (BUILD_SANDBOX_LIMITS, buildkit.ts: buildBuildxArgs), workspace size limit หลัง clone (workspace.ts: assertWorkspaceSizeWithinLimit) — ดู threat-model.md section 3
 - [x] M2: General reconciliation loop (`apps/deploy-worker/src/reconciler.ts`) — active container หาย → `projects.degraded_at` (mark degraded, ต้อง redeploy), orphan container (label ครบแต่ไม่มี deployment ใน DB) → report-only log; deploying-without-lease recovery ครอบคลุมแล้วโดย `recoverStaleLeases()` ที่มีอยู่ก่อน (ทุกครั้งที่ jobLoop claim); domain readiness recheck และ installation-revoked handling ยังไม่ทำ (ต้องมี Traefik state adapter / GitHub installation webhook handler แยกต่างหาก)
-- [ ] M3: Audit log (login, config change, deploy, rollback, volume deletion)
+- [x] M3: Audit log (`apps/control-api/src/audit/log.ts`) — `audit_events` table (migration 0012), fail-open `recordAuditEvent()`, `GET /api/v1/audit-events` (keyset pagination); wired เข้า login/logout (สำเร็จ+ล้มเหลว), project update/archive, deploy/redeploy/restart/stop/rollback/cancel, volume delete
 - [ ] M4: Backup automation (encryption keys, GitHub App PEM/webhook secret, ACME storage)
 - [ ] M5: Web security (secure headers, CSRF, session rotation, login rate limit, origin/host validation)
 - [ ] M6: Production docker-compose, resource limits ทุก container, runbooks, release checklist sign-off

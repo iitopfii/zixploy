@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { API_PREFIX, AppError, isUlid, ulid } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
+import { getClientIp, recordAuditEvent } from "../audit/log";
 import { authPlugin, requireAuthenticated } from "../plugins/auth";
 
 interface ProjectRow {
@@ -147,7 +148,8 @@ export function projectRoutes(db: Database) {
     })
     .patch(
       "/:id",
-      ({ params, body }) => {
+      ({ params, body, request, requireSession }) => {
+        const session = requireSession();
         const existing = loadProject(db, params.id);
         if (existing.archived_at !== null) {
           throw new AppError("PROJECT_ARCHIVED", "project นี้ถูก archive แล้ว แก้ไขไม่ได้");
@@ -177,6 +179,14 @@ export function projectRoutes(db: Database) {
           set("updated_at", Date.now());
           values.push(params.id);
           db.query(`UPDATE projects SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+          recordAuditEvent(db, {
+            actorUserId: session.userId,
+            action: "project_updated",
+            resourceType: "project",
+            resourceId: params.id,
+            metadata: { fields: Object.keys(body) },
+            ip: getClientIp(request),
+          });
         }
 
         return toProject(loadProject(db, params.id));
@@ -185,7 +195,8 @@ export function projectRoutes(db: Database) {
     )
     .post(
       "/:id/archive",
-      ({ params }) => {
+      ({ params, request, requireSession }) => {
+        const session = requireSession();
         const existing = loadProject(db, params.id);
         // idempotent: archive ซ้ำไม่เปลี่ยนเวลาเดิม
         if (existing.archived_at === null) {
@@ -195,6 +206,13 @@ export function projectRoutes(db: Database) {
             now,
             params.id,
           );
+          recordAuditEvent(db, {
+            actorUserId: session.userId,
+            action: "project_archived",
+            resourceType: "project",
+            resourceId: params.id,
+            ip: getClientIp(request),
+          });
         }
         return toProject(loadProject(db, params.id));
       },

@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   AppError,
+  buildTraefikLabels,
   containerName,
   deploymentLabels,
   imageName,
@@ -31,6 +32,7 @@ import {
 import { findActiveContainerId, loadProjectConfig, setProjectStatus } from "../db/project-config";
 import type { BuildImageParams, BuildImageResult, BuildSecret } from "../docker/buildkit";
 import type { DockerCliClient } from "../docker/cli-client";
+import { loadProjectDomains } from "../domains/loader";
 import { injectEnvVars } from "../env/inject";
 import { buildRedactFn } from "../env/redaction";
 import type { CloneParams } from "../git/clone";
@@ -206,10 +208,19 @@ export async function runBuildOrRollbackPipeline(
     }
     await deps.docker.removeContainer(cName, { force: true });
     await deps.docker.ensureNetwork(PROXY_NETWORK);
+
+    // โหลด domain configs ที่ enabled → สร้าง Traefik labels
+    // labels merge เข้ากับ deploymentLabels — ไม่รับ raw label จากผู้ใช้ (threat-model.md)
+    const domainConfigs = loadProjectDomains(db, job.projectId);
+    const containerLabels = {
+      ...deploymentLabels(job.projectId, deploymentId),
+      ...buildTraefikLabels(domainConfigs, job.projectId),
+    };
+
     const { containerId } = await deps.docker.createContainer({
       name: cName,
       image: imageTag,
-      labels: deploymentLabels(job.projectId, deploymentId),
+      labels: containerLabels,
       ...(project.startCommand ? { cmd: [project.startCommand] } : {}),
       cpuLimit: project.cpuLimit,
       memoryLimitMb: project.memoryLimitMb,

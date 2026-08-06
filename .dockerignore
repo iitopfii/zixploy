@@ -1,0 +1,47 @@
+# Dependencies (rebuilt inside container)
+node_modules/
+**/node_modules/
+
+# Bun cache
+.bun/
+**/.bun/
+
+# Build output (rebuilt inside container)
+dist/
+.output/
+.nuxt/
+.nitro/
+**/.output/
+**/.nuxt/
+
+# Runtime data — never in image
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+data/
+.env
+.env.*
+
+# Secrets
+*.pem
+*.key
+secrets/
+backups/
+
+# Dev/test artifacts
+*.log
+coverage/
+.nyc_output/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Git
+.git/
+
+# Scratchpad
+apps/*/test/__fixtures__/tmp/

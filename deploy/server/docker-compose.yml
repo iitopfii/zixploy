@@ -1,0 +1,147 @@
+# Zixploy — Server Deployment (HTTP-only, no domain required)
+# ใช้กับ: docker compose -f deploy/server/docker-compose.yml up -d --build
+#
+# สถาปัตยกรรม (ไม่ใช้ Let's Encrypt เพราะยังไม่มี domain):
+#   port 80 → Traefik → /api/* → control-api:3001
+#                              → /*     → dashboard:3000
+#   worker เข้า Docker socket โดยตรง
+
+services:
+
+  # ── Traefik (HTTP only) ────────────────────────────────────────────────────
+  traefik:
+    image: traefik:v3.6
+    container_name: zixploy-traefik
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedByDefault=false
+      - --providers.docker.network=zixploy-proxy
+      - --entrypoints.web.address=:80
+      - --api=false
+      - --log.level=INFO
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - zixploy-proxy
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Control API ────────────────────────────────────────────────────────────
+  control-api:
+    build:
+      context: ../..
+      dockerfile: apps/control-api/Dockerfile
+    image: zixploy/control-api:local
+    container_name: zixploy-control-api
+    restart: unless-stopped
+    environment:
+      ZIXPLOY_DB_PATH: /data/control.db
+      ZIXPLOY_API_PORT: "3001"
+      ZIXPLOY_LOG_LEVEL: info
+      ZIXPLOY_BASE_URL: http://${SERVER_IP:-localhost}
+      ZIXPLOY_BIND_HOST: "0.0.0.0"
+      ZIXPLOY_MASTER_KEY_FILE: /run/secrets/master_key
+      ZIXPLOY_BACKUP_DB_DIR: /backups/db
+      ZIXPLOY_BACKUP_KEYS_DIR: /backups/keys
+      ZIXPLOY_BACKUP_RETENTION: "14"
+    volumes:
+      - zixploy-data:/data
+      - zixploy-backups:/backups
+      - /etc/zixploy/master.key:/run/secrets/master_key:ro
+    expose:
+      - "3001"
+    networks:
+      - zixploy-internal
+      - zixploy-proxy
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.api.rule: "PathPrefix(`/api/`)"
+      traefik.http.routers.api.entrypoints: web
+      traefik.http.services.api.loadbalancer.server.port: "3001"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/v1/system/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      - traefik
+
+  # ── Deploy Worker ──────────────────────────────────────────────────────────
+  deploy-worker:
+    build:
+      context: ../..
+      dockerfile: apps/deploy-worker/Dockerfile
+    image: zixploy/deploy-worker:local
+    container_name: zixploy-deploy-worker
+    restart: unless-stopped
+    environment:
+      ZIXPLOY_DB_PATH: /data/control.db
+      ZIXPLOY_WORKSPACES_DIR: /workspaces
+      ZIXPLOY_LOG_LEVEL: info
+      ZIXPLOY_MASTER_KEY_FILE: /run/secrets/master_key
+    volumes:
+      - zixploy-data:/data
+      - zixploy-workspaces:/workspaces
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /etc/zixploy/master.key:/run/secrets/master_key:ro
+    networks:
+      - zixploy-internal
+      - zixploy-proxy
+    depends_on:
+      - control-api
+
+  # ── Dashboard ──────────────────────────────────────────────────────────────
+  dashboard:
+    build:
+      context: ../..
+      dockerfile: apps/dashboard/Dockerfile
+    image: zixploy/dashboard:local
+    container_name: zixploy-dashboard
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      HOST: "0.0.0.0"
+    expose:
+      - "3000"
+    networks:
+      - zixploy-internal
+      - zixploy-proxy
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.dashboard.rule: "PathPrefix(`/`)"
+      traefik.http.routers.dashboard.entrypoints: web
+      traefik.http.services.dashboard.loadbalancer.server.port: "3000"
+      # API router มี priority สูงกว่า (match ก่อน)
+      traefik.http.routers.dashboard.priority: "1"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      - control-api
+
+networks:
+  zixploy-proxy:
+    name: zixploy-proxy
+    driver: bridge
+  zixploy-internal:
+    name: zixploy-internal
+    driver: bridge
+    internal: true
+
+volumes:
+  zixploy-data:
+    name: zixploy-data
+  zixploy-workspaces:
+    name: zixploy-workspaces
+  zixploy-backups:
+    name: zixploy-backups

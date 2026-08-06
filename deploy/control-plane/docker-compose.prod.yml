@@ -80,6 +80,7 @@ services:
       ZIXPLOY_API_PORT: "3001"
       ZIXPLOY_LOG_LEVEL: info
       ZIXPLOY_BASE_URL: https://${ZIXPLOY_DOMAIN}
+      ZIXPLOY_BIND_HOST: "0.0.0.0"
       ZIXPLOY_MASTER_KEY_FILE: /run/secrets/master_key
       ZIXPLOY_ACME_FILE: /acme/acme.json
       ZIXPLOY_BACKUP_DB_DIR: /var/backups/zixploy/db

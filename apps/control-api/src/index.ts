@@ -38,15 +38,17 @@ if (appCount > 0) log.info("github apps configured", { count: appCount });
 
 const port = Number(process.env.ZIXPLOY_API_PORT ?? 3001);
 
-// bind เฉพาะ loopback — production ให้ Traefik เป็นตัวรับ traffic จากภายนอก
-// (docs/phase-01 security; API ต้องไม่ bind public interface โดยตรง)
+// bind address — ค่า default 127.0.0.1 (loopback เท่านั้น, เหมาะกับ bare-metal + host Traefik)
+// ใน Docker ให้ตั้ง ZIXPLOY_BIND_HOST=0.0.0.0 เพื่อให้ Traefik container เชื่อมต่อได้ผ่าน Docker network
+// (isolation ใน Docker มาจาก network segmentation: zixploy-internal + expose ไม่ใช่ ports)
+const bindHost = process.env.ZIXPLOY_BIND_HOST ?? "127.0.0.1";
 const app = buildApp(db, { registry, baseUrl, masterKeys }).listen({
   port,
-  hostname: "127.0.0.1",
+  hostname: bindHost,
   maxRequestBodySize: MAX_BODY_BYTES,
 });
 
-log.info("control-api listening", { url: `http://127.0.0.1:${port}` });
+log.info("control-api listening", { url: `http://${bindHost}:${port}` });
 
 export type { App } from "./app";
 export { app };

@@ -26,7 +26,8 @@ function parseAllowedHosts(baseUrl: string | undefined): Set<string> {
   const hosts = new Set<string>();
   if (baseUrl) {
     try {
-      hosts.add(new URL(baseUrl).host);
+      // ใช้ .hostname (ไม่มี port) เพื่อให้เปรียบเทียบกับ Host header ที่อาจมีหรือไม่มี port ได้
+      hosts.add(new URL(baseUrl).hostname);
     } catch {
       log.warn("ZIXPLOY_BASE_URL ไม่ใช่ URL ที่ถูกต้อง — origin guard จะไม่นับเป็น allowed host", {
         baseUrl,
@@ -42,8 +43,14 @@ function parseAllowedHosts(baseUrl: string | undefined): Set<string> {
 
 function hostOf(value: string): string | null {
   try {
-    // Origin header เป็น URL เต็ม (scheme://host); Host header เป็น host ตรง ๆ
-    return value.includes("://") ? new URL(value).host : value;
+    if (value.includes("://")) {
+      // Origin header — ดึง hostname ไม่รวม port
+      return new URL(value).hostname;
+    }
+    // Host header อาจมี port (เช่น "127.0.0.1:3001", "example.com:8080", "[::1]:443")
+    // strip port ออก: จับ host ส่วนที่ไม่ใช่ port suffix
+    const m = value.match(/^(\[.+?\]|[^:]+)(?::\d+)?$/);
+    return m ? m[1] : value;
   } catch {
     return null;
   }

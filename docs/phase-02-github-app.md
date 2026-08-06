@@ -184,18 +184,36 @@ bun run --filter @zixploy/dashboard build        ✅  build complete
 - [x] Webhook processing state machine: recovery, retry, exhausted — tested at DB level
 - [ ] Manual end-to-end test with real GitHub App (requires public URL — mock-validated; real-app test deferred to staging)
 
+## Real-GitHub Validation ที่ทำแล้ว (2026-08-06, local dev, ยังไม่มี public URL)
+
+ทดสอบ UI flow จริงผ่าน `/settings/github` → กด "สร้าง GitHub App" → browser POST manifest form
+ไปที่ `https://github.com/settings/apps/new` จริง
+
+**ผลลัพธ์**: GitHub ตอบ `Invalid GitHub App configuration — Hook url is not supported because
+it isn't reachable over the public Internet (localhost) / Hook is invalid`
+
+นี่คือ error เจาะจงที่ field `hook_attributes.url` เท่านั้น — ไม่ใช่ generic parse/format error
+ยืนยันว่า **manifest JSON ที่ระบบสร้าง (name, url, redirect_url, setup_url, permissions,
+default_events, public) ผ่าน validation ของ GitHub ทุก field** มีแค่ webhook URL ที่ติดเพราะ
+`ZIXPLOY_BASE_URL=http://localhost:3000` ไม่ใช่ public URL ตามที่ GitHub กำหนด — เป็นข้อจำกัดของ
+environment ไม่ใช่บั๊กของ manifest builder
+
+ยังไม่ได้ทดสอบต่อ (ต้องมี public URL ก่อน): ngrok tunnel setup ถูกข้ามในรอบนี้ตามที่ผู้ใช้เลือก
+ไม่ทดสอบ webhook ในตอนนี้ — รอ staging ที่มี public domain จริง
+
 ## Mock-Only Items (Phase 2)
 
 รายการต่อไปนี้ผ่าน tests โดย mock GitHub API — **ยังไม่ได้ทดสอบกับ GitHub จริง**:
 
-- Manifest form POST + conversion exchange กับ GitHub จริง
+- Manifest conversion exchange (`POST /app-manifests/{code}/conversions`) กับ GitHub จริง —
+  form POST ผ่านแล้ว (ดูด้านบน) แต่ยังไปไม่ถึงขั้น code exchange เพราะ hook URL ติด localhost
 - Real RS256 JWT accepted by GitHub API
 - Installation token exchange over live HTTPS
 - Real webhook delivery from GitHub servers (per-app endpoint)
 - Branch validation via live `GET /repos/{owner}/{repo}/branches/{branch}`
 - Path encoding behavior with real GitHub owner/repo names containing special chars
 
-Phase 3 staging environment จะทดสอบ end-to-end flow เหล่านี้
+Phase 3 staging environment (มี public domain) จะทดสอบ end-to-end flow เหล่านี้ให้ครบ
 
 ## ไม่เริ่มในเฟสนี้ (Phase 3–8)
 

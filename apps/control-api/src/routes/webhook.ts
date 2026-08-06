@@ -20,6 +20,7 @@
 import type { Database } from "bun:sqlite";
 import { API_PREFIX, AppError, ulid } from "@zixploy/shared";
 import { Elysia } from "elysia";
+import { enqueuePushDeploy } from "../deploys/queue";
 import type { GitHubAppRegistry } from "../github/registry";
 import {
   type InstallationEventPayload,
@@ -323,6 +324,27 @@ async function handlePush(
         projectId: project.id,
         branch,
         commitSha: commitSha.slice(0, 7), // short SHA สำหรับ log — ไม่ใช่ secret
+      });
+
+      // Phase 3: promote intent → deployments + deploy_jobs ทันที (control-api เท่านั้นที่ INSERT
+      // ลง deploy_jobs ได้ — ADR-0002) coalesce เข้า pending job เดิมถ้ามี push ถี่ ๆ ระหว่าง build
+      const { deploymentId, coalesced } = enqueuePushDeploy(db, {
+        projectId: project.id,
+        installationId,
+        repoFullName: payload.repository.full_name,
+        commitSha,
+        commitMessage: commitMessage ?? null,
+        commitAuthor,
+      });
+      db.query("UPDATE deploy_intents SET status = 'picked_up', updated_at = ? WHERE id = ?").run(
+        Date.now(),
+        intentId,
+      );
+      log.info("deploy job enqueued from push", {
+        intentId,
+        projectId: project.id,
+        deploymentId,
+        coalesced,
       });
     }
   }

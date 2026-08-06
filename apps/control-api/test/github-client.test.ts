@@ -71,7 +71,7 @@ describe("GitHubHttpClient — path encoding", () => {
     let capturedUrl = "";
     const client = makeClient(async (url) => {
       capturedUrl = String(url);
-      return jsonRes({ name: "feature/x", protected: false });
+      return jsonRes({ name: "feature/x", protected: false, commit: { sha: "a".repeat(40) } });
     });
     await client.getBranch("token", "owner/repo", "feature/x");
     // branch name "feature/x" ต้อง encode เป็น feature%2Fx ไม่ใช่ feature/x
@@ -85,7 +85,7 @@ describe("GitHubHttpClient — path encoding", () => {
     let capturedUrl = "";
     const client = makeClient(async (url) => {
       capturedUrl = String(url);
-      return jsonRes({ name: "main", protected: true });
+      return jsonRes({ name: "main", protected: true, commit: { sha: "a".repeat(40) } });
     });
     await client.getBranch("token", "owner/repo", "main");
     expect(capturedUrl).toContain("/branches/main");
@@ -240,7 +240,16 @@ describe("GitHubHttpClient — JSON parse + response validation", () => {
   });
 
   test("JSON ขาด required field (getBranch: missing name) → AppError GITHUB_UNAVAILABLE", async () => {
-    const client = makeClient(async () => jsonRes({ protected: false })); // ขาด name
+    const client = makeClient(async () =>
+      jsonRes({ protected: false, commit: { sha: "a".repeat(40) } }),
+    ); // ขาด name
+    await expect(client.getBranch("token", "owner/repo", "main")).rejects.toMatchObject({
+      code: "GITHUB_UNAVAILABLE",
+    });
+  });
+
+  test("JSON ขาด commit.sha (getBranch) → AppError GITHUB_UNAVAILABLE", async () => {
+    const client = makeClient(async () => jsonRes({ name: "main", protected: true, commit: {} }));
     await expect(client.getBranch("token", "owner/repo", "main")).rejects.toMatchObject({
       code: "GITHUB_UNAVAILABLE",
     });
@@ -283,11 +292,15 @@ describe("GitHubHttpClient — JSON parse + response validation", () => {
 // --- getBranch ---
 
 describe("GitHubHttpClient — getBranch", () => {
-  test("branch มีอยู่ → คืน branch data", async () => {
-    const client = makeClient(async () => jsonRes({ name: "main", protected: true }));
+  test("branch มีอยู่ → คืน branch data พร้อม commit.sha", async () => {
+    const sha = "a".repeat(40);
+    const client = makeClient(async () =>
+      jsonRes({ name: "main", protected: true, commit: { sha } }),
+    );
     const branch = await client.getBranch("token", "owner/repo", "main");
     expect(branch.name).toBe("main");
     expect(branch.protected).toBe(true);
+    expect(branch.commit.sha).toBe(sha);
   });
 
   test("branch ไม่มี (404) → AppError INSTALLATION_NOT_FOUND", async () => {
@@ -301,7 +314,7 @@ describe("GitHubHttpClient — getBranch", () => {
     let capturedUrl = "";
     const client = makeClient(async (url) => {
       capturedUrl = String(url);
-      return jsonRes({ name: "develop", protected: false });
+      return jsonRes({ name: "develop", protected: false, commit: { sha: "a".repeat(40) } });
     });
     await client.getBranch("token", "owner/repo", "develop");
     expect(capturedUrl).toContain("/branches/develop");

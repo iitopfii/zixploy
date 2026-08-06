@@ -50,6 +50,8 @@ export interface Repository {
 export interface Branch {
   name: string;
   protected: boolean;
+  /** commit SHA ล่าสุดของ branch นี้ — ใช้ resolve "commit ล่าสุด" ตอน manual deploy (Phase 3) */
+  commitSha: string;
 }
 
 export interface ListReposResult {
@@ -115,6 +117,7 @@ function mapBranch(data: GitHubBranchData): Branch {
   return {
     name: data.name,
     protected: data.protected,
+    commitSha: data.commit.sha,
   };
 }
 

@@ -290,7 +290,26 @@ describe("webhook endpoint — push event", () => {
     expect(intent).not.toBeNull();
     expect(intent!.commit_sha).toBe("a".repeat(40));
     expect(intent!.commit_message).toBe("feat: add feature"); // แค่บรรทัดแรก
-    expect(intent!.status).toBe("pending");
+    // Phase 3: promote เป็น deployments+deploy_jobs ทันทีในธุรกรรมเดียวกัน — ไม่ค้างที่ pending อีกต่อไป
+    expect(intent!.status).toBe("picked_up");
+
+    // ตรวจว่า deployment + deploy_job ถูกสร้างจริง
+    const deployment = db
+      .query(
+        "SELECT * FROM deployments WHERE project_id = (SELECT project_id FROM deploy_intents WHERE branch = 'main')",
+      )
+      .get() as Record<string, unknown> | null;
+    expect(deployment).not.toBeNull();
+    expect(deployment!.status).toBe("queued");
+    expect(deployment!.trigger).toBe("push");
+    expect(deployment!.commit_sha).toBe("a".repeat(40));
+
+    const job = db
+      .query("SELECT * FROM deploy_jobs WHERE deployment_id = ?")
+      .get(deployment!.id as string) as Record<string, unknown> | null;
+    expect(job).not.toBeNull();
+    expect(job!.status).toBe("pending");
+    expect(job!.type).toBe("deploy");
   });
 
   test("push ผิด branch → ไม่สร้าง deploy_intent", async () => {

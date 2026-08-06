@@ -70,6 +70,7 @@ const repoSchema = t.Object({
 const branchSchema = t.Object({
   name: t.String(),
   protected: t.Boolean(),
+  commitSha: t.String(),
 });
 
 const sourceBody = t.Object({

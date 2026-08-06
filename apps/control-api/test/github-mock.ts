@@ -54,9 +54,9 @@ export function createMockGitHub(options: MockGitHubOptions = {}): GitHubService
   };
 
   const defaultBranches: Branch[] = [
-    { name: "main", protected: true },
-    { name: "develop", protected: false },
-    { name: "feature/x", protected: false },
+    { name: "main", protected: true, commitSha: "a".repeat(40) },
+    { name: "develop", protected: false, commitSha: "b".repeat(40) },
+    { name: "feature/x", protected: false, commitSha: "c".repeat(40) },
   ];
 
   return {

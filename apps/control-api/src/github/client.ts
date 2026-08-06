@@ -42,6 +42,8 @@ export interface GitHubRepositoryData {
 export interface GitHubBranchData {
   name: string;
   protected: boolean;
+  /** ใช้ resolve commit ล่าสุดตอน manual deploy (Phase 3) — GitHub ส่งมาเสมอในทั้ง list และ single-branch response */
+  commit: { sha: string };
 }
 
 /** Token response จาก POST /app/installations/{id}/access_tokens */
@@ -120,6 +122,19 @@ function assertArray(v: unknown, context: string): asserts v is unknown[] {
       "GITHUB_UNAVAILABLE",
       `GitHub API response ผิดรูปแบบ (ไม่ใช่ array): ${context}`,
     );
+  }
+}
+
+/** ตรวจ shape ของ branch object เดียว: name, protected, commit.sha — ใช้ทั้ง single-branch และ list */
+function assertBranchShape(v: unknown, context: string): void {
+  assertFields(v, ["name", "protected", "commit"], context);
+  assertFields((v as Record<string, unknown>).commit, ["sha"], `${context}.commit`);
+}
+
+function assertBranchArray(v: unknown, context: string): void {
+  assertArray(v, context);
+  for (let i = 0; i < v.length; i++) {
+    assertBranchShape(v[i], `${context}[${i}]`);
   }
 }
 
@@ -303,7 +318,7 @@ export class GitHubHttpClient implements GitHubClient {
       `/repos/${encoded}/branches?page=${page}&per_page=${perPage}`,
     );
     return this.parseJson<GitHubBranchData[]>(res, `repos/${repoFullName}/branches`, (v) =>
-      assertArray(v, `repos/${repoFullName}/branches`),
+      assertBranchArray(v, `repos/${repoFullName}/branches`),
     );
   }
 
@@ -317,7 +332,7 @@ export class GitHubHttpClient implements GitHubClient {
     return this.parseJson<GitHubBranchData>(
       res,
       `repos/${repoFullName}/branches/${branchName}`,
-      (v) => assertFields(v, ["name", "protected"], `repos/${repoFullName}/branches/${branchName}`),
+      (v) => assertBranchShape(v, `repos/${repoFullName}/branches/${branchName}`),
     );
   }
 }

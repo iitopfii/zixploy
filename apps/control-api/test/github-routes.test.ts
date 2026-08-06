@@ -16,8 +16,8 @@ const REPO: import("../src/github/service").Repository = {
 };
 
 const BRANCHES: import("../src/github/service").Branch[] = [
-  { name: "main", protected: true },
-  { name: "develop", protected: false },
+  { name: "main", protected: true, commitSha: "a".repeat(40) },
+  { name: "develop", protected: false, commitSha: "b".repeat(40) },
 ];
 
 /** สร้าง github_apps row ให้ FK ของ github_installations.github_app_id ผ่าน */

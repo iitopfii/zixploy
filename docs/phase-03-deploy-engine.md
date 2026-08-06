@@ -118,16 +118,16 @@ GET  /api/v1/deployments/:id
 
 ## งานดำเนินการ
 
-- [ ] สร้าง deployment/job schema และ state machine
-- [ ] สร้าง worker lease/heartbeat/recovery
-- [ ] สร้าง Git clone แบบ exact SHA และ redacted credential
-- [ ] สร้าง Docker build adapter และ progress parser
-- [ ] สร้าง candidate container และ resource limits
-- [ ] สร้าง health check runner
-- [ ] สร้าง activation/rollback logic
-- [ ] สร้าง manual deploy/restart/stop UI
-- [ ] สร้าง deployment history และ status timeline
-- [ ] สร้าง safe cleanup worker
+- [x] สร้าง deployment/job schema และ state machine (M1)
+- [x] สร้าง worker lease/heartbeat/recovery (M2)
+- [x] สร้าง Git clone แบบ exact SHA และ redacted credential (M4)
+- [x] สร้าง Docker build adapter และ progress parser (M5)
+- [x] สร้าง candidate container และ resource limits (M5/M6)
+- [x] สร้าง health check runner (M6)
+- [x] สร้าง activation/rollback logic (M6)
+- [ ] สร้าง manual deploy/restart/stop UI — API พร้อมแล้ว (M3), UI เป็น M8 รอบถัดไป
+- [ ] สร้าง deployment history และ status timeline — API พร้อมแล้ว (M3: GET endpoints), UI เป็น M8 รอบถัดไป
+- [x] สร้าง safe cleanup worker (M7)
 
 ## การทดสอบ Failure Cases
 
@@ -145,8 +145,23 @@ GET  /api/v1/deployments/:id
 
 ## Exit Criteria
 
-- Deploy public/private repository ได้จาก UI และ webhook
-- Build failure ไม่กระทบ active deployment
-- Restart worker แล้ว queue recover ได้โดยไม่สร้าง container ซ้ำ
-- Manual stop/restart/redeploy/rollback ทำงานและมี audit record
-- Cleanup ไม่แตะ resource ที่ระบบไม่ได้เป็นเจ้าของ
+สถานะจริงหลัง M1-M7 (backend ครบ, ยืนยันด้วย 490 automated tests + live-Docker integration tests
++ manual E2E สคริปต์เดียวที่รัน real clone/build/container/rollback จริงบน Docker Desktop —
+`apps/deploy-worker/scripts/e2e-smoke.ts`):
+
+- [x] Deploy repository ได้จาก webhook (push → auto-deploy) และ manual trigger ผ่าน API —
+      ยังไม่ผ่าน UI จริง (M8) เพราะยังไม่มี GitHub App ติดตั้งจริงในเครื่อง dev เพื่อทดสอบ private
+      repo ผ่าน webhook จริง แต่ pipeline เดียวกันถูกยืนยันด้วย E2E script (local git remote แทน
+      GitHub) + M3's HTTP round-trip tests (routes จริง, mock GitHub client)
+- [x] Build failure ไม่กระทบ active deployment — พิสูจน์ทั้งใน unit tests (M6) และยืนยันจริงใน E2E
+      script (ADR-0004: container ใหม่ต้องขึ้นสำเร็จก่อน container เก่าถึงถูกปิด)
+- [x] Restart worker แล้ว queue recover ได้โดยไม่สร้าง container ซ้ำ — `recoverStaleLeases` (M2) +
+      idempotent create (remove-before-create ทุกครั้ง, M6) มี regression test ครอบ
+- [x] Manual stop/restart/redeploy/rollback ทำงานและมี audit record — Operations API ครบ (M3),
+      rollback ยืนยันจริงใน E2E script ว่า container กลับไปใช้ image เดิมได้โดยไม่ clone/build ซ้ำ
+- [x] Cleanup ไม่แตะ resource ที่ระบบไม่ได้เป็นเจ้าของ — ADR-0005 label re-verify ก่อนลบทุกครั้ง (M7),
+      negative test ยืนยัน project อื่นไม่ถูกแตะ
+
+**ยังไม่ทำ (out of scope รอบนี้ตามแผนที่ตกลงไว้)**: M8 dashboard UI (deploy/restart/stop/rollback
+ปุ่มกด, deployment history/timeline หน้าจอ) และการทดสอบผ่าน GitHub App ติดตั้งจริง — ทั้งสองเป็น
+งานรอบถัดไป

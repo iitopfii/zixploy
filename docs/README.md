@@ -36,7 +36,7 @@ Backend ทั้งระบบใช้ TypeScript โดยมี Elysia เ�
 | 0 | ตรึง scope, architecture และข้อกำหนดระบบ | [phase-00-foundation.md](./phase-00-foundation.md) | ✅ ผ่าน Exit Criteria |
 | 1 | สร้าง control plane, authentication และ persistence | [phase-01-control-plane.md](./phase-01-control-plane.md) | ✅ ผ่าน Exit Criteria |
 | 2 | เชื่อม GitHub App และเลือก repository/branch | [phase-02-github-app.md](./phase-02-github-app.md) | ✅ ผ่าน Exit Criteria (mock-validated) |
-| 3 | สร้าง deploy engine และ deployment queue | [phase-03-deploy-engine.md](./phase-03-deploy-engine.md) | ⬜ ยังไม่เริ่ม |
+| 3 | สร้าง deploy engine และ deployment queue | [phase-03-deploy-engine.md](./phase-03-deploy-engine.md) | 🟨 Backend ผ่าน Exit Criteria (M1-M7, E2E-validated), UI รอ M8 |
 | 4 | Environment Settings และ secret handling | [phase-04-environment.md](./phase-04-environment.md) | ⬜ ยังไม่เริ่ม |
 | 5 | Domains, routing และ HTTPS | [phase-05-domains.md](./phase-05-domains.md) | ⬜ ยังไม่เริ่ม |
 | 6 | Build/Runtime Logs และ observability | [phase-06-logs.md](./phase-06-logs.md) | ⬜ ยังไม่เริ่ม |

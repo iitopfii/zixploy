@@ -81,14 +81,14 @@ POST   /api/v1/projects/:id/domains/:domainId/check
 
 ## งานดำเนินการ
 
-- [ ] สร้าง domain schema/validation/normalization
-- [ ] สร้าง DNS resolver/check service
-- [ ] สร้าง deterministic Traefik label generator
-- [ ] ผูก labels กับ candidate container
-- [ ] ตั้ง Traefik HTTP→HTTPS และ ACME resolver
-- [ ] สร้าง route/certificate probes
-- [ ] สร้าง domain UI และ status polling
-- [ ] เพิ่ม duplicate-domain locking ใน DB
+- [x] สร้าง domain schema/validation/normalization
+- [x] สร้าง DNS resolver/check service
+- [x] สร้าง deterministic Traefik label generator
+- [x] ผูก labels กับ candidate container
+- [x] ตั้ง Traefik HTTP→HTTPS และ ACME resolver
+- [x] สร้าง route/certificate probes
+- [x] สร้าง domain UI และ status polling
+- [x] เพิ่ม duplicate-domain locking ใน DB
 
 ## การทดสอบ
 

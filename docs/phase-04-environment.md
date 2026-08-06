@@ -72,14 +72,14 @@ API response สำหรับ secret ต้องคืน metadata เช่�
 
 ## งานดำเนินการ
 
-- [ ] สร้าง environment schema และ encryption envelope
-- [ ] สร้าง key loader และ startup validation
-- [ ] สร้าง CRUD/import parser
-- [ ] สร้าง UI editor พร้อม dirty state
-- [ ] ผูก runtime injection กับ deploy engine
-- [ ] เพิ่ม BuildKit secret integration
-- [ ] สร้าง centralized redaction middleware
-- [ ] สร้าง key rotation command และ runbook
+- [x] สร้าง environment schema และ encryption envelope
+- [x] สร้าง key loader และ startup validation
+- [x] สร้าง CRUD/import parser
+- [x] สร้าง UI editor พร้อม dirty state
+- [x] ผูก runtime injection กับ deploy engine
+- [x] เพิ่ม BuildKit secret integration
+- [x] สร้าง centralized redaction middleware
+- [x] สร้าง key rotation command และ runbook
 
 ## การทดสอบ
 

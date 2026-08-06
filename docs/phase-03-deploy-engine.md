@@ -125,8 +125,8 @@ GET  /api/v1/deployments/:id
 - [x] สร้าง candidate container และ resource limits (M5/M6)
 - [x] สร้าง health check runner (M6)
 - [x] สร้าง activation/rollback logic (M6)
-- [ ] สร้าง manual deploy/restart/stop UI — API พร้อมแล้ว (M3), UI เป็น M8 รอบถัดไป
-- [ ] สร้าง deployment history และ status timeline — API พร้อมแล้ว (M3: GET endpoints), UI เป็น M8 รอบถัดไป
+- [x] สร้าง manual deploy/restart/stop UI
+- [x] สร้าง deployment history และ status timeline
 - [x] สร้าง safe cleanup worker (M7)
 
 ## การทดสอบ Failure Cases

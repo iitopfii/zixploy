@@ -39,7 +39,6 @@ const tabs = [
 ] as const;
 
 const activeTab = ref<(typeof tabs)[number]["key"]>("overview");
-const activePhase = computed(() => tabs.find((t) => t.key === activeTab.value)?.phase ?? null);
 
 const confirmArchive = ref(false);
 const archiving = ref(false);
@@ -332,9 +331,40 @@ const installationStatus = computed(() => {
           @saved="refresh()"
         />
 
-        <p v-else class="muted placeholder">
-          {{ activePhase }} จะเปิดใช้งานส่วนนี้
-        </p>
+        <!-- Deploy tab -->
+        <DeployTab
+          v-else-if="activeTab === 'deploy'"
+          :project-id="id"
+          :has-source="isConnected"
+          :archived="!!project.archivedAt"
+        />
+
+        <!-- Environment tab -->
+        <EnvironmentTab
+          v-else-if="activeTab === 'environment'"
+          :project-id="id"
+          :archived="!!project.archivedAt"
+        />
+
+        <!-- Domains tab -->
+        <DomainsTab
+          v-else-if="activeTab === 'domains'"
+          :project-id="id"
+          :archived="!!project.archivedAt"
+        />
+
+        <!-- Logs tab -->
+        <LogsTab
+          v-else-if="activeTab === 'logs'"
+          :project-id="id"
+        />
+
+        <!-- Volumes tab -->
+        <VolumesTab
+          v-else-if="activeTab === 'volumes'"
+          :project-id="id"
+          :archived="!!project.archivedAt"
+        />
       </div>
 
       <ConfirmDialog

@@ -80,13 +80,13 @@ Process output
 
 ## งานดำเนินการ
 
-- [ ] สร้าง build log writer พร้อม sequence IDs
-- [ ] สร้าง Docker runtime log adapter
-- [ ] สร้าง SSE endpoints/reconnect logic
-- [ ] ใช้ centralized secret redactor ก่อน persist/stream
-- [ ] สร้าง Logs UI
+- [x] สร้าง build log writer พร้อม sequence IDs
+- [x] สร้าง Docker runtime log adapter
+- [x] สร้าง SSE endpoints/reconnect logic
+- [x] ใช้ centralized secret redactor ก่อน persist/stream
+- [x] สร้าง Logs UI
 - [ ] ตั้ง Docker log rotation
-- [ ] สร้าง retention/cleanup/disk monitor
+- [x] สร้าง retention/cleanup/disk monitor
 - [ ] เพิ่ม metrics ขั้นต่ำ: queue depth, deploy duration, failures, disk usage
 
 ## การทดสอบ

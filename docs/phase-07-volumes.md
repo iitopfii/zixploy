@@ -88,7 +88,7 @@ MVP ควรเตรียม extension point แม้ยังไม่ท�
 - [x] สร้าง mount-path/driver allowlist validation (shared/volumes.ts: validateMountPath, safety.ts: defense-in-depth)
 - [x] ผูก volume configuration กับ container creation (pipeline/build.ts: createVolume → createContainer)
 - [x] รองรับ single-writer activation strategy (warning log — start-before-stop ยังเหมือนเดิม, phase doc: MVP)
-- [ ] สร้าง volume UI และ confirmation flow (Phase 8)
+- [x] สร้าง volume UI และ confirmation flow
 - [x] สร้าง orphan detection แบบ report-only ก่อน (volumes/reconciler.ts: volumeReconcileLoop)
 - [x] เขียน backup/restore runbook และ extension interface (docs/runbooks/volume-backup-restore.md)
 

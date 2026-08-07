@@ -2,14 +2,19 @@
  * Git clone แบบ exact commit SHA — ไม่ clone branch tip เฉย ๆ (ป้องกัน TOCTOU ระหว่าง
  * webhook รับ push กับตอน worker clone จริง — commit ที่ deploy ต้องตรงกับที่ webhook ระบุเป๊ะ)
  *
- * Token ไม่ใส่ในตัว URL — ใช้ `git -c http.extraheader="AUTHORIZATION: bearer <token>"` แทน
- * ป้องกัน token หลุดเข้า URL ที่อาจถูก echo ใน error message แล้วถูก log persist
- * (docs/threat-model.md: "Installation token ไม่เข้า clone URL ที่ถูก log")
- * หมายเหตุ: argv ของ subprocess เองยังมองเห็นได้จาก process อื่นบนเครื่องเดียวกันที่มีสิทธิ์เพียงพอ
- * (เหมือนกับทุก subprocess-based credential passing) — นี่ไม่ใช่ช่องโหว่ใหม่เทียบกับที่ worker
- * มีสิทธิ์ Docker root-equivalent อยู่แล้ว เป้าหมายคือกัน token ไม่ให้ "persist ลง log/DB"
+ * Token ถูกฝังใน remote URL รูปแบบ `x-access-token:<token>@github.com` และส่งตรงไปใน
+ * `git fetch <url>` โดยไม่ผ่าน `git remote add` ก่อน — ดังนั้น token ไม่ถูกบันทึกลง `.git/config`
  *
- * stdout/stderr ทุกบรรทัดผ่าน redactString() ก่อนส่งให้ onLog — เผื่อ token หลุดมาในข้อความ error
+ * ทำไมไม่ใช้ `http.extraheader` (ตาม threat model เดิม):
+ * ทดสอบบน git 2.49.1 / Alpine บน VPS จริง — ทุก format (bearer/Bearer/token) fail exit 128
+ * ไม่ว่าจะ disable credential.helper ก่อนหรือไม่ ทำให้ต้องใช้ URL-embedded approach แทน
+ *
+ * Security mitigations:
+ * - stdout/stderr ทุกบรรทัดผ่าน redactString() ก่อนส่งให้ onLog หรือใส่ใน error message
+ *   (CREDENTIAL_URL_RE ครอบ `user:pass@` ในข้อความ error ของ git, GITHUB_TOKEN_RE ครอบ ghs_*)
+ * - argv ของ subprocess ยังมองเห็นได้จาก process อื่นที่มีสิทธิ์เพียงพอ —
+ *   accepted risk เดิมที่ thread model ยอมรับ (worker มีสิทธิ์ Docker root-equivalent อยู่แล้ว)
+ *   เป้าหมายคือกัน token ไม่ให้ "persist ลง log/DB" ซึ่งยังบรรลุได้ผ่าน redactString()
  */
 
 import { mkdirSync } from "node:fs";
@@ -41,6 +46,13 @@ async function run(
     stdout: "pipe",
     stderr: "pipe",
     signal: opts.signal,
+    env: {
+      ...process.env,
+      // ป้องกัน git พยายาม prompt credentials ทาง /dev/tty (ไม่มีใน container)
+      // แทนที่จะ fail ด้วย "No such device or address" จะ fail ทันทีพร้อม auth error จริง
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_ASKPASS: "echo",
+    },
   });
 
   const [stdoutText, stderrText] = await Promise.all([
@@ -71,8 +83,10 @@ function truncate(text: string, max = 400): string {
  */
 export async function cloneCommit(params: CloneParams): Promise<void> {
   const { repoFullName, commitSha, token, destDir, timeoutMs, signal, onLog } = params;
-  const url = params.remoteUrl ?? `https://github.com/${repoFullName}.git`;
-  const extraHeader = `http.extraheader=AUTHORIZATION: bearer ${token}`;
+  // URL-based auth: x-access-token:<token>@github.com (ไม่ผ่าน git remote add → token ไม่ถูกบันทึกลง .git/config)
+  // เมื่อ remoteUrl ถูก inject (tests/local) จะ override และไม่มี token ใน URL เลย
+  const url =
+    params.remoteUrl ?? `https://x-access-token:${token}@github.com/${repoFullName}.git`;
 
   const timeoutController = new AbortController();
   const timer = setTimeout(() => timeoutController.abort(), timeoutMs);
@@ -89,16 +103,15 @@ export async function cloneCommit(params: CloneParams): Promise<void> {
       throw new AppError("CLONE_FAILED", `git init ล้มเหลว: ${truncate(result.stderr)}`);
     }
 
-    result = await run(["git", "-C", destDir, "remote", "add", "origin", url], {
-      signal: combinedSignal,
-      onLog,
-    });
-    if (result.code !== 0) {
-      throw new AppError("CLONE_FAILED", `git remote add ล้มเหลว: ${truncate(result.stderr)}`);
-    }
-
+    // ส่ง URL ตรงไปที่ git fetch (ไม่ผ่าน remote add) — token ไม่ถูก persist ใน .git/config
+    // -c credential.helper= ปิด credential helper ทั้งหมดเพื่อกัน git พยายาม prompt หรือ
+    // ใช้ stored credentials อื่นที่อาจ override URL-based auth
     result = await run(
-      ["git", "-C", destDir, "-c", extraHeader, "fetch", "--depth", "1", "origin", commitSha],
+      [
+        "git", "-C", destDir,
+        "-c", "credential.helper=",
+        "fetch", "--depth", "1", url, commitSha,
+      ],
       { signal: combinedSignal, onLog },
     );
     if (result.code !== 0) {

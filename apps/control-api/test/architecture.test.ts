@@ -71,10 +71,15 @@ describe("Control API ต้องไม่แตะ Docker (ADR-0002)", () => {
 });
 
 describe("API ต้องไม่ bind public interface (docs/phase-01 security)", () => {
-  test("entrypoint listen บน loopback เท่านั้น", () => {
+  test("entrypoint bind loopback เป็น default — override ผ่าน ZIXPLOY_BIND_HOST เท่านั้น", () => {
     const entrypoint = readFileSync(join(API_SRC, "index.ts"), "utf8");
-    expect(entrypoint).toContain('hostname: "127.0.0.1"');
-    expect(entrypoint).not.toContain('hostname: "0.0.0.0"');
+    // ค่า default fallback ต้องเป็น 127.0.0.1 เสมอ (กรณี env ไม่ถูกตั้ง = safe)
+    expect(entrypoint).toContain('"127.0.0.1"');
+    // ห้าม hardcode 0.0.0.0 ตรง ๆ ในโค้ด — ต้องมาจาก env var ZIXPLOY_BIND_HOST เท่านั้น
+    // (Docker compose ตั้งค่านี้ผ่าน environment: block ไม่ใช่ hardcode ในโค้ด)
+    expect(entrypoint).not.toContain('"0.0.0.0"');
+    // ต้องมี env var lookup เพื่อยืนยันว่า override mechanism มีอยู่จริง
+    expect(entrypoint).toContain("ZIXPLOY_BIND_HOST");
   });
 
   test("entrypoint กำหนด maxRequestBodySize", () => {

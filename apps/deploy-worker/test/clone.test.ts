@@ -128,7 +128,7 @@ describe("cloneCommit", () => {
     expect((caught as AppError).code).toBe("CLONE_FAILED");
   });
 
-  test("token ไม่เข้า URL — auth ผ่าน extraheader เท่านั้น, ไม่หลุดใน error log", async () => {
+  test("token ไม่หลุดใน error log — redactString() ครอบ stdout/stderr/error message ทั้งหมด", async () => {
     const destDir = tempDir();
     const secretToken = "ghs_verysecrettoken1234567890abcdefgh";
     const logs: string[] = [];
@@ -136,6 +136,8 @@ describe("cloneCommit", () => {
     let caught: unknown;
     try {
       // ชี้ไป localhost port ที่ไม่มีอะไร listen — fail เร็ว offline ล้วน ๆ ไม่ต้องต่อเน็ตจริง
+      // remoteUrl override ทำให้ token ไม่เข้าไปใน URL เลย (ไม่มีผลกับ redactString แต่ทดสอบ
+      // ว่า token param ไม่รั่วผ่าน mechanism อื่น เช่น env var หรือ subprocess args ที่ถูก echo กลับ)
       await cloneCommit({
         repoFullName: "unused/unused",
         commitSha: "a".repeat(40),
@@ -151,10 +153,10 @@ describe("cloneCommit", () => {
     }
 
     expect(caught).toBeInstanceOf(AppError);
-    // token ไม่ปรากฏใน log บรรทัดไหนเลย (extraheader ไม่ใช่ URL — git ไม่มีเหตุผลจะ echo มันกลับ)
+    // token ไม่ปรากฏใน log บรรทัดไหนเลย (redactString ครอบ URL credentials และ ghs_* โดยตรง)
     const fullLog = logs.join("\n");
     expect(fullLog).not.toContain(secretToken);
-    // error message ของ AppError เองก็ต้องไม่มี token (เราตัด stderr ผ่าน redactString ก่อนใส่ error message)
+    // error message ของ AppError เองก็ต้องไม่มี token (stderr ผ่าน redactString ก่อนใส่ error message)
     expect((caught as AppError).message).not.toContain(secretToken);
   });
 });

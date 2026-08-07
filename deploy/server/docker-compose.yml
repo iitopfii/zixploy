@@ -38,8 +38,11 @@ services:
       - --entrypoints.web.forwardedHeaders.trustedIPs=173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,2a06:98c0::/29,2c0f:f248::/32
       - --entrypoints.websecure.forwardedHeaders.trustedIPs=173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,2a06:98c0::/29,2c0f:f248::/32
       # ── ACME (Let's Encrypt) ──
-      # ACME_EMAIL ต้องตั้งใน .env — Let's Encrypt ใช้แจ้งเตือนก่อน cert หมดอายุ
-      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@localhost}
+      # ACME_EMAIL: ตั้งใน deploy/server/.env เพื่อรับแจ้งเตือนก่อน cert หมดอายุ
+      # ปล่อยว่างได้ (ACME อนุญาต account ที่ไม่มี contact) แต่ **ห้ามใส่ค่าที่ไม่ใช่อีเมลจริง**
+      # — Let's Encrypt ปฏิเสธทั้ง account ถ้า domain ของอีเมลไม่มีจุด (เช่น admin@localhost)
+      # แล้ว cert ทุกใบขอไม่ได้ทั้งเซิร์ฟเวอร์
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-}
       - --certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json
       - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
       - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
@@ -47,6 +50,9 @@ services:
       # ตั้ง ACME_CA_SERVER=https://acme-staging-v02.api.letsencrypt.org/directory ตอนเทสต์
       - --certificatesresolvers.letsencrypt.acme.caserver=${ACME_CA_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
       - --api=false
+      # ping ต้องเปิดคู่กับ healthcheck ด้านล่าง — `traefik healthcheck --ping` ยิงไปที่
+      # /ping ของ entrypoint traefik (:8080) ซึ่งไม่มีอยู่ถ้าไม่ตั้ง --ping=true
+      - --ping=true
       - --log.level=INFO
     ports:
       - "80:80"
@@ -58,6 +64,10 @@ services:
       - zixploy-acme:/acme
     networks:
       - zixploy-proxy
+    # control-api สร้าง /certs/dynamic ตอนบูต — Traefik ต้องรอ ไม่งั้น file provider
+    # ตายตั้งแต่ start ("unable to read directory") แล้ว custom cert ไม่ทำงานจนกว่าจะ restart
+    depends_on:
+      - control-api
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
       interval: 15s
@@ -103,14 +113,15 @@ services:
       traefik.http.routers.api.rule: "PathPrefix(`/api/`)"
       traefik.http.routers.api.entrypoints: web
       traefik.http.services.api.loadbalancer.server.port: "3001"
+    # 127.0.0.1 ไม่ใช่ localhost: `localhost` ใน container resolve เป็น ::1 (IPv6) ก่อน
+    # แต่ Bun bind แค่ 0.0.0.0 (IPv4) → connection refused → container ขึ้น unhealthy
+    # → **Traefik docker provider ข้าม container ที่ไม่ healthy** → ไม่มี router → 404 ทั้งเว็บ
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/v1/system/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/api/v1/system/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 15s
-    depends_on:
-      - traefik
 
   # ── Deploy Worker ──────────────────────────────────────────────────────────
   deploy-worker:
@@ -159,8 +170,9 @@ services:
       traefik.http.services.dashboard.loadbalancer.server.port: "3000"
       # API router มี priority สูงกว่า (match ก่อน)
       traefik.http.routers.dashboard.priority: "1"
+    # 127.0.0.1 ไม่ใช่ localhost — เหตุผลเดียวกับ control-api ด้านบน
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
       interval: 30s
       timeout: 5s
       retries: 3

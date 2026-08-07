@@ -168,85 +168,110 @@ async function deleteVolume() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function lcClass(lc: string) {
-  if (lc === "active") return "lc-active";
-  if (lc === "error") return "lc-error";
-  if (lc === "deletion_pending") return "lc-del";
-  return "lc-other";
-}
+const LIFECYCLE_TONE: Record<string, string> = {
+  active: "tone-ok",
+  error: "tone-bad",
+  deletion_pending: "tone-warn",
+  detached: "tone-idle",
+};
 
-function fmtTime(ms: number | null) {
-  if (!ms) return "—";
-  return new Date(ms).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
+function lcTone(lc: string) {
+  return LIFECYCLE_TONE[lc] ?? "tone-idle";
 }
 </script>
 
 <template>
-  <div class="volumes-tab">
-    <div class="tab-header">
+  <div class="stack-lg">
+    <div class="row-between">
       <h2 class="section-title">Volumes</h2>
       <button v-if="!archived" class="primary small" @click="showCreate = !showCreate">
-        {{ showCreate ? 'ยกเลิก' : '+ สร้าง volume' }}
+        <AppIcon :name="showCreate ? 'x' : 'plus'" :size="14" />
+        {{ showCreate ? "ยกเลิก" : "สร้าง volume" }}
       </button>
     </div>
 
     <!-- Create form -->
-    <div v-if="showCreate" class="create-panel">
-      <div class="form-row">
-        <label class="form-label">ชื่อ</label>
-        <input v-model="createForm.displayName" class="form-input" placeholder="my-data" />
-      </div>
-      <div class="form-row">
-        <label class="form-label">Mount path</label>
-        <input v-model="createForm.mountPath" class="form-input code" placeholder="/app/data" />
-      </div>
-      <div class="form-row">
-        <label class="form-label">Access mode</label>
-        <select v-model="createForm.accessMode" class="form-select">
-          <option value="shared-safe">shared-safe (แนะนำ)</option>
-          <option value="single-writer">single-writer (⚠️ downtime ระหว่าง deploy)</option>
-        </select>
-      </div>
-      <label class="check-label">
-        <input type="checkbox" v-model="createForm.readOnly" />
-        Read-only mount
+    <div v-if="showCreate" class="inset stack">
+      <label>
+        <span>ชื่อ</span>
+        <input v-model="createForm.displayName" placeholder="my-data" />
       </label>
-      <p v-if="createError" class="error-text small">{{ createError }}</p>
+      <label>
+        <span>Mount path</span>
+        <input v-model="createForm.mountPath" class="mono" placeholder="/app/data" />
+      </label>
+      <label>
+        <span>Access mode</span>
+        <select v-model="createForm.accessMode">
+          <option value="shared-safe">shared-safe (แนะนำ)</option>
+          <option value="single-writer">single-writer (downtime ระหว่าง deploy)</option>
+        </select>
+      </label>
+      <div class="check-row">
+        <input v-model="createForm.readOnly" type="checkbox" id="vol-ro" />
+        <label for="vol-ro">Read-only mount</label>
+      </div>
+      <p v-if="createError" class="alert alert-bad small">
+        <AppIcon name="alert" :size="13" />
+        <span>{{ createError }}</span>
+      </p>
       <button
         class="primary small"
+        style="align-self: flex-start"
         :disabled="creating || !createForm.displayName.trim() || !createForm.mountPath.trim()"
         @click="createVolume"
-      >{{ creating ? 'กำลังสร้าง…' : 'สร้าง' }}</button>
+      >
+        <span v-if="creating" class="spinner" />
+        {{ creating ? "กำลังสร้าง…" : "สร้าง" }}
+      </button>
     </div>
 
-    <p v-if="loading" class="muted">กำลังโหลด…</p>
-    <p v-else-if="loadError" class="error-text">{{ loadError }}</p>
-    <p v-else-if="volumes.length === 0" class="muted">ยังไม่มี volume</p>
+    <div v-if="loading" class="stack">
+      <span class="skeleton" style="height: 90px" />
+      <span class="skeleton" style="height: 90px" />
+    </div>
+    <p v-else-if="loadError" class="alert alert-bad">
+      <AppIcon name="alert" :size="15" />
+      <span>{{ loadError }}</span>
+    </p>
+    <div v-else-if="volumes.length === 0" class="empty">
+      <span class="empty-icon"><AppIcon name="database" :size="20" /></span>
+      <span class="empty-title">ยังไม่มี volume</span>
+    </div>
 
     <!-- Volume list -->
     <ul v-else class="vol-list">
-      <li v-for="v in volumes" :key="v.id" class="vol-item">
+      <li v-for="v in volumes" :key="v.id" class="inset vol-item">
         <div class="vol-header">
           <strong>{{ v.displayName }}</strong>
-          <span class="badge" :class="lcClass(v.lifecycle)">{{ v.lifecycle }}</span>
-          <span v-if="v.readOnly" class="badge badge-ro">read-only</span>
+          <span class="badge" :class="lcTone(v.lifecycle)">{{ v.lifecycle }}</span>
+          <span v-if="v.readOnly" class="badge">read-only</span>
         </div>
 
-        <dl class="vol-meta">
-          <dt>Mount path</dt><dd><code>{{ v.mountPath }}</code></dd>
-          <dt>Docker name</dt><dd><code class="muted small">{{ v.dockerName }}</code></dd>
-          <dt>Access mode</dt><dd>{{ v.accessMode }}</dd>
-          <dt>Last attached</dt><dd>{{ fmtTime(v.lastAttachedAt) }}</dd>
+        <dl class="kv">
+          <dt>Mount path</dt>
+          <dd><code>{{ v.mountPath }}</code></dd>
+          <dt>Docker name</dt>
+          <dd><code class="muted small">{{ v.dockerName }}</code></dd>
+          <dt>Access mode</dt>
+          <dd>{{ v.accessMode }}</dd>
+          <dt>Last attached</dt>
+          <dd :title="fullDateTime(v.lastAttachedAt)">{{ timeAgo(v.lastAttachedAt) }}</dd>
         </dl>
 
-        <p v-if="v.lifecycle === 'error'" class="warn-text small">
-          ⚠️ Docker volume หายไป — อาจถูกลบด้วยมือ ดู runbook สำหรับ recovery
+        <p v-if="v.lifecycle === 'error'" class="alert alert-bad small">
+          <AppIcon name="alert" :size="13" />
+          <span>Docker volume หายไป — อาจถูกลบด้วยมือ ดู runbook สำหรับ recovery</span>
         </p>
-        <p v-if="v.lifecycle === 'deletion_pending'" class="muted small">
-          ⏳ รอ worker ลบ Docker volume จริง…
+        <p v-if="v.lifecycle === 'deletion_pending'" class="alert alert-warn small">
+          <AppIcon name="clock" :size="13" />
+          <span>รอ worker ลบ Docker volume จริง…</span>
         </p>
 
-        <p v-if="detachError[v.id]" class="error-text small">{{ detachError[v.id] }}</p>
+        <p v-if="detachError[v.id]" class="alert alert-bad small">
+          <AppIcon name="alert" :size="13" />
+          <span>{{ detachError[v.id] }}</span>
+        </p>
 
         <div v-if="!archived" class="vol-actions">
           <button
@@ -254,7 +279,10 @@ function fmtTime(ms: number | null) {
             class="secondary small"
             :disabled="detachingId === v.id"
             @click="detach(v.id)"
-          >{{ detachingId === v.id ? 'กำลัง detach…' : 'Detach' }}</button>
+          >
+            <span v-if="detachingId === v.id" class="spinner" />
+            {{ detachingId === v.id ? "กำลัง detach…" : "Detach" }}
+          </button>
 
           <button
             v-if="v.lifecycle !== 'deletion_pending'"
@@ -262,7 +290,10 @@ function fmtTime(ms: number | null) {
             :disabled="v.lifecycle === 'active'"
             :title="v.lifecycle === 'active' ? 'ต้อง detach ก่อนลบ' : ''"
             @click="openDelete(v)"
-          >ลบ</button>
+          >
+            <AppIcon name="trash" :size="13" />
+            ลบ
+          </button>
         </div>
 
         <!-- Typed delete confirm -->
@@ -270,113 +301,80 @@ function fmtTime(ms: number | null) {
           <p class="warn-text small">
             พิมพ์ชื่อ volume <strong>{{ v.displayName }}</strong> เพื่อยืนยันการลบ
           </p>
-          <p class="muted small">⚠️ ข้อมูลใน volume จะหายถาวร — ไม่สามารถกู้คืนได้</p>
+          <p class="muted small">ข้อมูลใน volume จะหายถาวร — ไม่สามารถกู้คืนได้</p>
           <input
             v-model="confirmInput"
-            class="form-input"
             placeholder="ชื่อ volume"
             @keydown.enter="deleteVolume"
           />
-          <p v-if="deleteError" class="error-text small">{{ deleteError }}</p>
+          <p v-if="deleteError" class="alert alert-bad small">
+            <AppIcon name="alert" :size="13" />
+            <span>{{ deleteError }}</span>
+          </p>
           <div class="confirm-actions">
             <button class="danger small" :disabled="!canDelete || deleting" @click="deleteVolume">
-              {{ deleting ? 'กำลังลบ…' : 'ยืนยันลบ' }}
+              <span v-if="deleting" class="spinner" />
+              {{ deleting ? "กำลังลบ…" : "ยืนยันลบ" }}
             </button>
-            <button class="secondary small" @click="confirmDeleteId = null; confirmInput = ''">ยกเลิก</button>
+            <button
+              class="secondary small"
+              @click="confirmDeleteId = null; confirmInput = ''"
+            >
+              ยกเลิก
+            </button>
           </div>
         </div>
       </li>
     </ul>
 
     <p class="muted small note">
-      ℹ️ volume จะถูก mount ทุกครั้งที่ deploy — redeploy เพื่อให้การเปลี่ยนแปลงมีผล
+      <AppIcon name="info" :size="13" />
+      volume จะถูก mount ทุกครั้งที่ deploy — redeploy เพื่อให้การเปลี่ยนแปลงมีผล
     </p>
   </div>
 </template>
 
 <style scoped>
-.volumes-tab { display: flex; flex-direction: column; gap: 0.75rem; }
-.tab-header { display: flex; align-items: center; justify-content: space-between; }
-.section-title { margin: 0; font-size: 1rem; font-weight: 600; }
-
-.create-panel {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-.form-row { display: flex; align-items: center; gap: 0.75rem; }
-.form-label { min-width: 110px; font-size: 0.875rem; color: var(--muted); }
-.form-input {
-  flex: 1;
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  color: var(--fg);
-  font-size: 0.9rem;
-}
-.form-input.code { font-family: monospace; }
-.form-select {
-  flex: 1;
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  color: var(--fg);
-  font-size: 0.875rem;
-}
-.check-label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
-
-.vol-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
-.vol-item {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.75rem 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.vol-header { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-.badge { font-size: 0.7rem; padding: 0.15rem 0.45rem; border-radius: 999px; font-weight: 600; }
-.lc-active { background: #d1fae5; color: #065f46; }
-.lc-error { background: #fee2e2; color: #991b1b; }
-.lc-del { background: #fef9c3; color: #854d0e; }
-.lc-other { background: var(--border); color: var(--muted); }
-.badge-ro { background: var(--border); color: var(--muted); }
-
-.vol-meta {
-  display: grid;
-  grid-template-columns: 110px 1fr;
-  gap: 0.3rem 0.75rem;
-  font-size: 0.85rem;
+.vol-list {
+  list-style: none;
   margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
 }
-dt { color: var(--muted); }
-dd { margin: 0; }
+.vol-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.vol-header {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
 
-.vol-actions { display: flex; gap: 0.5rem; }
-.warn-text { color: var(--warn); margin: 0; }
+.vol-actions {
+  display: flex;
+  gap: var(--s-2);
+}
 
 .confirm-delete {
-  border-top: 1px solid var(--border);
-  padding-top: 0.6rem;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--s-3);
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: var(--s-2);
 }
-.confirm-actions { display: flex; gap: 0.5rem; }
-
-.note { margin-top: 0.25rem; }
-
-@media (prefers-color-scheme: dark) {
-  .lc-active { background: #064e3b; color: #6ee7b7; }
-  .lc-error { background: #7f1d1d; color: #fca5a5; }
-  .lc-del { background: #713f12; color: #fde68a; }
+.confirm-actions {
+  display: flex;
+  gap: var(--s-2);
 }
-:root[data-theme="dark"] .lc-active { background: #064e3b; color: #6ee7b7; }
-:root[data-theme="dark"] .lc-error { background: #7f1d1d; color: #fca5a5; }
-:root[data-theme="dark"] .lc-del { background: #713f12; color: #fde68a; }
+
+.note {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
 </style>

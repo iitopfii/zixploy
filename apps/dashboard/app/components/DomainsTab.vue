@@ -152,42 +152,47 @@ async function checkDns(domainId: string) {
  */
 const DNS_PRESENTATION: Record<
   string,
-  { tone: string; icon: string; label: string; hint: string }
+  { tone: string; icon: IconName; label: string; hint: string }
 > = {
   valid: {
-    tone: "ok",
-    icon: "✓",
+    tone: "tone-ok",
+    icon: "check",
     label: "ชี้มาที่ server แล้ว",
     hint: "domain พร้อมรับ traffic",
   },
   proxied: {
-    tone: "info",
-    icon: "☁",
+    tone: "tone-info",
+    icon: "shield",
     label: "ผ่าน Cloudflare",
     hint: "Cloudflare proxy เปิดอยู่ — DDoS protection ทำงาน traffic วิ่งผ่าน Cloudflare มาที่ server นี้",
   },
   mismatch: {
-    tone: "bad",
-    icon: "✗",
+    tone: "tone-bad",
+    icon: "x",
     label: "ชี้ไปที่อื่น",
     hint: "A record ปัจจุบันไม่ได้ชี้มาที่ server นี้ และไม่ใช่ Cloudflare — แก้ที่ผู้ให้บริการ DNS",
   },
   unknown: {
-    tone: "warn",
-    icon: "?",
+    tone: "tone-warn",
+    icon: "info",
     label: "resolve ไม่ได้",
     hint: "ยังไม่มี DNS record หรือ propagate ไม่เสร็จ (รอ 5–30 นาทีหลังสร้าง record)",
   },
   pending: {
-    tone: "muted",
-    icon: "•",
+    tone: "tone-idle",
+    icon: "clock",
     label: "ยังไม่ได้ตรวจ",
     hint: 'กด "ตรวจ DNS" เพื่อตรวจสอบ',
   },
 };
 
+/** ชื่อ icon ที่ AppIcon รองรับ — ใช้จำกัด type ของ DNS_PRESENTATION.icon ให้ตรงกับ set จริง */
+type IconName = "check" | "shield" | "x" | "info" | "clock";
+
+const FALLBACK_DNS_PRESENTATION = DNS_PRESENTATION.unknown as (typeof DNS_PRESENTATION)[string];
+
 function dns(status: string) {
-  return DNS_PRESENTATION[status] ?? DNS_PRESENTATION.unknown!;
+  return DNS_PRESENTATION[status] ?? FALLBACK_DNS_PRESENTATION;
 }
 
 // ---------------------------------------------------------------------------
@@ -343,64 +348,98 @@ async function copyIp(ip: string) {
 </script>
 
 <template>
-  <div class="domains-tab">
-    <div class="tab-header">
+  <div class="stack-lg">
+    <div class="row-between wrap">
       <div>
         <h2 class="section-title">Domains</h2>
         <p class="muted small subtitle">ชี้ domain มาที่ server นี้แล้วเลือกวิธีจัดการ HTTPS</p>
       </div>
       <button v-if="!archived" class="primary small" @click="showAdd = !showAdd">
-        {{ showAdd ? 'ยกเลิก' : '+ เพิ่ม domain' }}
+        <AppIcon :name="showAdd ? 'x' : 'plus'" :size="14" />
+        {{ showAdd ? "ยกเลิก" : "เพิ่ม domain" }}
       </button>
     </div>
 
     <!-- DNS setup hint — แสดง IP ที่ผู้ใช้ต้องชี้มา หลังตรวจ DNS ครั้งแรก -->
-    <div v-if="serverIps.length > 0" class="hint-box">
-      <span class="hint-label">สร้าง A record ชี้มาที่</span>
+    <div v-if="serverIps.length > 0" class="alert alert-info hint-box">
+      <AppIcon name="globe" :size="15" />
+      <span class="muted">สร้าง A record ชี้มาที่</span>
       <code class="ip-code">{{ serverIps[0] }}</code>
       <button class="ghost tiny" @click="copyIp(serverIps[0] as string)">
-        {{ copiedIp ? 'คัดลอกแล้ว' : 'คัดลอก' }}
+        <AppIcon :name="copiedIp ? 'check' : 'copy'" :size="12" />
+        {{ copiedIp ? "คัดลอกแล้ว" : "คัดลอก" }}
       </button>
       <span class="muted tiny">เปิด Cloudflare proxy ได้ — ระบบรองรับ</span>
     </div>
 
     <!-- Add form -->
-    <div v-if="showAdd" class="panel">
-      <div class="form-row">
-        <label class="form-label">Hostname</label>
-        <input v-model="addForm.hostname" class="form-input" placeholder="app.example.com" @keydown.enter="addDomain" />
-      </div>
-      <div class="form-row">
-        <label class="form-label">Port ของ container</label>
-        <input v-model.number="addForm.internalPort" class="form-input short" type="number" min="1" max="65535" />
-      </div>
+    <div v-if="showAdd" class="inset stack">
+      <label>
+        <span>Hostname</span>
+        <input v-model="addForm.hostname" placeholder="app.example.com" @keydown.enter="addDomain" />
+      </label>
+      <label class="short-field">
+        <span>Port ของ container</span>
+        <input v-model.number="addForm.internalPort" type="number" min="1" max="65535" />
+      </label>
       <div class="form-checks">
-        <label><input v-model="addForm.httpsEnabled" type="checkbox" /> เปิด HTTPS</label>
-        <label><input v-model="addForm.redirectHttp" type="checkbox" :disabled="!addForm.httpsEnabled" /> บังคับ HTTP → HTTPS</label>
+        <div class="check-row">
+          <input id="dom-https" v-model="addForm.httpsEnabled" type="checkbox" />
+          <label for="dom-https">เปิด HTTPS</label>
+        </div>
+        <div class="check-row">
+          <input
+            id="dom-redirect"
+            v-model="addForm.redirectHttp"
+            type="checkbox"
+            :disabled="!addForm.httpsEnabled"
+          />
+          <label for="dom-redirect">บังคับ HTTP → HTTPS</label>
+        </div>
       </div>
-      <p v-if="addError" class="bad-text small">{{ addError }}</p>
-      <div>
-        <button class="primary small" :disabled="adding || !addForm.hostname.trim()" @click="addDomain">
-          {{ adding ? 'กำลังเพิ่ม…' : 'เพิ่ม domain' }}
-        </button>
-      </div>
+      <p v-if="addError" class="alert alert-bad small">
+        <AppIcon name="alert" :size="13" />
+        <span>{{ addError }}</span>
+      </p>
+      <button
+        class="primary small"
+        style="align-self: flex-start"
+        :disabled="adding || !addForm.hostname.trim()"
+        @click="addDomain"
+      >
+        <span v-if="adding" class="spinner" />
+        {{ adding ? "กำลังเพิ่ม…" : "เพิ่ม domain" }}
+      </button>
     </div>
 
-    <p v-if="loading" class="muted">กำลังโหลด…</p>
-    <p v-else-if="loadError" class="bad-text">{{ loadError }}</p>
-    <p v-else-if="domains.length === 0" class="muted empty">ยังไม่มี domain — เพิ่ม domain เพื่อรับ traffic จากภายนอก</p>
+    <div v-if="loading" class="stack">
+      <span class="skeleton" style="height: 130px" />
+      <span class="skeleton" style="height: 130px" />
+    </div>
+    <p v-else-if="loadError" class="alert alert-bad">
+      <AppIcon name="alert" :size="15" />
+      <span>{{ loadError }}</span>
+    </p>
+    <div v-else-if="domains.length === 0" class="empty">
+      <span class="empty-icon"><AppIcon name="globe" :size="20" /></span>
+      <span class="empty-title">ยังไม่มี domain</span>
+      <p class="small">เพิ่ม domain เพื่อรับ traffic จากภายนอก</p>
+    </div>
 
     <!-- Domain list -->
     <ul v-else class="domain-list">
-      <li v-for="d in domains" :key="d.id" class="domain-card" :class="{ disabled: !d.enabled }">
+      <li v-for="d in domains" :key="d.id" class="card domain-card" :class="{ disabled: !d.enabled }">
         <!-- Header: hostname + badges -->
         <div class="card-head">
           <div class="title-line">
-            <strong class="hostname">{{ d.hostname }}</strong>
-            <span class="muted small">→ :{{ d.internalPort }}</span>
+            <strong class="hostname truncate">{{ d.hostname }}</strong>
+            <span class="muted small mono">:{{ d.internalPort }}</span>
           </div>
           <div class="badges">
-            <span v-if="d.httpsEnabled" class="badge accent">HTTPS</span>
+            <span v-if="d.httpsEnabled" class="badge tone-ok">
+              <AppIcon name="lock" :size="11" />
+              HTTPS
+            </span>
             <span v-else class="badge">HTTP</span>
             <span v-if="!d.enabled" class="badge">ปิดอยู่</span>
           </div>
@@ -408,22 +447,23 @@ async function copyIp(ip: string) {
 
         <!-- DNS status -->
         <div class="status-line">
-          <span class="pill" :class="dns(d.dnsStatus).tone">
-            {{ dns(d.dnsStatus).icon }} {{ dns(d.dnsStatus).label }}
+          <span class="badge" :class="dns(d.dnsStatus).tone">
+            <AppIcon :name="dns(d.dnsStatus).icon" :size="12" />
+            {{ dns(d.dnsStatus).label }}
           </span>
           <span class="muted tiny">ตรวจล่าสุด {{ fmtChecked(d.dnsCheckedAt) }}</span>
         </div>
         <p class="muted tiny hint">{{ dns(d.dnsStatus).hint }}</p>
         <p v-if="checkResults[d.id]?.resolved?.length" class="muted tiny mono">
-          resolve ได้: {{ checkResults[d.id]?.resolved.join(', ') }}
+          resolve ได้: {{ checkResults[d.id]?.resolved.join(", ") }}
         </p>
 
         <!-- TLS -->
         <div v-if="d.httpsEnabled" class="tls-section">
           <div class="tls-head">
             <span class="tls-label">ใบรับรอง TLS</span>
-            <span class="pill" :class="d.tlsMode === 'custom' ? 'info' : 'ok'">
-              {{ d.tlsMode === 'custom' ? 'ใบรับรองของคุณ' : "Let's Encrypt (อัตโนมัติ)" }}
+            <span class="badge" :class="d.tlsMode === 'custom' ? 'tone-info' : 'tone-ok'">
+              {{ d.tlsMode === "custom" ? "ใบรับรองของคุณ" : "Let's Encrypt (อัตโนมัติ)" }}
             </span>
           </div>
 
@@ -447,7 +487,8 @@ async function copyIp(ip: string) {
 
           <div v-if="!archived" class="tls-actions">
             <button class="secondary tiny" @click="openCertPanel(d.id)">
-              {{ d.tlsMode === 'custom' ? 'เปลี่ยนใบรับรอง' : 'อัปโหลดใบรับรองเอง' }}
+              <AppIcon name="key" :size="12" />
+              {{ d.tlsMode === "custom" ? "เปลี่ยนใบรับรอง" : "อัปโหลดใบรับรองเอง" }}
             </button>
             <button
               v-if="d.tlsMode === 'custom'"
@@ -455,39 +496,50 @@ async function copyIp(ip: string) {
               :disabled="removingCertId === d.id"
               @click="removeCertificate(d.id)"
             >
-              {{ removingCertId === d.id ? 'กำลังลบ…' : "กลับไปใช้ Let's Encrypt" }}
+              <span v-if="removingCertId === d.id" class="spinner" />
+              {{ removingCertId === d.id ? "กำลังลบ…" : "กลับไปใช้ Let's Encrypt" }}
             </button>
           </div>
 
           <!-- Upload panel -->
-          <div v-if="certPanelId === d.id" class="panel cert-panel">
+          <div v-if="certPanelId === d.id" class="inset stack cert-panel">
             <p class="muted tiny">
               วาง PEM ทั้งสองช่อง — ใบรับรองต้องครอบ <code>{{ d.hostname }}</code>
               และ private key ต้องไม่มี passphrase
             </p>
-            <label class="form-label tiny">Certificate (full chain)</label>
-            <textarea
-              v-model="certForm.certificate"
-              class="form-textarea mono"
-              rows="5"
-              placeholder="-----BEGIN CERTIFICATE-----&#10;…&#10;-----END CERTIFICATE-----"
-              spellcheck="false"
-            />
-            <label class="form-label tiny">Private key</label>
-            <textarea
-              v-model="certForm.privateKey"
-              class="form-textarea mono"
-              rows="5"
-              placeholder="-----BEGIN PRIVATE KEY-----&#10;…&#10;-----END PRIVATE KEY-----"
-              spellcheck="false"
-            />
-            <p v-if="certError" class="bad-text small">{{ certError }}</p>
+            <label class="stack-sm">
+              <span class="tiny">Certificate (full chain)</span>
+              <textarea
+                v-model="certForm.certificate"
+                class="mono"
+                rows="5"
+                placeholder="-----BEGIN CERTIFICATE-----&#10;…&#10;-----END CERTIFICATE-----"
+                spellcheck="false"
+              />
+            </label>
+            <label class="stack-sm">
+              <span class="tiny">Private key</span>
+              <textarea
+                v-model="certForm.privateKey"
+                class="mono"
+                rows="5"
+                placeholder="-----BEGIN PRIVATE KEY-----&#10;…&#10;-----END PRIVATE KEY-----"
+                spellcheck="false"
+              />
+            </label>
+            <p v-if="certError" class="alert alert-bad small">
+              <AppIcon name="alert" :size="13" />
+              <span>{{ certError }}</span>
+            </p>
             <div class="confirm-actions">
               <button
                 class="primary small"
                 :disabled="certSaving || !certForm.certificate.trim() || !certForm.privateKey.trim()"
                 @click="uploadCertificate(d.id)"
-              >{{ certSaving ? 'กำลังบันทึก…' : 'บันทึกใบรับรอง' }}</button>
+              >
+                <span v-if="certSaving" class="spinner" />
+                {{ certSaving ? "กำลังบันทึก…" : "บันทึกใบรับรอง" }}
+              </button>
               <button class="secondary small" @click="certPanelId = null">ยกเลิก</button>
             </div>
           </div>
@@ -496,23 +548,40 @@ async function copyIp(ip: string) {
         <!-- Actions -->
         <div v-if="!archived" class="card-actions">
           <button class="secondary small" :disabled="checkingId === d.id" @click="checkDns(d.id)">
-            {{ checkingId === d.id ? 'กำลังตรวจ…' : 'ตรวจ DNS' }}
+            <span v-if="checkingId === d.id" class="spinner" />
+            <AppIcon v-else name="refresh" :size="13" />
+            {{ checkingId === d.id ? "กำลังตรวจ…" : "ตรวจ DNS" }}
           </button>
           <button class="secondary small" @click="toggleEnabled(d)">
-            {{ d.enabled ? 'ปิดใช้งาน' : 'เปิดใช้งาน' }}
+            {{ d.enabled ? "ปิดใช้งาน" : "เปิดใช้งาน" }}
           </button>
-          <button class="danger small" @click="confirmDeleteId = d.id">ลบ</button>
+          <button class="danger small" @click="confirmDeleteId = d.id">
+            <AppIcon name="trash" :size="13" />
+            ลบ
+          </button>
         </div>
 
         <!-- inline confirm delete -->
         <div v-if="confirmDeleteId === d.id" class="confirm-delete">
-          <p class="warn-text small">ลบ domain <strong>{{ d.hostname }}</strong>? traffic ที่เข้ามาจะไม่ถูก route อีก</p>
-          <p v-if="deleteError" class="bad-text small">{{ deleteError }}</p>
+          <p class="alert alert-warn small">
+            <AppIcon name="alert" :size="13" />
+            <span>ลบ domain <strong>{{ d.hostname }}</strong>? traffic ที่เข้ามาจะไม่ถูก route อีก</span>
+          </p>
+          <p v-if="deleteError" class="alert alert-bad small">
+            <AppIcon name="alert" :size="13" />
+            <span>{{ deleteError }}</span>
+          </p>
           <div class="confirm-actions">
             <button class="danger small" :disabled="deleting" @click="deleteDomain(d.id)">
-              {{ deleting ? 'กำลังลบ…' : 'ยืนยันลบ' }}
+              <span v-if="deleting" class="spinner" />
+              {{ deleting ? "กำลังลบ…" : "ยืนยันลบ" }}
             </button>
-            <button class="secondary small" @click="confirmDeleteId = null; deleteError = ''">ยกเลิก</button>
+            <button
+              class="secondary small"
+              @click="confirmDeleteId = null; deleteError = ''"
+            >
+              ยกเลิก
+            </button>
           </div>
         </div>
       </li>
@@ -521,116 +590,154 @@ async function copyIp(ip: string) {
 </template>
 
 <style scoped>
-.domains-tab { display: flex; flex-direction: column; gap: 0.85rem; }
-.tab-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
-.section-title { margin: 0; font-size: 1rem; font-weight: 600; }
-.subtitle { margin: 0.15rem 0 0; }
-.empty { padding: 1.5rem 0; text-align: center; }
+.subtitle {
+  margin: 0.15rem 0 0;
+}
 
-.tiny { font-size: 0.75rem; }
-.small { font-size: 0.85rem; }
-.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
-
-/* ── DNS setup hint ────────────────────────────────────────────────── */
+/* ── DNS setup hint ── */
 .hint-box {
-  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
-  padding: 0.6rem 0.85rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  font-size: 0.85rem;
+  align-items: center;
+  flex-wrap: wrap;
 }
-.hint-label { color: var(--muted); }
 .ip-code {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  background: var(--bg); border: 1px solid var(--border);
-  padding: 0.1rem 0.4rem; border-radius: 4px; color: var(--text);
-}
-
-/* ── panels / forms ───────────────────────────────────────────────── */
-.panel {
+  background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  padding: 1rem;
-  display: flex; flex-direction: column; gap: 0.6rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--r-sm);
+  color: var(--text);
 }
-.form-row { display: flex; align-items: center; gap: 0.75rem; }
-.form-label { min-width: 140px; font-size: 0.85rem; color: var(--muted); }
-.form-input {
-  flex: 1; padding: 0.4rem 0.55rem;
-  border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--bg); color: var(--text); font-size: 0.9rem;
-}
-.form-input.short { max-width: 110px; flex: none; }
-.form-textarea {
-  width: 100%; padding: 0.5rem;
-  border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--bg); color: var(--text);
-  font-size: 0.75rem; line-height: 1.4; resize: vertical;
-}
-.form-checks { display: flex; gap: 1.25rem; flex-wrap: wrap; font-size: 0.85rem; }
 
-/* ── domain card ──────────────────────────────────────────────────── */
-.domain-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+/* ── add form ── */
+.short-field {
+  max-width: 160px;
+}
+.form-checks {
+  display: flex;
+  gap: var(--s-5);
+  flex-wrap: wrap;
+}
+.form-checks .check-row {
+  margin-bottom: 0;
+}
+
+/* ── domain card ── */
+.domain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
 .domain-card {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  padding: 0.9rem 1rem;
-  display: flex; flex-direction: column; gap: 0.45rem;
+  gap: var(--s-2);
+  display: flex;
+  flex-direction: column;
 }
-.domain-card.disabled { opacity: 0.6; }
-
-.card-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
-.title-line { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
-.hostname { font-size: 0.95rem; }
-.badges { display: flex; gap: 0.35rem; }
-
-.badge {
-  font-size: 0.7rem; padding: 0.1rem 0.45rem; border-radius: 999px;
-  background: var(--bg); border: 1px solid var(--border); color: var(--muted);
+.domain-card.disabled {
+  opacity: 0.6;
 }
-.badge.accent { color: var(--accent); border-color: var(--accent); }
 
-/* ── status pill ──────────────────────────────────────────────────── */
-.status-line { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
-.pill {
-  font-size: 0.75rem; font-weight: 600;
-  padding: 0.15rem 0.55rem; border-radius: 999px;
-  border: 1px solid currentColor;
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  flex-wrap: wrap;
 }
-.pill.ok    { color: var(--ok); }
-.pill.info  { color: var(--accent); }
-.pill.warn  { color: var(--warn); }
-.pill.bad   { color: var(--bad); }
-.pill.muted { color: var(--muted); }
-.hint { margin: 0; line-height: 1.5; }
+.title-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  min-width: 0;
+}
+.hostname {
+  font-size: var(--t-md);
+}
+.badges {
+  display: flex;
+  gap: var(--s-2);
+}
 
-.ok-text    { color: var(--ok); }
-.warn-text  { color: var(--warn); }
-.bad-text   { color: var(--bad); }
-.muted-text { color: var(--muted); }
+/* ── status ── */
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+.hint {
+  margin: 0;
+  line-height: 1.5;
+}
 
-/* ── TLS section ──────────────────────────────────────────────────── */
+.warn-text {
+  color: var(--warn);
+}
+.bad-text {
+  color: var(--bad);
+}
+.ok-text {
+  color: var(--ok);
+}
+
+/* ── TLS section ── */
 .tls-section {
-  margin-top: 0.35rem; padding-top: 0.6rem;
-  border-top: 1px solid var(--border);
-  display: flex; flex-direction: column; gap: 0.45rem;
+  margin-top: var(--s-1);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
 }
-.tls-head { display: flex; align-items: center; gap: 0.6rem; }
-.tls-label { font-size: 0.85rem; font-weight: 600; }
-.cert-info { display: flex; flex-direction: column; gap: 0.2rem; }
-.cert-row { display: flex; gap: 0.6rem; align-items: baseline; }
-.cert-row > span:first-child { min-width: 70px; }
-.tls-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.cert-panel { margin-top: 0.35rem; }
+.tls-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.tls-label {
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+.cert-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.cert-row {
+  display: flex;
+  gap: var(--s-3);
+  align-items: baseline;
+}
+.cert-row > span:first-child {
+  min-width: 70px;
+}
+.tls-actions {
+  display: flex;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+.cert-panel {
+  margin-top: var(--s-1);
+}
 
-/* ── actions ──────────────────────────────────────────────────────── */
-.card-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.35rem; }
-.confirm-delete {
-  border-top: 1px solid var(--border); margin-top: 0.35rem; padding-top: 0.6rem;
-  display: flex; flex-direction: column; gap: 0.4rem;
+/* ── actions ── */
+.card-actions {
+  display: flex;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  margin-top: var(--s-1);
 }
-.confirm-actions { display: flex; gap: 0.5rem; }
+.confirm-delete {
+  border-top: 1px solid var(--border-subtle);
+  margin-top: var(--s-1);
+  padding-top: var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.confirm-actions {
+  display: flex;
+  gap: var(--s-2);
+}
 </style>

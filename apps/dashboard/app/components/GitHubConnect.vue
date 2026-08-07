@@ -80,37 +80,49 @@ const activeInstallations = computed(
 </script>
 
 <template>
-  <div class="github-connect">
+  <div class="stack">
     <template v-if="loading">
-      <p class="muted">กำลังโหลด GitHub integration status…</p>
+      <div class="stack-sm">
+        <span class="skeleton" style="height: 1em; width: 70%" />
+        <span class="skeleton" style="height: 1em; width: 40%" />
+      </div>
     </template>
 
     <!-- Master key ยังไม่ configure -->
     <template v-else-if="statusError || !masterKeyReady">
-      <div class="not-configured">
-        <p class="muted">
-          Master key ยังไม่ได้ configure — GitHub App credentials ต้องเข้ารหัสก่อนเก็บ
-        </p>
-        <p class="muted small">
-          ตั้งค่า <code>ZIXPLOY_MASTER_KEY_FILE</code> บนเซิร์ฟเวอร์แล้ว restart Control API
-        </p>
-        <NuxtLink to="/settings/github" class="small">ดูรายละเอียดที่ GitHub Apps settings →</NuxtLink>
+      <div class="alert alert-warn">
+        <AppIcon name="key" :size="16" />
+        <div class="stack-sm">
+          <strong>Master key ยังไม่ได้ configure</strong>
+          <span>GitHub App credentials ต้องเข้ารหัสก่อนเก็บ — ตั้งค่า <code>ZIXPLOY_MASTER_KEY_FILE</code> บนเซิร์ฟเวอร์แล้ว restart Control API</span>
+          <NuxtLink to="/settings/github" class="inline-link">
+            ดูรายละเอียดที่ GitHub Apps settings
+            <AppIcon name="chevronRight" :size="12" />
+          </NuxtLink>
+        </div>
       </div>
     </template>
 
     <!-- ยังไม่มี GitHub App -->
     <template v-else-if="apps.length === 0">
-      <div class="no-app">
-        <p class="muted">ยังไม่มี GitHub App — สร้าง app จากหน้า settings เพื่อเชื่อมต่อ repository</p>
-        <NuxtLink to="/settings/github" class="btn-link primary">สร้าง GitHub App</NuxtLink>
+      <div class="empty">
+        <span class="empty-icon"><AppIcon name="github" :size="20" /></span>
+        <span class="empty-title">ยังไม่มี GitHub App</span>
+        <p class="small">สร้าง app จากหน้า settings เพื่อเชื่อมต่อ repository</p>
+        <NuxtLink to="/settings/github" class="btn primary">
+          สร้าง GitHub App
+        </NuxtLink>
       </div>
     </template>
 
     <!-- มี app แล้วแต่ยังไม่ได้ install -->
     <template v-else-if="activeInstallations.length === 0">
-      <p class="muted">มี GitHub App แล้ว แต่ยังไม่ได้ติดตั้งกับ account ใด</p>
-      <p v-if="installError" class="error-text">{{ installError }}</p>
-      <div class="app-buttons">
+      <p class="muted small">มี GitHub App แล้ว แต่ยังไม่ได้ติดตั้งกับ account ใด</p>
+      <p v-if="installError" class="alert alert-bad">
+        <AppIcon name="alert" :size="15" />
+        <span>{{ installError }}</span>
+      </p>
+      <div class="actions">
         <button
           v-for="app in apps"
           :key="app.id"
@@ -118,6 +130,7 @@ const activeInstallations = computed(
           :disabled="installLoading"
           @click="installApp(app.id)"
         >
+          <span v-if="installLoading" class="spinner" />
           {{ installLoading ? "กำลัง redirect…" : `Install ${app.name}` }}
         </button>
       </div>
@@ -126,7 +139,7 @@ const activeInstallations = computed(
     <!-- พร้อมใช้ -->
     <template v-else>
       <div class="install-list">
-        <div v-for="install in activeInstallations" :key="install.id" class="install-item">
+        <div v-for="install in activeInstallations" :key="install.id" class="inset install-item">
           <img
             v-if="install.accountAvatarUrl"
             :src="install.accountAvatarUrl"
@@ -135,92 +148,65 @@ const activeInstallations = computed(
             width="24"
             height="24"
           />
+          <span v-else class="avatar avatar-fallback" aria-hidden="true">
+            {{ install.accountLogin.charAt(0).toUpperCase() }}
+          </span>
           <span class="account-name">{{ install.accountLogin }}</span>
-          <span class="account-type muted">{{ install.accountType }}</span>
-          <span v-if="install.appName" class="muted small">via {{ install.appName }}</span>
+          <span class="muted small">{{ install.accountType }}</span>
+          <span v-if="install.appName" class="muted tiny">via {{ install.appName }}</span>
         </div>
       </div>
 
-      <div class="add-more">
-        <NuxtLink to="/settings/github" class="btn-link secondary small">จัดการ GitHub Apps</NuxtLink>
-        <button class="secondary small" @click="() => refreshInstallations()">รีเฟรช</button>
+      <div class="row wrap">
+        <NuxtLink to="/settings/github" class="btn secondary small">จัดการ GitHub Apps</NuxtLink>
+        <button class="ghost small" @click="() => refreshInstallations()">
+          <AppIcon name="refresh" :size="13" />
+          รีเฟรช
+        </button>
       </div>
-      <p v-if="installError" class="error-text">{{ installError }}</p>
+      <p v-if="installError" class="alert alert-bad">
+        <AppIcon name="alert" :size="15" />
+        <span>{{ installError }}</span>
+      </p>
     </template>
   </div>
 </template>
 
 <style scoped>
-.github-connect {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+.inline-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: var(--t-sm);
 }
-.not-configured,
-.no-app {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  align-items: flex-start;
-}
-.not-configured code {
-  font-size: 0.8125rem;
-  background: var(--surface-alt, var(--surface));
-  padding: 0.15rem 0.4rem;
-  border-radius: 3px;
-}
-.btn-link {
-  display: inline-block;
-  padding: 0.4rem 0.9rem;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  text-decoration: none;
-}
-.btn-link.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-.btn-link:hover {
-  text-decoration: none;
-}
-.app-buttons {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
+
 .install-list {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--s-2);
 }
 .install-item {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--s-3);
 }
 .avatar {
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   object-fit: cover;
+  flex-shrink: 0;
+}
+.avatar-fallback {
+  display: grid;
+  place-items: center;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 .account-name {
   font-weight: 500;
-}
-.account-type {
-  font-size: 0.8125rem;
-}
-.add-more {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  align-items: center;
-  margin-top: 0.25rem;
-}
-.small {
-  font-size: 0.8125rem;
-  padding: 0.3rem 0.75rem;
-}
-.btn-link.small {
-  padding: 0.3rem 0.75rem;
 }
 </style>

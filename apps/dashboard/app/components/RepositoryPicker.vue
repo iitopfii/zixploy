@@ -166,7 +166,7 @@ function confirmPick(branch: string) {
 </script>
 
 <template>
-  <div class="repo-picker">
+  <div class="stack">
     <!-- Breadcrumb -->
     <div class="breadcrumb">
       <button
@@ -177,7 +177,7 @@ function confirmPick(branch: string) {
       >
         1. App
       </button>
-      <span class="sep">›</span>
+      <AppIcon name="chevronRight" :size="12" class="sep-icon" />
       <button
         class="crumb"
         :class="{ active: step === 'repo' }"
@@ -186,17 +186,17 @@ function confirmPick(branch: string) {
       >
         2. Repository
       </button>
-      <span class="sep">›</span>
+      <AppIcon name="chevronRight" :size="12" class="sep-icon" />
       <span class="crumb" :class="{ active: step === 'branch' }">3. Branch</span>
     </div>
 
     <!-- Step 1: เลือก App + account -->
     <template v-if="step === 'app'">
-      <p v-if="appGroups.length === 0" class="muted">
+      <p v-if="appGroups.length === 0" class="muted small">
         ยังไม่มี GitHub App ที่ติดตั้ง — สร้างและติดตั้งที่หน้า settings ก่อน
       </p>
 
-      <div v-for="group in appGroups" :key="group.appId" class="app-group">
+      <div v-for="group in appGroups" :key="group.appId" class="inset app-group">
         <div class="app-group-head">
           <strong>{{ group.appName }}</strong>
           <span class="muted small">{{ group.items.length }} account</span>
@@ -217,9 +217,13 @@ function confirmPick(branch: string) {
               width="22"
               height="22"
             />
+            <span v-else class="avatar avatar-fallback" aria-hidden="true">
+              {{ inst.accountLogin.charAt(0).toUpperCase() }}
+            </span>
             <span class="account-name">{{ inst.accountLogin }}</span>
             <span class="muted small">{{ inst.accountType }}</span>
-            <span v-if="inst.status === 'suspended'" class="badge warn">Suspended</span>
+            <span v-if="inst.status === 'suspended'" class="status status-mismatch">Suspended</span>
+            <AppIcon v-else name="chevronRight" :size="14" class="chevron" />
           </li>
         </ul>
       </div>
@@ -228,32 +232,40 @@ function confirmPick(branch: string) {
     <!-- Step 2: Repository -->
     <template v-else-if="step === 'repo'">
       <div class="selected-context">
-        <button class="back-btn secondary small" @click="backToApps">← เปลี่ยน app</button>
+        <button class="secondary tiny" @click="backToApps">
+          <AppIcon name="arrowLeft" :size="12" />
+          เปลี่ยน app
+        </button>
         <span class="muted small">
           {{ selectedInstallation?.appName }} / {{ selectedInstallation?.accountLogin }}
         </span>
       </div>
 
-      <p v-if="selectedInstallation?.status === 'suspended'" class="warn-text">
-        ⚠️ GitHub installation นี้ถูก suspend — unsuspend ผ่าน GitHub App settings ก่อน
+      <p v-if="selectedInstallation?.status === 'suspended'" class="alert alert-warn">
+        <AppIcon name="alert" :size="14" />
+        <span>GitHub installation นี้ถูก suspend — unsuspend ผ่าน GitHub App settings ก่อน</span>
       </p>
 
       <div class="search-bar">
-        <input
-          v-model="searchQuery"
-          type="search"
-          placeholder="ค้นหา repository…"
-          class="search-input"
-          @input="page = 1"
-        />
-        <button class="secondary small" @click="() => refreshRepos()">รีเฟรช</button>
+        <div class="search-field">
+          <AppIcon name="search" :size="14" />
+          <input v-model="searchQuery" type="search" placeholder="ค้นหา repository…" @input="page = 1" />
+        </div>
+        <button class="secondary small icon" title="รีเฟรช" aria-label="รีเฟรช" @click="() => refreshRepos()">
+          <AppIcon name="refresh" :size="14" />
+        </button>
       </div>
 
-      <p v-if="repoLoading" class="muted">กำลังโหลด repositories…</p>
+      <div v-if="repoLoading" class="stack-sm">
+        <span class="skeleton" style="height: 52px" />
+        <span class="skeleton" style="height: 52px" />
+        <span class="skeleton" style="height: 52px" />
+      </div>
 
-      <div v-else-if="repoError" class="error-state">
-        <p class="error-text">ไม่สามารถดึง repositories ได้</p>
-        <button class="secondary small" @click="() => refreshRepos()">ลองใหม่</button>
+      <div v-else-if="repoError" class="alert alert-bad">
+        <AppIcon name="alert" :size="15" />
+        <span>ไม่สามารถดึง repositories ได้</span>
+        <button class="secondary tiny" @click="() => refreshRepos()">ลองใหม่</button>
       </div>
 
       <template v-else-if="filteredRepos.length > 0">
@@ -266,47 +278,50 @@ function confirmPick(branch: string) {
           >
             <div class="repo-info">
               <span class="repo-name">{{ repo.fullName }}</span>
-              <span v-if="repo.private" class="badge private">Private</span>
+              <span v-if="repo.private" class="badge tone-warn">Private</span>
             </div>
-            <span v-if="repo.description" class="repo-desc muted">{{ repo.description }}</span>
+            <span v-if="repo.description" class="repo-desc muted truncate">{{ repo.description }}</span>
           </li>
         </ul>
 
         <!-- pagination -->
         <div v-if="totalPages > 1" class="pagination">
-          <button :disabled="!hasPrev" class="secondary small" @click="page--">← ก่อนหน้า</button>
+          <button :disabled="!hasPrev" class="secondary small" @click="page--">ก่อนหน้า</button>
           <span class="muted small">หน้า {{ page }} / {{ totalPages }}</span>
-          <button :disabled="!hasNext" class="secondary small" @click="page++">ถัดไป →</button>
+          <button :disabled="!hasNext" class="secondary small" @click="page++">ถัดไป</button>
         </div>
       </template>
 
-      <p v-else-if="searchQuery" class="muted">ไม่พบ repository ที่ตรงกับ "{{ searchQuery }}"</p>
-      <p v-else class="muted">ไม่มี repository ที่เข้าถึงได้ — ตรวจสอบ GitHub App permissions</p>
+      <p v-else-if="searchQuery" class="muted small">ไม่พบ repository ที่ตรงกับ "{{ searchQuery }}"</p>
+      <p v-else class="muted small">ไม่มี repository ที่เข้าถึงได้ — ตรวจสอบ GitHub App permissions</p>
     </template>
 
     <!-- Step 3: Branch -->
     <template v-else>
       <div class="selected-context">
-        <button class="back-btn secondary small" @click="selectedRepo = null">
-          ← เปลี่ยน repository
+        <button class="secondary tiny" @click="selectedRepo = null">
+          <AppIcon name="arrowLeft" :size="12" />
+          เปลี่ยน repository
         </button>
         <strong>{{ selectedRepo?.fullName }}</strong>
-        <span v-if="selectedRepo?.private" class="badge private">Private</span>
+        <span v-if="selectedRepo?.private" class="badge tone-warn">Private</span>
       </div>
 
       <div class="search-bar">
-        <input
-          v-model="searchBranch"
-          type="search"
-          placeholder="ค้นหา branch…"
-          class="search-input"
-        />
+        <div class="search-field">
+          <AppIcon name="search" :size="14" />
+          <input v-model="searchBranch" type="search" placeholder="ค้นหา branch…" />
+        </div>
       </div>
 
-      <p v-if="branchLoading" class="muted">กำลังโหลด branches…</p>
+      <div v-if="branchLoading" class="stack-sm">
+        <span class="skeleton" style="height: 42px" />
+        <span class="skeleton" style="height: 42px" />
+      </div>
 
-      <div v-else-if="branchError" class="error-state">
-        <p class="error-text">ไม่สามารถดึง branches ได้</p>
+      <div v-else-if="branchError" class="alert alert-bad">
+        <AppIcon name="alert" :size="15" />
+        <span>ไม่สามารถดึง branches ได้</span>
       </div>
 
       <template v-else-if="filteredBranches.length > 0">
@@ -318,12 +333,11 @@ function confirmPick(branch: string) {
             :class="{ selected: selectedBranch === branch.name }"
             @click="selectedBranch = branch.name"
           >
-            <span class="branch-name">{{ branch.name }}</span>
-            <span v-if="branch.protected" class="badge protected">Protected</span>
-            <span
-              v-if="branch.name === selectedRepo?.defaultBranch"
-              class="badge default"
-            >Default</span>
+            <span class="branch-name mono">{{ branch.name }}</span>
+            <span v-if="branch.protected" class="badge tone-info">Protected</span>
+            <span v-if="branch.name === selectedRepo?.defaultBranch" class="badge tone-ok">
+              Default
+            </span>
           </li>
         </ul>
 
@@ -338,107 +352,134 @@ function confirmPick(branch: string) {
         </div>
       </template>
 
-      <p v-else class="muted">ไม่พบ branch ที่ตรงกับ "{{ searchBranch }}"</p>
+      <p v-else class="muted small">ไม่พบ branch ที่ตรงกับ "{{ searchBranch }}"</p>
     </template>
   </div>
 </template>
 
 <style scoped>
-.repo-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
 .breadcrumb {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  font-size: 0.8125rem;
+  gap: var(--s-1);
 }
 .crumb {
   background: none;
   border: none;
+  box-shadow: none;
+  height: auto;
   padding: 0.15rem 0.35rem;
-  color: var(--muted);
-  font-size: 0.8125rem;
+  color: var(--text-muted);
+  font-size: var(--t-sm);
+}
+.crumb:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text-secondary);
 }
 .crumb:disabled {
   cursor: default;
+  opacity: 1;
 }
 .crumb.active {
   color: var(--accent);
   font-weight: 600;
 }
-.sep {
-  color: var(--muted);
+.sep-icon {
+  color: var(--text-faint);
 }
+
 .app-group {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.65rem 0.85rem;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: var(--s-2);
 }
 .app-group-head {
   display: flex;
   align-items: baseline;
-  gap: 0.6rem;
+  gap: var(--s-3);
 }
+
 .account-list {
   list-style: none;
   padding: 0;
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: var(--s-1);
 }
 .account-item {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.6rem;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r);
   cursor: pointer;
+  background: var(--surface-1);
+  transition: background var(--fast), border-color var(--fast);
 }
-.account-item:hover {
-  background: var(--surface-alt, color-mix(in srgb, var(--surface) 80%, var(--accent)));
+.account-item:hover:not(.suspended) {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
 }
 .account-item.suspended {
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 0.55;
 }
 .account-name {
   font-weight: 500;
+  font-size: var(--t-sm);
 }
+.chevron {
+  margin-left: auto;
+  color: var(--text-faint);
+}
+
 .avatar {
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   object-fit: cover;
+  flex-shrink: 0;
 }
+.avatar-fallback {
+  display: grid;
+  place-items: center;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
 .selected-context {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--s-3);
   flex-wrap: wrap;
 }
-.back-btn {
-  font-size: 0.8125rem;
-}
+
 .search-bar {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--s-2);
   align-items: center;
 }
-.search-input {
+.search-field {
+  position: relative;
   flex: 1;
-  padding: 0.4rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  color: var(--text);
-  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
 }
+.search-field :deep(.icon) {
+  position: absolute;
+  left: 0.6rem;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.search-field input {
+  padding-left: 2rem;
+}
+
 .repo-list,
 .branch-list {
   list-style: none;
@@ -446,91 +487,60 @@ function confirmPick(branch: string) {
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: var(--s-1);
   max-height: 320px;
   overflow-y: auto;
 }
 .repo-item,
 .branch-item {
-  padding: 0.5rem 0.75rem;
+  padding: var(--s-2) var(--s-3);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r);
   cursor: pointer;
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+  background: var(--surface-1);
+  transition: background var(--fast), border-color var(--fast);
 }
 .repo-item:hover,
 .branch-item:hover {
-  background: var(--surface-alt, color-mix(in srgb, var(--surface) 80%, var(--accent)));
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+.branch-item {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--s-2);
 }
 .branch-item.selected {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: var(--accent-tint);
 }
 .repo-info {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--s-2);
 }
 .repo-name {
   font-weight: 500;
+  font-size: var(--t-sm);
 }
 .repo-desc {
-  font-size: 0.8125rem;
+  font-size: var(--t-xs);
 }
 .branch-name {
-  font-family: monospace;
+  font-size: var(--t-sm);
 }
-.badge {
-  font-size: 0.7rem;
-  padding: 0.1rem 0.4rem;
-  border-radius: 99px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-.badge.private {
-  background: color-mix(in srgb, var(--warn) 15%, transparent);
-  color: var(--warn);
-}
-.badge.protected {
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--accent);
-}
-.badge.default {
-  background: color-mix(in srgb, var(--ok) 15%, transparent);
-  color: var(--ok);
-}
-.badge.warn {
-  background: color-mix(in srgb, var(--warn) 15%, transparent);
-  color: var(--warn);
-}
+
 .pagination {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.75rem;
+  gap: var(--s-3);
 }
 .branch-actions {
   display: flex;
   justify-content: flex-end;
-}
-.error-state {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-.warn-text {
-  color: var(--warn);
-  font-size: 0.875rem;
-  margin: 0;
-}
-.small {
-  font-size: 0.8125rem;
-  padding: 0.3rem 0.75rem;
-}
-.muted.small,
-span.small {
-  padding: 0;
 }
 </style>

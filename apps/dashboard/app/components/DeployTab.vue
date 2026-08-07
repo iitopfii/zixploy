@@ -166,139 +166,168 @@ async function cancel(deploymentId: string) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function statusClass(s: string) {
-  if (s === "succeeded") return "badge-ok";
-  if (s === "failed" || s === "cancelled") return "badge-err";
-  return "badge-run";
-}
-
-function fmtTime(ms: number | null) {
-  if (!ms) return "—";
-  return new Date(ms).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
-}
-
 function fmtDuration(start: number | null, end: number | null) {
   if (!start || !end) return null;
   const s = Math.round((end - start) / 1000);
   if (s < 60) return `${s}s`;
   return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
-
-function shortSha(sha: string) {
-  return sha.slice(0, 7);
-}
 </script>
 
 <template>
-  <div class="deploy-tab">
+  <div class="stack-lg">
     <!-- Action buttons -->
-    <div v-if="!archived" class="actions-row">
-      <button class="primary" :disabled="!!busy || !hasSource" @click="deploy">
-        {{ busy === 'Deploy' ? 'กำลัง deploy…' : 'Deploy' }}
-      </button>
-      <button :disabled="!!busy || deployments.length === 0" @click="redeploy">
-        {{ busy === 'Redeploy' ? 'กำลัง…' : 'Redeploy' }}
-      </button>
-      <button :disabled="!!busy" @click="restart">
-        {{ busy === 'Restart' ? 'กำลัง…' : 'Restart' }}
-      </button>
-      <button class="danger" :disabled="!!busy" @click="stop">
-        {{ busy === 'Stop' ? 'กำลัง…' : 'Stop' }}
-      </button>
-    </div>
-    <p v-if="!hasSource" class="muted small">⚠️ ตั้งค่า Source repository ก่อนจึงจะ Deploy ได้</p>
+    <div class="stack">
+      <div v-if="!archived" class="actions">
+        <button class="primary" :disabled="!!busy || !hasSource" @click="deploy">
+          <span v-if="busy === 'Deploy'" class="spinner" />
+          <AppIcon v-else name="rotate" :size="15" />
+          {{ busy === "Deploy" ? "กำลัง deploy…" : "Deploy" }}
+        </button>
+        <button class="secondary" :disabled="!!busy || deployments.length === 0" @click="redeploy">
+          <span v-if="busy === 'Redeploy'" class="spinner" />
+          {{ busy === "Redeploy" ? "กำลัง…" : "Redeploy" }}
+        </button>
+        <button class="secondary" :disabled="!!busy" @click="restart">
+          <span v-if="busy === 'Restart'" class="spinner" />
+          {{ busy === "Restart" ? "กำลัง…" : "Restart" }}
+        </button>
+        <button class="danger" :disabled="!!busy" @click="stop">
+          <span v-if="busy === 'Stop'" class="spinner" />
+          <AppIcon v-else name="stop" :size="14" />
+          {{ busy === "Stop" ? "กำลัง…" : "Stop" }}
+        </button>
+      </div>
+      <p v-if="!hasSource" class="alert alert-warn">
+        <AppIcon name="alert" :size="15" />
+        <span>ตั้งค่า Source repository ก่อนจึงจะ Deploy ได้</span>
+      </p>
 
-    <p v-if="actionError" class="error-text">{{ actionError }}</p>
-    <p v-if="actionOk" class="ok-text">✓ {{ actionOk }}</p>
+      <p v-if="actionError" class="alert alert-bad">
+        <AppIcon name="alert" :size="15" />
+        <span>{{ actionError }}</span>
+      </p>
+      <p v-if="actionOk" class="alert alert-ok">
+        <AppIcon name="check" :size="15" />
+        <span>{{ actionOk }}</span>
+      </p>
+    </div>
 
     <!-- Deployment list -->
-    <div class="section-head">
-      <h2 class="section-title">ประวัติ Deployment</h2>
-      <button class="secondary small" :disabled="loadingList" @click="fetchDeployments()">↺ รีเฟรช</button>
+    <div>
+      <div class="row-between section-head">
+        <h2 class="section-title">ประวัติ Deployment</h2>
+        <button class="ghost small icon" :disabled="loadingList" title="รีเฟรช" aria-label="รีเฟรช" @click="fetchDeployments()">
+          <AppIcon name="refresh" :size="14" />
+        </button>
+      </div>
+
+      <div v-if="loadingList" class="stack">
+        <span class="skeleton" style="height: 64px" />
+        <span class="skeleton" style="height: 64px" />
+      </div>
+      <p v-else-if="listError" class="alert alert-bad">
+        <AppIcon name="alert" :size="15" />
+        <span>{{ listError }}</span>
+      </p>
+      <div v-else-if="deployments.length === 0" class="empty">
+        <span class="empty-icon"><AppIcon name="rotate" :size="20" /></span>
+        <span class="empty-title">ยังไม่เคย deploy</span>
+      </div>
+
+      <ul v-else class="deploy-list">
+        <li v-for="d in deployments" :key="d.id" class="inset deploy-item">
+          <div class="deploy-header">
+            <span class="status" :class="`status-${d.status}`">{{ d.status }}</span>
+            <code class="mono small">{{ shortSha(d.commitSha) }}</code>
+            <span class="meta muted small">{{ d.trigger }}</span>
+            <span class="meta muted small" :title="fullDateTime(d.queuedAt)">
+              {{ timeAgo(d.queuedAt) }}
+            </span>
+            <span v-if="fmtDuration(d.startedAt, d.finishedAt)" class="meta muted small">
+              <AppIcon name="clock" :size="11" />
+              {{ fmtDuration(d.startedAt, d.finishedAt) }}
+            </span>
+          </div>
+
+          <p v-if="d.commitMessage" class="commit-msg truncate">{{ d.commitMessage }}</p>
+
+          <p v-if="d.status === 'failed' && d.failureMessage" class="alert alert-bad small">
+            <AppIcon name="alert" :size="13" />
+            <span>{{ d.failureCode }}: {{ d.failureMessage }}</span>
+          </p>
+
+          <div v-if="!archived" class="deploy-item-actions">
+            <button
+              v-if="IN_FLIGHT.includes(d.status)"
+              class="danger tiny"
+              :disabled="!!busy"
+              @click="cancel(d.id)"
+            >
+              Cancel
+            </button>
+            <button
+              v-if="d.status === 'succeeded'"
+              class="secondary tiny"
+              :disabled="!!busy"
+              @click="rollback(d.id)"
+            >
+              Rollback
+            </button>
+          </div>
+        </li>
+      </ul>
+
+      <button
+        v-if="nextCursor && !loadingList"
+        class="secondary small load-more"
+        @click="fetchDeployments(nextCursor)"
+      >
+        โหลดเพิ่มเติม…
+      </button>
     </div>
-
-    <p v-if="loadingList" class="muted">กำลังโหลด…</p>
-    <p v-else-if="listError" class="error-text">{{ listError }}</p>
-    <p v-else-if="deployments.length === 0" class="muted">ยังไม่เคย deploy</p>
-
-    <ul v-else class="deploy-list">
-      <li v-for="d in deployments" :key="d.id" class="deploy-item">
-        <div class="deploy-header">
-          <span class="badge" :class="statusClass(d.status)">{{ d.status }}</span>
-          <code class="sha">{{ shortSha(d.commitSha) }}</code>
-          <span class="trigger muted">{{ d.trigger }}</span>
-          <span class="time muted">{{ fmtTime(d.queuedAt) }}</span>
-          <span v-if="fmtDuration(d.startedAt, d.finishedAt)" class="duration muted">
-            {{ fmtDuration(d.startedAt, d.finishedAt) }}
-          </span>
-        </div>
-
-        <p v-if="d.commitMessage" class="commit-msg">{{ d.commitMessage }}</p>
-
-        <p v-if="d.status === 'failed' && d.failureMessage" class="error-text small">
-          {{ d.failureCode }}: {{ d.failureMessage }}
-        </p>
-
-        <div v-if="!archived" class="deploy-item-actions">
-          <button
-            v-if="IN_FLIGHT.includes(d.status)"
-            class="danger small"
-            :disabled="!!busy"
-            @click="cancel(d.id)"
-          >Cancel</button>
-          <button
-            v-if="d.status === 'succeeded'"
-            class="secondary small"
-            :disabled="!!busy"
-            @click="rollback(d.id)"
-          >Rollback</button>
-        </div>
-      </li>
-    </ul>
-
-    <button
-      v-if="nextCursor && !loadingList"
-      class="secondary small"
-      @click="fetchDeployments(nextCursor)"
-    >โหลดเพิ่มเติม…</button>
   </div>
 </template>
 
 <style scoped>
-.deploy-tab { display: flex; flex-direction: column; gap: 1rem; }
-.actions-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.section-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 0.5rem; }
-.section-title { margin: 0; font-size: 1rem; font-weight: 600; }
+.section-head {
+  margin-bottom: var(--s-3);
+}
 
-.deploy-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
-.deploy-item {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.75rem 1rem;
+.deploy-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: var(--s-2);
 }
-.deploy-header { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
-.badge { font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 999px; font-weight: 600; }
-.badge-ok { background: var(--success-bg, #d1fae5); color: var(--success, #065f46); }
-.badge-err { background: var(--error-bg, #fee2e2); color: var(--error, #991b1b); }
-.badge-run { background: var(--accent-bg, #dbeafe); color: var(--accent); }
-.sha { font-size: 0.8rem; }
-.trigger, .time, .duration { font-size: 0.8rem; }
-.commit-msg { margin: 0; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.deploy-item-actions { display: flex; gap: 0.5rem; }
-
-@media (prefers-color-scheme: dark) {
-  .badge-ok { background: #064e3b; color: #6ee7b7; }
-  .badge-err { background: #7f1d1d; color: #fca5a5; }
-  .badge-run { background: #1e3a5f; color: #93c5fd; }
+.deploy-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
 }
-:root[data-theme="dark"] .badge-ok { background: #064e3b; color: #6ee7b7; }
-:root[data-theme="dark"] .badge-err { background: #7f1d1d; color: #fca5a5; }
-:root[data-theme="dark"] .badge-run { background: #1e3a5f; color: #93c5fd; }
+.deploy-header {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+.meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.commit-msg {
+  margin: 0;
+  font-size: var(--t-sm);
+  color: var(--text-secondary);
+}
+.deploy-item-actions {
+  display: flex;
+  gap: var(--s-2);
+}
+.load-more {
+  margin-top: var(--s-3);
+}
 </style>

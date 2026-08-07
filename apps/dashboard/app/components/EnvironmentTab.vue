@@ -201,156 +201,180 @@ async function save() {
 </script>
 
 <template>
-  <div class="env-tab">
-    <div class="env-header">
+  <div class="stack-lg">
+    <div class="row-between">
       <h2 class="section-title">Environment Variables</h2>
-      <div class="header-actions">
-        <button v-if="!archived" class="secondary small" @click="showImport = !showImport">
-          {{ showImport ? 'ปิด' : 'Import .env' }}
-        </button>
-      </div>
+      <button v-if="!archived" class="secondary small" @click="showImport = !showImport">
+        <AppIcon :name="showImport ? 'x' : 'copy'" :size="13" />
+        {{ showImport ? "ปิด" : "Import .env" }}
+      </button>
     </div>
 
     <!-- Import panel -->
-    <div v-if="showImport" class="import-panel">
+    <div v-if="showImport" class="inset stack">
       <p class="muted small">วาง .env content (KEY=VALUE) — ตรวจสอบก่อน save</p>
       <textarea
         v-model="importContent"
-        class="env-textarea"
+        class="mono"
         placeholder="DB_HOST=localhost&#10;API_KEY=secret"
         rows="6"
       />
-      <p v-if="importError" class="error-text small">{{ importError }}</p>
-      <div class="import-actions">
+      <p v-if="importError" class="alert alert-bad small">
+        <AppIcon name="alert" :size="13" />
+        <span>{{ importError }}</span>
+      </p>
+      <div class="actions">
         <button class="primary small" :disabled="importing || !importContent.trim()" @click="importDotEnv">
-          {{ importing ? 'กำลัง parse…' : 'Parse & Merge' }}
+          <span v-if="importing" class="spinner" />
+          {{ importing ? "กำลัง parse…" : "Parse & Merge" }}
         </button>
-        <button class="secondary small" @click="showImport = false; importContent = ''; importError = ''">ยกเลิก</button>
+        <button
+          class="secondary small"
+          @click="showImport = false; importContent = ''; importError = ''"
+        >
+          ยกเลิก
+        </button>
       </div>
     </div>
 
-    <p v-if="loading" class="muted">กำลังโหลด…</p>
-    <p v-else-if="loadError" class="error-text">{{ loadError }}</p>
+    <div v-if="loading" class="stack">
+      <span class="skeleton" style="height: 36px" />
+      <span class="skeleton" style="height: 36px" />
+    </div>
+    <p v-else-if="loadError" class="alert alert-bad">
+      <AppIcon name="alert" :size="15" />
+      <span>{{ loadError }}</span>
+    </p>
 
     <!-- Editor -->
     <template v-else>
-      <div class="env-grid-head">
-        <span>KEY</span>
-        <span>VALUE</span>
-        <span>Scope</span>
-        <span>Secret</span>
-        <span>On</span>
-        <span />
-      </div>
-      <div v-for="(row, i) in rows" :key="i" class="env-grid-row">
-        <input
-          v-model="row.key"
-          class="env-input code"
-          placeholder="KEY"
-          :disabled="archived"
-          @input="onRowChange"
-        />
-        <input
-          v-model="row.value"
-          class="env-input"
-          :type="row.isSecret ? 'password' : 'text'"
-          :placeholder="row.isExisting ? '(ไม่เปลี่ยน)' : 'value'"
-          :disabled="archived"
-          @input="onRowChange"
-        />
-        <select v-model="row.scope" class="env-select" :disabled="archived" @change="onRowChange">
-          <option value="runtime">runtime</option>
-          <option value="build">build</option>
-          <option value="both">both</option>
-        </select>
-        <input type="checkbox" v-model="row.isSecret" :disabled="archived" @change="onRowChange" />
-        <input type="checkbox" v-model="row.enabled" :disabled="archived" @change="onRowChange" />
-        <button v-if="!archived" class="danger tiny" @click="removeRow(i)">✕</button>
-      </div>
-
-      <div class="env-footer">
-        <button v-if="!archived" class="secondary small" @click="addRow">+ เพิ่ม variable</button>
-        <div class="save-area">
-          <p v-if="saveError" class="error-text small">{{ saveError }}</p>
-          <p v-if="saveOk" class="ok-text small">✓ บันทึกแล้ว</p>
+      <div v-if="rows.length > 0" class="env-grid">
+        <div class="env-grid-head">
+          <span>KEY</span>
+          <span>VALUE</span>
+          <span>Scope</span>
+          <span>Secret</span>
+          <span>On</span>
+          <span />
+        </div>
+        <div v-for="(row, i) in rows" :key="i" class="env-grid-row">
+          <input
+            v-model="row.key"
+            class="mono"
+            placeholder="KEY"
+            :disabled="archived"
+            @input="onRowChange"
+          />
+          <input
+            v-model="row.value"
+            :type="row.isSecret ? 'password' : 'text'"
+            :placeholder="row.isExisting ? '(ไม่เปลี่ยน)' : 'value'"
+            :disabled="archived"
+            @input="onRowChange"
+          />
+          <select v-model="row.scope" :disabled="archived" @change="onRowChange">
+            <option value="runtime">runtime</option>
+            <option value="build">build</option>
+            <option value="both">both</option>
+          </select>
+          <input
+            v-model="row.isSecret"
+            type="checkbox"
+            title="Secret"
+            :disabled="archived"
+            @change="onRowChange"
+          />
+          <input
+            v-model="row.enabled"
+            type="checkbox"
+            title="Enabled"
+            :disabled="archived"
+            @change="onRowChange"
+          />
           <button
             v-if="!archived"
-            class="primary"
-            :disabled="saving || !dirty"
-            @click="save"
-          >{{ saving ? 'กำลังบันทึก…' : 'บันทึก' }}</button>
-          <button v-if="dirty && !archived" class="secondary small" @click="initRows">ยกเลิก</button>
+            class="danger tiny icon"
+            title="ลบแถวนี้"
+            aria-label="ลบแถวนี้"
+            @click="removeRow(i)"
+          >
+            <AppIcon name="x" :size="12" />
+          </button>
+          <span v-else />
         </div>
       </div>
 
-      <p v-if="rows.length === 0 && !dirty" class="muted">ยังไม่มี environment variables</p>
+      <p v-if="rows.length === 0 && !dirty" class="muted small">ยังไม่มี environment variables</p>
+
+      <div class="row-between wrap env-footer">
+        <button v-if="!archived" class="secondary small" @click="addRow">
+          <AppIcon name="plus" :size="13" />
+          เพิ่ม variable
+        </button>
+        <div class="row wrap save-area">
+          <p v-if="saveError" class="alert alert-bad small">
+            <AppIcon name="alert" :size="13" />
+            <span>{{ saveError }}</span>
+          </p>
+          <p v-if="saveOk" class="alert alert-ok small">
+            <AppIcon name="check" :size="13" />
+            <span>บันทึกแล้ว</span>
+          </p>
+          <button v-if="dirty && !archived" class="secondary small" @click="initRows">ยกเลิก</button>
+          <button v-if="!archived" class="primary" :disabled="saving || !dirty" @click="save">
+            <span v-if="saving" class="spinner" />
+            {{ saving ? "กำลังบันทึก…" : "บันทึก" }}
+          </button>
+        </div>
+      </div>
     </template>
   </div>
 </template>
 
 <style scoped>
-.env-tab { display: flex; flex-direction: column; gap: 0.75rem; }
-.env-header { display: flex; align-items: center; justify-content: space-between; }
-.section-title { margin: 0; font-size: 1rem; font-weight: 600; }
-.header-actions { display: flex; gap: 0.5rem; }
-
-.import-panel {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1rem;
+.env-grid {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--s-2);
 }
-.env-textarea {
-  width: 100%;
-  font-family: monospace;
-  font-size: 0.85rem;
-  padding: 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  color: var(--fg);
-  resize: vertical;
-  box-sizing: border-box;
-}
-.import-actions { display: flex; gap: 0.5rem; }
 
-.env-grid-head {
-  display: grid;
-  grid-template-columns: 1fr 1fr 90px 50px 40px 32px;
-  gap: 0.4rem;
-  padding: 0 0.25rem;
-  font-size: 0.75rem;
-  color: var(--muted);
-  font-weight: 600;
-}
+.env-grid-head,
 .env-grid-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 90px 50px 40px 32px;
-  gap: 0.4rem;
+  grid-template-columns: 1fr 1fr 92px 44px 40px 28px;
+  gap: var(--s-2);
   align-items: center;
 }
-.env-input {
-  width: 100%;
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-size: 0.85rem;
-  background: var(--bg);
-  color: var(--fg);
-  box-sizing: border-box;
+.env-grid-head {
+  padding: 0 var(--s-2);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
-.env-input.code { font-family: monospace; }
-.env-select {
-  padding: 0.35rem 0.25rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-size: 0.8rem;
-  background: var(--bg);
-  color: var(--fg);
+.env-grid-row input[type="checkbox"] {
+  justify-self: center;
 }
-.env-footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-top: 0.5rem; }
-.save-area { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-button.tiny { padding: 0.2rem 0.4rem; font-size: 0.75rem; line-height: 1; }
+
+.env-footer {
+  margin-top: var(--s-2);
+}
+.save-area {
+  align-items: center;
+}
+
+@media (max-width: 720px) {
+  .env-grid-head {
+    display: none;
+  }
+  .env-grid-row {
+    grid-template-columns: 1fr;
+    gap: var(--s-1);
+    padding: var(--s-3);
+    background: var(--surface-2);
+    border-radius: var(--r);
+    margin-bottom: var(--s-2);
+  }
+}
 </style>

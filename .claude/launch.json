@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dashboard",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--filter", "@zixploy/dashboard", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "control-api-preview",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["--watch", "apps/control-api/src/index.ts"],
+      "port": 3001
+    }
+  ]
+}

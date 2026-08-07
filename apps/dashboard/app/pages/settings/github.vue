@@ -169,51 +169,58 @@ async function deleteApp() {
 </script>
 
 <template>
-  <section>
-    <div class="head">
+  <div class="stack-lg">
+    <header class="page-head">
       <div>
-        <NuxtLink to="/" class="muted small">← Projects</NuxtLink>
+        <NuxtLink to="/" class="crumb">
+          <AppIcon name="arrowLeft" :size="14" />
+          Projects
+        </NuxtLink>
         <h1>GitHub Apps</h1>
+        <p class="muted small">จัดการ GitHub App ที่ใช้เชื่อมต่อ repository เข้ากับ project</p>
       </div>
-    </div>
+    </header>
 
     <p
       v-if="callbackMessage"
-      :class="callbackMessage.ok ? 'ok-text' : 'error-text'"
-      class="card callback-msg"
+      class="alert"
+      :class="callbackMessage.ok ? 'alert-ok' : 'alert-bad'"
     >
-      {{ callbackMessage.text }}
+      <AppIcon :name="callbackMessage.ok ? 'check' : 'alert'" :size="15" />
+      <span>{{ callbackMessage.text }}</span>
     </p>
 
     <!-- Master key ยังไม่ configure -->
-    <div v-if="!masterKeyReady" class="card warn-card">
-      <p class="warn-text">⚠️ Master key ยังไม่ได้ configure</p>
-      <p class="muted">
-        GitHub App credentials ต้องเข้ารหัสก่อนเก็บลงฐานข้อมูล —
-        ตั้งค่า <code>ZIXPLOY_MASTER_KEY_FILE</code> ชี้ไฟล์ที่มี key ขนาด 32 byte (base64)
-        แล้ว restart Control API
-      </p>
-      <pre class="hint">openssl rand -base64 32 &gt; /etc/zixploy/master.key
+    <div v-if="!masterKeyReady" class="card">
+      <div class="alert alert-warn no-border">
+        <AppIcon name="key" :size="16" />
+        <div class="stack-sm">
+          <strong>Master key ยังไม่ได้ configure</strong>
+          <span>
+            GitHub App credentials ต้องเข้ารหัสก่อนเก็บลงฐานข้อมูล —
+            ตั้งค่า <code>ZIXPLOY_MASTER_KEY_FILE</code> ชี้ไฟล์ที่มี key ขนาด 32 byte (base64)
+            แล้ว restart Control API
+          </span>
+        </div>
+      </div>
+      <pre class="log-box hint-box">openssl rand -base64 32 &gt; /etc/zixploy/master.key
 chmod 600 /etc/zixploy/master.key</pre>
     </div>
 
     <template v-else>
       <!-- รายการ apps -->
       <div class="card">
-        <div class="card-head">
+        <div class="row-between card-head">
           <h2 class="section-title">GitHub Apps ของคุณ</h2>
-          <button
-            v-if="!showCreateForm"
-            class="primary small"
-            @click="showCreateForm = true"
-          >
-            + สร้าง GitHub App
+          <button v-if="!showCreateForm" class="primary small" @click="showCreateForm = true">
+            <AppIcon name="plus" :size="14" />
+            สร้าง GitHub App
           </button>
         </div>
 
         <!-- ฟอร์มสร้าง app -->
-        <div v-if="showCreateForm" class="create-form">
-          <p class="muted">
+        <div v-if="showCreateForm" class="inset create-form">
+          <p class="muted small">
             ระบบจะสร้าง GitHub App ให้อัตโนมัติ — GitHub จะถามยืนยันแล้วส่ง credentials กลับมา
             (เก็บแบบเข้ารหัส ไม่ต้องคัดลอก key เอง)
           </p>
@@ -226,17 +233,23 @@ chmod 600 /etc/zixploy/master.key</pre>
               placeholder="เช่น Zixploy Deploy"
               @keyup.enter="createApp"
             />
-            <small class="muted">{{ newAppName.length }}/34 — ชื่อต้องไม่ซ้ำกับ App อื่นบน GitHub</small>
+            <span class="field-hint">
+              {{ newAppName.length }}/34 — ชื่อต้องไม่ซ้ำกับ App อื่นบน GitHub
+            </span>
           </label>
           <label>
             <span>Organization (ไม่ระบุ = personal account)</span>
             <input v-model="newAppOrg" type="text" placeholder="my-org" />
           </label>
 
-          <p v-if="createError" class="error-text">{{ createError }}</p>
+          <p v-if="createError" class="alert alert-bad">
+            <AppIcon name="alert" :size="15" />
+            <span>{{ createError }}</span>
+          </p>
 
-          <div class="form-actions">
+          <div class="actions">
             <button class="primary" :disabled="creating" @click="createApp">
+              <span v-if="creating" class="spinner" />
               {{ creating ? "กำลังเปิด GitHub…" : "สร้างบน GitHub" }}
             </button>
             <button
@@ -249,19 +262,25 @@ chmod 600 /etc/zixploy/master.key</pre>
           </div>
         </div>
 
-        <p v-if="appsPending" class="muted">กำลังโหลด…</p>
+        <div v-if="appsPending" class="stack app-loading">
+          <span class="skeleton" style="height: 68px" />
+          <span class="skeleton" style="height: 68px" />
+        </div>
 
-        <p v-else-if="apps.length === 0 && !showCreateForm" class="muted empty">
-          ยังไม่มี GitHub App — สร้าง app แรกเพื่อเชื่อมต่อ repository
-        </p>
+        <div v-else-if="apps.length === 0 && !showCreateForm" class="empty">
+          <span class="empty-icon"><AppIcon name="github" :size="20" /></span>
+          <span class="empty-title">ยังไม่มี GitHub App</span>
+          <p class="small">สร้าง app แรกเพื่อเชื่อมต่อ repository</p>
+        </div>
 
         <ul v-else-if="apps.length > 0" class="app-list">
-          <li v-for="app in apps" :key="app.id" class="app-item">
+          <li v-for="app in apps" :key="app.id" class="inset app-item">
             <div class="app-main">
               <div class="app-title">
                 <strong>{{ app.name }}</strong>
-                <a :href="app.htmlUrl" target="_blank" rel="noopener noreferrer" class="small">
-                  บน GitHub ↗
+                <a :href="app.htmlUrl" target="_blank" rel="noopener noreferrer" class="app-link">
+                  บน GitHub
+                  <AppIcon name="external" :size="11" />
                 </a>
               </div>
               <div class="app-meta muted small">
@@ -285,10 +304,15 @@ chmod 600 /etc/zixploy/master.key</pre>
                     width="20"
                     height="20"
                   />
+                  <span v-else class="avatar avatar-fallback" aria-hidden="true">
+                    {{ inst.accountLogin.charAt(0).toUpperCase() }}
+                  </span>
                   <span>{{ inst.accountLogin }}</span>
                   <span class="muted small">{{ inst.accountType }}</span>
-                  <span v-if="inst.status === 'suspended'" class="badge warn">Suspended</span>
-                  <span v-else class="badge ok">Active</span>
+                  <span v-if="inst.status === 'suspended'" class="status status-mismatch">
+                    Suspended
+                  </span>
+                  <span v-else class="status status-running">Active</span>
                 </div>
               </div>
               <p v-else class="muted small no-install">ยังไม่ได้ติดตั้งกับ account ใด</p>
@@ -298,13 +322,21 @@ chmod 600 /etc/zixploy/master.key</pre>
               <button class="secondary small" @click="installApp(app.id)">
                 {{ installationsFor(app.id).length > 0 ? "เพิ่ม installation" : "Install" }}
               </button>
-              <button class="danger small" @click="confirmDeleteId = app.id">ลบ</button>
+              <button class="danger small icon" title="ลบ" aria-label="ลบ" @click="confirmDeleteId = app.id">
+                <AppIcon name="trash" :size="14" />
+              </button>
             </div>
           </li>
         </ul>
 
-        <p v-if="installError" class="error-text">{{ installError }}</p>
-        <p v-if="deleteError" class="error-text">{{ deleteError }}</p>
+        <p v-if="installError" class="alert alert-bad">
+          <AppIcon name="alert" :size="15" />
+          <span>{{ installError }}</span>
+        </p>
+        <p v-if="deleteError" class="alert alert-bad">
+          <AppIcon name="alert" :size="15" />
+          <span>{{ deleteError }}</span>
+        </p>
       </div>
     </template>
 
@@ -318,163 +350,125 @@ chmod 600 /etc/zixploy/master.key</pre>
       @cancel="confirmDeleteId = null"
       @confirm="deleteApp"
     />
-  </section>
+  </div>
 </template>
 
 <style scoped>
-.head {
-  margin-bottom: 1.5rem;
+.page-head h1 {
+  margin: 0.35rem 0 0.15rem;
 }
-h1 {
-  margin: 0.35rem 0 0;
-  font-size: 1.25rem;
-}
-.small {
-  font-size: 0.8125rem;
-}
-.callback-msg {
-  margin-bottom: 1rem;
-}
-.warn-card {
-  border-color: var(--warn);
-}
-.warn-text {
-  color: var(--warn);
-  margin: 0 0 0.5rem;
-  font-weight: 500;
-}
-.hint {
-  background: var(--surface-alt, var(--bg));
-  padding: 0.6rem 0.8rem;
-  border-radius: var(--radius);
-  font-size: 0.8125rem;
-  overflow-x: auto;
-  margin: 0.75rem 0 0;
-}
-.card-head {
-  display: flex;
+.crumb {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1rem;
+  gap: 0.3rem;
+  font-size: var(--t-sm);
+  color: var(--text-muted);
 }
-.section-title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
+.crumb:hover {
+  color: var(--text-secondary);
+  text-decoration: none;
 }
+
+.no-border {
+  border: none;
+  padding: 0;
+  background: transparent;
+}
+.hint-box {
+  margin-top: var(--s-3);
+}
+
+.card-head {
+  margin-bottom: var(--s-4);
+}
+
 .create-form {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding: 1rem;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
-  margin-bottom: 1rem;
+  gap: var(--s-3);
+  margin-bottom: var(--s-4);
 }
 .create-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-.create-form label > span {
-  font-size: 0.875rem;
-  color: var(--muted);
-}
-.create-form input {
-  padding: 0.45rem 0.65rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  color: var(--text);
-}
-.form-actions {
-  display: flex;
-  gap: 0.75rem;
-}
-.empty {
-  text-align: center;
-  padding: 1.5rem 0;
   margin: 0;
 }
+
+.app-loading {
+  gap: var(--s-3);
+}
+
 .app-list {
   list-style: none;
   padding: 0;
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--s-3);
 }
 .app-item {
   display: flex;
-  gap: 1rem;
+  gap: var(--s-4);
   align-items: flex-start;
   justify-content: space-between;
-  padding: 0.85rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
   flex-wrap: wrap;
 }
 .app-main {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: var(--s-2);
   min-width: 240px;
   flex: 1;
 }
 .app-title {
   display: flex;
   align-items: baseline;
-  gap: 0.75rem;
+  gap: var(--s-3);
   flex-wrap: wrap;
+}
+.app-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: var(--t-sm);
 }
 .app-meta {
   display: flex;
-  gap: 1rem;
+  gap: var(--s-4);
   flex-wrap: wrap;
 }
 .install-list {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-  margin-top: 0.4rem;
+  gap: var(--s-2);
+  margin-top: var(--s-1);
 }
 .install-item {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 0.875rem;
+  gap: var(--s-2);
+  font-size: var(--t-sm);
 }
 .avatar {
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   object-fit: cover;
+  flex-shrink: 0;
+}
+.avatar-fallback {
+  display: grid;
+  place-items: center;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 .no-install {
-  margin: 0.3rem 0 0;
+  margin: var(--s-1) 0 0;
 }
 .app-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--s-2);
   flex-wrap: wrap;
-}
-.badge {
-  font-size: 0.7rem;
-  padding: 0.1rem 0.4rem;
-  border-radius: 99px;
-  font-weight: 600;
-}
-.badge.ok {
-  background: color-mix(in srgb, var(--ok) 15%, transparent);
-  color: var(--ok);
-}
-.badge.warn {
-  background: color-mix(in srgb, var(--warn) 15%, transparent);
-  color: var(--warn);
-}
-.danger.small,
-.secondary.small,
-.primary.small {
-  font-size: 0.8125rem;
-  padding: 0.3rem 0.75rem;
 }
 </style>

@@ -26,19 +26,33 @@ const {
  */
 const initialLoading = computed(() => pending.value && !project.value);
 
-/** Tab แต่ละอันเปิดจริงในเฟสที่ระบุ — ตอนนี้แสดงเป็น placeholder ที่บอกสถานะชัดเจน */
 const tabs = [
-  { key: "overview", label: "Overview", phase: null },
-  { key: "source", label: "Source", phase: null },
-  { key: "settings", label: "Settings", phase: null },
-  { key: "deploy", label: "Deploy", phase: "Phase 3" },
-  { key: "environment", label: "Environment", phase: "Phase 4" },
-  { key: "domains", label: "Domains", phase: "Phase 5" },
-  { key: "logs", label: "Logs", phase: "Phase 6" },
-  { key: "volumes", label: "Volumes", phase: "Phase 7" },
+  { key: "overview", label: "ภาพรวม", icon: "grid" as const },
+  { key: "source", label: "Source", icon: "github" as const },
+  { key: "settings", label: "ตั้งค่า", icon: "settings" as const },
+  { key: "deploy", label: "Deploy", icon: "rotate" as const },
+  { key: "environment", label: "Environment", icon: "key" as const },
+  { key: "domains", label: "Domains", icon: "globe" as const },
+  { key: "logs", label: "Logs", icon: "terminal" as const },
+  { key: "volumes", label: "Volumes", icon: "database" as const },
 ] as const;
 
-const activeTab = ref<(typeof tabs)[number]["key"]>("overview");
+type TabKey = (typeof tabs)[number]["key"];
+
+/**
+ * เก็บ tab ที่เปิดอยู่ไว้ใน query string — refresh หน้าแล้วยังอยู่แท็บเดิม
+ * และ copy URL ส่งต่อให้คนอื่นเปิดตรงแท็บนั้นได้
+ */
+const activeTab = computed<TabKey>({
+  get() {
+    const q = route.query.tab;
+    const found = tabs.find((t) => t.key === q);
+    return found?.key ?? "overview";
+  },
+  set(value) {
+    router.replace({ query: { ...route.query, tab: value === "overview" ? undefined : value } });
+  },
+});
 
 const confirmArchive = ref(false);
 const archiving = ref(false);
@@ -64,7 +78,7 @@ const { data: gitHubStatus, pending: statusPending } = await useAsyncData(
   { server: false },
 );
 
-const { data: installationsData, refresh: refreshInstallations } = await useAsyncData(
+const { data: installationsData } = await useAsyncData(
   "github-installations-project",
   async () => {
     const { data } = await api.api.v1.github.installations.get();
@@ -84,8 +98,9 @@ const showPicker = ref(false);
 
 /** installation ที่ project นี้เชื่อมอยู่ (ถ้ามี) */
 const connectedInstallation = computed(() => {
-  if (!project.value?.installationId) return null;
-  return installationsData.value?.items.find((i) => i.id === project.value!.installationId) ?? null;
+  const installationId = project.value?.installationId;
+  if (!installationId) return null;
+  return installationsData.value?.items.find((i) => i.id === installationId) ?? null;
 });
 
 const isConnected = computed(() => !!project.value?.repoFullName);
@@ -143,111 +158,275 @@ async function disconnectSource() {
 
 // installation ที่ project อ้างอิง — ตรวจ revoked/suspended state
 const installationStatus = computed(() => {
-  if (!project.value?.installationId) return "none";
-  const inst = installationsData.value?.items.find((i) => i.id === project.value!.installationId);
+  const installationId = project.value?.installationId;
+  if (!installationId) return "none";
+  const inst = installationsData.value?.items.find((i) => i.id === installationId);
   return inst?.status ?? "unknown";
 });
+
+/** ขั้นตอนที่ยังทำไม่ครบก่อน deploy ได้ — แสดงเป็น checklist ในหน้า overview */
+const setupSteps = computed(() => {
+  const p = project.value;
+  if (!p) return [];
+  return [
+    { label: "เชื่อม GitHub repository", done: !!p.repoFullName, tab: "source" as const },
+    { label: "ระบุ internal port", done: p.internalPort != null, tab: "settings" as const },
+  ];
+});
+
+const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
 </script>
 
 <template>
-  <section>
-    <p v-if="initialLoading" class="muted">กำลังโหลด…</p>
+  <div>
+    <!-- Loading -->
+    <div v-if="initialLoading" class="stack-lg">
+      <span class="skeleton" style="width: 180px; height: 1.8em" />
+      <span class="skeleton" style="width: 100%; height: 2.2em" />
+      <div class="card">
+        <span class="skeleton" style="width: 60%; height: 1em; display: block" />
+      </div>
+    </div>
 
+    <!-- Not found -->
     <div v-else-if="error || !project" class="card">
-      <p class="error-text">ไม่พบ project นี้</p>
-      <NuxtLink to="/">กลับไปหน้า Projects</NuxtLink>
+      <div class="empty">
+        <span class="empty-icon"><AppIcon name="alert" :size="20" /></span>
+        <span class="empty-title">ไม่พบ project นี้</span>
+        <p class="small">project อาจถูกลบไปแล้ว หรือลิงก์ไม่ถูกต้อง</p>
+        <NuxtLink to="/" class="btn secondary">
+          <AppIcon name="arrowLeft" :size="15" />
+          กลับไปหน้า Projects
+        </NuxtLink>
+      </div>
     </div>
 
     <template v-else>
-      <div class="head">
-        <div>
-          <NuxtLink to="/" class="muted small">← Projects</NuxtLink>
-          <h1>{{ project.name }}</h1>
+      <!-- ── Header ── -->
+      <header class="head">
+        <NuxtLink to="/" class="crumb">
+          <AppIcon name="arrowLeft" :size="14" />
+          Projects
+        </NuxtLink>
+
+        <div class="head-main">
+          <div class="title-row">
+            <h1 class="truncate">{{ project.name }}</h1>
+            <span
+              class="status"
+              :class="`status-${project.degraded ? 'degraded' : project.status}`"
+            >
+              {{ project.degraded ? "ผิดปกติ" : projectStatusLabel(project.status) }}
+            </span>
+          </div>
+
+          <div class="head-meta">
+            <a
+              v-if="project.repoFullName"
+              :href="`https://github.com/${project.repoFullName}`"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="meta-link"
+            >
+              <AppIcon name="github" :size="13" />
+              {{ project.repoFullName }}
+              <AppIcon name="external" :size="11" />
+            </a>
+            <span v-if="project.branch" class="meta">
+              <AppIcon name="branch" :size="13" />
+              {{ project.branch }}
+            </span>
+            <span class="meta mono tiny" :title="`Project ID: ${project.id}`">
+              {{ project.id }}
+            </span>
+          </div>
         </div>
-        <span class="status" :class="`status-${project.status}`">{{ project.status }}</span>
+      </header>
+
+      <!-- Banner: archived / degraded -->
+      <div v-if="project.archivedAt" class="alert alert-warn banner">
+        <AppIcon name="info" :size="16" />
+        <span>project นี้ถูก archive แล้ว — แก้ไขและ deploy ไม่ได้ แต่ประวัติทั้งหมดยังอยู่</span>
+      </div>
+      <div v-else-if="project.degraded" class="alert alert-bad banner">
+        <AppIcon name="alert" :size="16" />
+        <span>
+          container ที่ควรทำงานอยู่หายไปจาก Docker — สั่ง deploy ใหม่เพื่อกู้คืนบริการ
+        </span>
       </div>
 
-      <p v-if="project.archivedAt" class="card archived">
-        project นี้ถูก archive แล้ว — แก้ไขไม่ได้
-      </p>
-
-      <nav class="tabs">
+      <!-- ── Tabs ── -->
+      <nav class="tabs" aria-label="ส่วนของ project">
         <button
           v-for="tab in tabs"
           :key="tab.key"
+          class="tab"
           :class="{ active: activeTab === tab.key }"
+          :aria-current="activeTab === tab.key ? 'page' : undefined"
           @click="activeTab = tab.key"
         >
-          {{ tab.label }}
+          <AppIcon :name="tab.icon" :size="15" />
+          <span>{{ tab.label }}</span>
         </button>
       </nav>
 
-      <div class="card panel">
-        <!-- Overview tab -->
+      <!-- ── Panels ── -->
+      <div class="panel-wrap">
+        <!-- Overview -->
         <template v-if="activeTab === 'overview'">
-          <dl>
-            <dt>Repository</dt>
-            <dd>{{ project.repoFullName ?? "—" }}</dd>
-            <dt>Branch</dt>
-            <dd>{{ project.branch ?? "—" }}</dd>
-            <dt>Auto deploy</dt>
-            <dd>{{ project.autoDeploy ? "เปิด" : "ปิด" }}</dd>
-            <dt>Dockerfile</dt>
-            <dd>{{ project.dockerfilePath }}</dd>
-            <dt>Build context</dt>
-            <dd>{{ project.buildContext }}</dd>
-            <dt>Internal port</dt>
-            <dd>{{ project.internalPort ?? "—" }}</dd>
-          </dl>
-
-          <div v-if="!project.archivedAt" class="danger-zone">
-            <button class="danger" @click="confirmArchive = true">Archive project</button>
+          <!-- checklist ก่อนพร้อม deploy — ซ่อนเมื่อครบแล้ว -->
+          <div v-if="!setupComplete && !project.archivedAt" class="card setup">
+            <h2 class="section-title">เตรียมพร้อมก่อน deploy</h2>
+            <ul class="steps">
+              <li v-for="step in setupSteps" :key="step.label" :class="{ done: step.done }">
+                <span class="step-mark">
+                  <AppIcon v-if="step.done" name="check" :size="12" />
+                </span>
+                <span class="step-label">{{ step.label }}</span>
+                <button v-if="!step.done" class="ghost small" @click="activeTab = step.tab">
+                  ไปตั้งค่า
+                  <AppIcon name="chevronRight" :size="13" />
+                </button>
+              </li>
+            </ul>
           </div>
+
+          <div class="overview-grid">
+            <section class="card">
+              <h2 class="section-title">Source</h2>
+              <dl class="kv">
+                <dt>Repository</dt>
+                <dd>
+                  <a
+                    v-if="project.repoFullName"
+                    :href="`https://github.com/${project.repoFullName}`"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >{{ project.repoFullName }}</a>
+                  <span v-else class="muted">ยังไม่ได้เชื่อม</span>
+                </dd>
+                <dt>Branch</dt>
+                <dd>
+                  <code v-if="project.branch">{{ project.branch }}</code>
+                  <span v-else class="muted">—</span>
+                </dd>
+                <dt>Auto deploy</dt>
+                <dd>
+                  <span class="badge" :class="project.autoDeploy ? 'tone-ok' : 'tone-idle'">
+                    {{ project.autoDeploy ? "เปิด" : "ปิด" }}
+                  </span>
+                </dd>
+              </dl>
+            </section>
+
+            <section class="card">
+              <h2 class="section-title">Build &amp; Runtime</h2>
+              <dl class="kv">
+                <dt>Dockerfile</dt>
+                <dd><code>{{ project.dockerfilePath }}</code></dd>
+                <dt>Build context</dt>
+                <dd><code>{{ project.buildContext }}</code></dd>
+                <dt>Internal port</dt>
+                <dd>
+                  <code v-if="project.internalPort">{{ project.internalPort }}</code>
+                  <span v-else class="warn-text small">ยังไม่ได้ระบุ</span>
+                </dd>
+                <dt>Health check</dt>
+                <dd>
+                  <code v-if="project.healthCheckPath">{{ project.healthCheckPath }}</code>
+                  <span v-else class="muted">ไม่ได้ตั้งค่า</span>
+                </dd>
+              </dl>
+            </section>
+
+            <section class="card">
+              <h2 class="section-title">ข้อมูลทั่วไป</h2>
+              <dl class="kv">
+                <dt>สร้างเมื่อ</dt>
+                <dd :title="fullDateTime(project.createdAt)">{{ timeAgo(project.createdAt) }}</dd>
+                <dt>แก้ไขล่าสุด</dt>
+                <dd :title="fullDateTime(project.updatedAt)">{{ timeAgo(project.updatedAt) }}</dd>
+                <dt>Project ID</dt>
+                <dd><code class="tiny">{{ project.id }}</code></dd>
+              </dl>
+            </section>
+          </div>
+
+          <section v-if="!project.archivedAt" class="card danger-zone">
+            <div class="row-between wrap">
+              <div>
+                <h2 class="section-title">Archive project</h2>
+                <p class="muted small">
+                  ซ่อน project จากรายการ ประวัติ deployment ยังอยู่ครบ ไม่ลบ volume หรือข้อมูลใด ๆ
+                </p>
+              </div>
+              <button class="danger" @click="confirmArchive = true">
+                <AppIcon name="trash" :size="15" />
+                Archive
+              </button>
+            </div>
+          </section>
         </template>
 
-        <!-- Source tab -->
+        <!-- Source -->
         <template v-else-if="activeTab === 'source'">
-          <div class="source-panel">
+          <div class="card stack">
             <h2 class="section-title">GitHub Repository</h2>
 
-            <!-- revoked warning -->
             <div
               v-if="isConnected && (installationStatus === 'deleted' || installationStatus === 'suspended')"
-              class="revoke-warning"
+              class="alert alert-warn"
             >
-              <p class="warn-text">
-                ⚠️ GitHub installation
-                {{ installationStatus === 'deleted' ? 'ถูกถอนการติดตั้งแล้ว' : 'ถูก suspend' }}
-                — Auto deploy ถูกปิดอัตโนมัติ
-              </p>
-              <p class="muted">
-                {{ installationStatus === 'deleted'
-                  ? 'Reinstall GitHub App แล้วเชื่อมต่อ repository ใหม่'
-                  : 'Unsuspend GitHub App ผ่าน GitHub Settings แล้ว refresh' }}
-              </p>
+              <AppIcon name="alert" :size="16" />
+              <div class="stack-sm">
+                <strong>
+                  GitHub installation
+                  {{ installationStatus === "deleted" ? "ถูกถอนการติดตั้งแล้ว" : "ถูก suspend" }}
+                  — Auto deploy ถูกปิดอัตโนมัติ
+                </strong>
+                <span class="muted">
+                  {{
+                    installationStatus === "deleted"
+                      ? "Reinstall GitHub App แล้วเชื่อมต่อ repository ใหม่"
+                      : "Unsuspend GitHub App ผ่าน GitHub Settings แล้ว refresh"
+                  }}
+                </span>
+              </div>
             </div>
 
-            <!-- Connected state -->
+            <!-- Connected -->
             <template v-if="isConnected && !showPicker">
-              <div class="connected-repo">
-                <div class="repo-info-row">
-                  <span class="label muted">Repository</span>
-                  <strong>{{ project.repoFullName }}</strong>
-                </div>
-                <div class="repo-info-row">
-                  <span class="label muted">Branch</span>
-                  <code>{{ project.branch }}</code>
-                </div>
-                <div v-if="connectedInstallation" class="repo-info-row">
-                  <span class="label muted">Account</span>
-                  <span>{{ connectedInstallation.accountLogin }}</span>
-                </div>
+              <div class="inset">
+                <dl class="kv">
+                  <dt>Repository</dt>
+                  <dd>
+                    <a
+                      :href="`https://github.com/${project.repoFullName}`"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="repo-link"
+                    >
+                      {{ project.repoFullName }}
+                      <AppIcon name="external" :size="12" />
+                    </a>
+                  </dd>
+                  <dt>Branch</dt>
+                  <dd><code>{{ project.branch }}</code></dd>
+                  <dt v-if="connectedInstallation">Account</dt>
+                  <dd v-if="connectedInstallation">{{ connectedInstallation.accountLogin }}</dd>
+                </dl>
               </div>
 
-              <p v-if="sourceSuccess" class="ok-text">เชื่อมต่อสำเร็จ</p>
-              <p v-if="sourceError" class="error-text">{{ sourceError }}</p>
+              <p v-if="sourceSuccess" class="alert alert-ok">
+                <AppIcon name="check" :size="15" />
+                <span>เชื่อมต่อสำเร็จ</span>
+              </p>
+              <p v-if="sourceError" class="alert alert-bad">
+                <AppIcon name="alert" :size="15" />
+                <span>{{ sourceError }}</span>
+              </p>
 
-              <div v-if="!project.archivedAt" class="source-actions">
+              <div v-if="!project.archivedAt" class="actions">
                 <button
                   class="secondary"
                   :disabled="sourceSaving"
@@ -255,59 +434,54 @@ const installationStatus = computed(() => {
                 >
                   เปลี่ยน repository
                 </button>
-                <button
-                  class="danger"
-                  :disabled="sourceSaving"
-                  @click="disconnectSource"
-                >
+                <button class="danger" :disabled="sourceSaving" @click="disconnectSource">
+                  <span v-if="sourceSaving" class="spinner" />
                   {{ sourceSaving ? "กำลังยกเลิก…" : "ยกเลิกการเชื่อมต่อ" }}
                 </button>
               </div>
             </template>
 
-            <!-- Not connected / picker open -->
+            <!-- Not connected / picker -->
             <template v-else>
-              <p v-if="!isConnected && !showPicker" class="muted">
-                ยังไม่ได้เชื่อมต่อ repository — เลือก repository จาก GitHub
-              </p>
-
-              <!-- GitHub not configured -->
               <template v-if="statusPending">
-                <p class="muted">กำลังตรวจ GitHub integration…</p>
+                <p class="muted small">กำลังตรวจ GitHub integration…</p>
               </template>
+
               <template v-else-if="!gitHubStatus?.configured">
-                <div class="not-configured-msg">
-                  <GitHubConnect />
-                </div>
+                <GitHubConnect />
               </template>
 
-              <!-- No installations -->
               <template v-else-if="activeInstallations.length === 0 && !showPicker">
-                <div class="no-install">
-                  <p class="muted">ยังไม่มี GitHub installation</p>
-                  <GitHubConnect />
+                <div class="empty">
+                  <span class="empty-icon"><AppIcon name="github" :size="20" /></span>
+                  <span class="empty-title">ยังไม่มี GitHub installation</span>
+                  <p class="small">ติดตั้ง GitHub App บนบัญชีของคุณก่อนเลือก repository</p>
                 </div>
+                <GitHubConnect />
               </template>
 
-              <!-- Repo picker -->
               <template v-else>
                 <template v-if="!showPicker && !isConnected">
-                  <button
-                    v-if="!project.archivedAt"
-                    class="primary"
-                    @click="showPicker = true"
-                  >
-                    เลือก repository
-                  </button>
+                  <div class="empty">
+                    <span class="empty-icon"><AppIcon name="github" :size="20" /></span>
+                    <span class="empty-title">ยังไม่ได้เชื่อม repository</span>
+                    <p class="small">เลือก repository และ branch ที่จะใช้ deploy project นี้</p>
+                    <button v-if="!project.archivedAt" class="primary" @click="showPicker = true">
+                      เลือก repository
+                    </button>
+                  </div>
                 </template>
 
                 <template v-if="showPicker">
-                  <RepositoryPicker
-                    :installations="activeInstallations"
-                    @pick="connectSource"
-                  />
+                  <RepositoryPicker :installations="activeInstallations" @pick="connectSource" />
 
-                  <div class="picker-cancel">
+                  <p v-if="sourceError" class="alert alert-bad">
+                    <AppIcon name="alert" :size="15" />
+                    <span>{{ sourceError }}</span>
+                  </p>
+                  <p v-if="sourceSaving" class="muted small">กำลังบันทึก…</p>
+
+                  <div class="actions">
                     <button
                       class="secondary small"
                       :disabled="sourceSaving"
@@ -316,61 +490,51 @@ const installationStatus = computed(() => {
                       ยกเลิก
                     </button>
                   </div>
-                  <p v-if="sourceError" class="error-text">{{ sourceError }}</p>
-                  <p v-if="sourceSaving" class="muted">กำลังบันทึก…</p>
                 </template>
               </template>
             </template>
           </div>
         </template>
 
-        <!-- Settings tab -->
-        <ProjectSettingsForm
-          v-else-if="activeTab === 'settings'"
-          :project="project"
-          @saved="refresh()"
-        />
+        <!-- Settings -->
+        <div v-else-if="activeTab === 'settings'" class="card">
+          <ProjectSettingsForm :project="project" @saved="refresh()" />
+        </div>
 
-        <!-- Deploy tab -->
-        <DeployTab
-          v-else-if="activeTab === 'deploy'"
-          :project-id="id"
-          :has-source="isConnected"
-          :archived="!!project.archivedAt"
-        />
+        <!-- Deploy -->
+        <div v-else-if="activeTab === 'deploy'" class="card">
+          <DeployTab
+            :project-id="id"
+            :has-source="isConnected"
+            :archived="!!project.archivedAt"
+          />
+        </div>
 
-        <!-- Environment tab -->
-        <EnvironmentTab
-          v-else-if="activeTab === 'environment'"
-          :project-id="id"
-          :archived="!!project.archivedAt"
-        />
+        <!-- Environment -->
+        <div v-else-if="activeTab === 'environment'" class="card">
+          <EnvironmentTab :project-id="id" :archived="!!project.archivedAt" />
+        </div>
 
-        <!-- Domains tab -->
-        <DomainsTab
-          v-else-if="activeTab === 'domains'"
-          :project-id="id"
-          :archived="!!project.archivedAt"
-        />
+        <!-- Domains -->
+        <div v-else-if="activeTab === 'domains'" class="card">
+          <DomainsTab :project-id="id" :archived="!!project.archivedAt" />
+        </div>
 
-        <!-- Logs tab -->
-        <LogsTab
-          v-else-if="activeTab === 'logs'"
-          :project-id="id"
-        />
+        <!-- Logs -->
+        <div v-else-if="activeTab === 'logs'" class="card">
+          <LogsTab :project-id="id" />
+        </div>
 
-        <!-- Volumes tab -->
-        <VolumesTab
-          v-else-if="activeTab === 'volumes'"
-          :project-id="id"
-          :archived="!!project.archivedAt"
-        />
+        <!-- Volumes -->
+        <div v-else-if="activeTab === 'volumes'" class="card">
+          <VolumesTab :project-id="id" :archived="!!project.archivedAt" />
+        </div>
       </div>
 
       <ConfirmDialog
         :open="confirmArchive"
         title="Archive project"
-        :message="`project จะถูกซ่อนจากรายการแต่ประวัติยังอยู่ ไม่ลบ volume หรือข้อมูลใด ๆ`"
+        message="project จะถูกซ่อนจากรายการแต่ประวัติยังอยู่ ไม่ลบ volume หรือข้อมูลใด ๆ"
         confirm-label="Archive"
         :require-typed="project.name"
         :busy="archiving"
@@ -378,128 +542,193 @@ const installationStatus = computed(() => {
         @confirm="archive"
       />
     </template>
-  </section>
+  </div>
 </template>
 
 <style scoped>
+/* ── Header ── */
 .head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-h1 {
-  margin: 0.35rem 0 0;
-  font-size: 1.25rem;
-}
-.small {
-  font-size: 0.875rem;
-}
-.archived {
-  border-color: var(--warn);
-  color: var(--warn);
-  margin-bottom: 1rem;
-}
-.tabs {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  margin-bottom: -1px;
-}
-.tabs button {
-  border-radius: var(--radius) var(--radius) 0 0;
-  border-bottom-color: transparent;
-}
-.tabs button.active {
-  background: var(--surface);
-  border-color: var(--border);
-  border-bottom-color: var(--surface);
-  color: var(--accent);
-}
-.panel {
-  border-top-left-radius: 0;
-}
-dl {
-  display: grid;
-  grid-template-columns: minmax(140px, auto) 1fr;
-  gap: 0.6rem 1.5rem;
-  margin: 0;
-}
-dt {
-  color: var(--muted);
-  font-size: 0.875rem;
-}
-dd {
-  margin: 0;
-}
-.danger-zone {
-  margin-top: 2rem;
-  padding-top: 1.25rem;
-  border-top: 1px solid var(--border);
-}
-.placeholder {
-  text-align: center;
-  padding: 2.5rem 1rem;
-  margin: 0;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-bottom: var(--s-4);
 }
 
-/* Source tab */
-.source-panel {
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: var(--t-sm);
+  color: var(--text-muted);
+  align-self: flex-start;
+}
+.crumb:hover {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.head-main {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: var(--s-2);
+  min-width: 0;
 }
-.section-title {
-  margin: 0 0 0.25rem;
-  font-size: 1rem;
-  font-weight: 600;
-}
-.revoke-warning {
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--warn);
-  border-radius: var(--radius);
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-.warn-text {
-  color: var(--warn);
-  margin: 0;
-}
-.connected-repo {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-.repo-info-row {
+
+.title-row {
   display: flex;
   align-items: center;
-  gap: 1rem;
-}
-.label {
-  min-width: 100px;
-  font-size: 0.875rem;
-}
-.source-actions {
-  display: flex;
-  gap: 0.75rem;
+  gap: var(--s-3);
+  min-width: 0;
   flex-wrap: wrap;
 }
-.not-configured-msg {
-  padding: 0.75rem 1rem;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
+
+.head-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  flex-wrap: wrap;
 }
-.no-install {
+.meta,
+.meta-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: var(--t-sm);
+  color: var(--text-muted);
+}
+.meta-link:hover {
+  color: var(--accent);
+  text-decoration: none;
+}
+.head-meta .mono {
+  color: var(--text-faint);
+}
+
+.banner {
+  margin-bottom: var(--s-4);
+}
+
+/* ── Tabs ──
+   segmented bar บนพื้นเข้ม — scroll แนวนอนได้บนจอแคบโดยไม่ตัดแท็บหาย */
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r);
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin-bottom: var(--s-4);
+}
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  height: 30px;
+  padding: 0 var(--s-3);
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--t-sm);
+  border-radius: var(--r-sm);
+}
+.tab:hover:not(.active) {
+  background: var(--surface-2);
+  border-color: transparent;
+  color: var(--text-secondary);
+}
+.tab.active {
+  background: var(--surface-3);
+  color: var(--text);
+  font-weight: 550;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── Panels ── */
+.panel-wrap {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--s-4);
 }
-.picker-cancel {
-  margin-top: 0.5rem;
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--s-4);
+}
+.overview-grid .card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+/* ── Setup checklist ── */
+.setup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  border-color: var(--accent-tint-strong);
+  background: linear-gradient(var(--accent-tint), var(--accent-tint)), var(--surface-1);
+}
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.steps li {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  font-size: var(--t-sm);
+}
+.step-mark {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  color: var(--accent-fg);
+}
+.steps li.done .step-mark {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #05130c;
+}
+.steps li.done .step-label {
+  color: var(--text-muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-faint);
+}
+.step-label {
+  flex: 1;
+}
+
+/* ── Danger zone ── */
+.danger-zone {
+  border-color: var(--bad-edge);
+}
+.danger-zone p {
+  margin-top: 0.2rem;
+  max-width: 52ch;
+}
+
+.repo-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+@media (max-width: 640px) {
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

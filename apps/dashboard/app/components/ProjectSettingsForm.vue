@@ -141,33 +141,34 @@ async function save() {
 </script>
 
 <template>
-  <form class="settings" @submit.prevent="save">
-    <p v-if="disabled" class="muted note">
-      project ถูก archive แล้ว — แก้ไขไม่ได้
+  <form class="settings stack" @submit.prevent="save">
+    <p v-if="disabled" class="alert alert-warn">
+      <AppIcon name="info" :size="15" />
+      <span>project ถูก archive แล้ว — แก้ไขไม่ได้</span>
     </p>
 
     <label>
       <span>ชื่อ project</span>
       <input v-model="form.name" :disabled="disabled" maxlength="100" />
-      <em v-if="fieldErrors.name" class="error-text">{{ fieldErrors.name }}</em>
+      <em v-if="fieldErrors.name" class="field-error">{{ fieldErrors.name }}</em>
     </label>
 
     <label>
       <span>Dockerfile path</span>
       <input v-model="form.dockerfilePath" :disabled="disabled" placeholder="Dockerfile" />
-      <em v-if="fieldErrors.dockerfilePath" class="error-text">{{ fieldErrors.dockerfilePath }}</em>
+      <em v-if="fieldErrors.dockerfilePath" class="field-error">{{ fieldErrors.dockerfilePath }}</em>
     </label>
 
     <label>
       <span>Build context</span>
       <input v-model="form.buildContext" :disabled="disabled" placeholder="." />
-      <em v-if="fieldErrors.buildContext" class="error-text">{{ fieldErrors.buildContext }}</em>
+      <em v-if="fieldErrors.buildContext" class="field-error">{{ fieldErrors.buildContext }}</em>
     </label>
 
     <label>
       <span>Internal port (ว่างไว้ได้ถ้ายังไม่กำหนด)</span>
       <input v-model="form.internalPort" :disabled="disabled" inputmode="numeric" placeholder="8080" />
-      <em v-if="fieldErrors.internalPort" class="error-text">{{ fieldErrors.internalPort }}</em>
+      <em v-if="fieldErrors.internalPort" class="field-error">{{ fieldErrors.internalPort }}</em>
     </label>
 
     <label>
@@ -175,19 +176,26 @@ async function save() {
       <input v-model="form.healthCheckPath" :disabled="disabled" placeholder="/healthz" />
     </label>
 
-    <label class="checkbox">
-      <input v-model="form.autoDeploy" type="checkbox" :disabled="disabled" />
-      <span>Auto deploy เมื่อมี push (ทำงานจริงเมื่อเชื่อม repository ใน Phase 2)</span>
-    </label>
+    <div class="check-row">
+      <input id="auto-deploy" v-model="form.autoDeploy" type="checkbox" :disabled="disabled" />
+      <label for="auto-deploy">Auto deploy เมื่อมี push (ทำงานจริงเมื่อเชื่อม repository)</label>
+    </div>
 
-    <p v-if="saveError" class="error-text">{{ saveError }}</p>
-    <p v-else-if="saved && !dirty" class="ok-text">บันทึกแล้ว</p>
+    <p v-if="saveError" class="alert alert-bad">
+      <AppIcon name="alert" :size="15" />
+      <span>{{ saveError }}</span>
+    </p>
+    <p v-else-if="saved && !dirty" class="alert alert-ok">
+      <AppIcon name="check" :size="15" />
+      <span>บันทึกแล้ว</span>
+    </p>
 
-    <div class="actions">
-      <button type="button" :disabled="disabled || !dirty || saving" @click="discardChanges">
+    <div class="actions-end form-footer">
+      <button type="button" class="secondary" :disabled="disabled || !dirty || saving" @click="discardChanges">
         ยกเลิกการแก้ไข
       </button>
       <button class="primary" type="submit" :disabled="disabled || !dirty || saving">
+        <span v-if="saving" class="spinner" />
         {{ saving ? "กำลังบันทึก…" : "บันทึก" }}
       </button>
     </div>
@@ -195,41 +203,19 @@ async function save() {
 </template>
 
 <style scoped>
-.note {
-  margin-top: 0;
-  padding: 0.6rem 0.9rem;
-  border: 1px solid var(--warn);
-  border-radius: var(--radius);
-  color: var(--warn);
+.settings label {
+  margin-bottom: 0;
 }
-label em {
+.field-error {
   display: block;
-  margin-top: 0.3rem;
+  margin-top: var(--s-2);
   font-style: normal;
-  font-size: 0.8125rem;
+  font-size: var(--t-xs);
+  color: var(--bad);
 }
-label.checkbox {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.6rem;
-}
-label.checkbox input {
-  width: auto;
-  margin-top: 0.25rem;
-}
-label.checkbox span {
-  margin: 0;
-  color: var(--text);
-}
-.ok-text {
-  color: var(--ok);
-}
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.75rem;
-  margin-top: 1.25rem;
-  padding-top: 1.25rem;
-  border-top: 1px solid var(--border);
+.form-footer {
+  margin-top: var(--s-2);
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--border-subtle);
 }
 </style>

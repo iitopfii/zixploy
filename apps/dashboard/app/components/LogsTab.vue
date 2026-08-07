@@ -222,25 +222,28 @@ function onScroll() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function shortSha(sha: string) {
-  return sha.slice(0, 7);
-}
 function fmtTime(ms: number) {
   return new Date(ms).toLocaleString("th-TH", { timeStyle: "short" });
 }
 </script>
 
 <template>
-  <div class="logs-tab">
+  <div class="stack">
     <!-- Mode toggle -->
-    <div class="mode-row">
-      <button :class="['mode-btn', { active: mode === 'build' }]" @click="mode = 'build'">Build logs</button>
-      <button :class="['mode-btn', { active: mode === 'runtime' }]" @click="mode = 'runtime'">Runtime logs</button>
+    <div class="tabs mode-tabs">
+      <button class="tab" :class="{ active: mode === 'build' }" @click="mode = 'build'">
+        <AppIcon name="box" :size="14" />
+        Build logs
+      </button>
+      <button class="tab" :class="{ active: mode === 'runtime' }" @click="mode = 'runtime'">
+        <AppIcon name="terminal" :size="14" />
+        Runtime logs
+      </button>
     </div>
 
     <!-- Build logs -->
     <template v-if="mode === 'build'">
-      <div class="dep-selector">
+      <div class="toolbar">
         <select v-model="selectedDepId" class="dep-select" :disabled="loadingDeps">
           <option v-if="loadingDeps" value="">กำลังโหลด…</option>
           <option v-else-if="deploymentList.length === 0" value="">ยังไม่มี deployment</option>
@@ -248,16 +251,36 @@ function fmtTime(ms: number) {
             {{ shortSha(d.commitSha) }} — {{ d.status }} — {{ fmtTime(d.queuedAt) }}
           </option>
         </select>
-        <span v-if="isLive" class="live-badge">● LIVE</span>
-        <button class="secondary small" :disabled="loadingBuildLogs" @click="loadBuildLogs">↺</button>
+        <span v-if="isLive" class="status status-running is-live">LIVE</span>
+        <button
+          class="ghost icon small"
+          :disabled="loadingBuildLogs"
+          title="รีเฟรช"
+          aria-label="รีเฟรช"
+          @click="loadBuildLogs"
+        >
+          <AppIcon name="refresh" :size="14" />
+        </button>
       </div>
 
-      <p v-if="buildLogError" class="error-text small">{{ buildLogError }}</p>
-      <p v-if="loadingBuildLogs" class="muted small">กำลังโหลด…</p>
+      <p v-if="buildLogError" class="alert alert-bad small">
+        <AppIcon name="alert" :size="14" />
+        <span>{{ buildLogError }}</span>
+      </p>
 
       <div ref="logBox" class="log-box" @scroll="onScroll">
-        <p v-if="buildLogs.length === 0 && !loadingBuildLogs" class="muted small center">ยังไม่มี log</p>
-        <div v-for="l in buildLogs" :key="l.seq" class="log-line" :class="l.stream === 'stderr' ? 'log-err' : ''">
+        <div v-if="loadingBuildLogs" class="stack-sm">
+          <span class="skeleton" style="height: 14px; width: 90%" />
+          <span class="skeleton" style="height: 14px; width: 75%" />
+          <span class="skeleton" style="height: 14px; width: 82%" />
+        </div>
+        <p v-else-if="buildLogs.length === 0" class="muted small center">ยังไม่มี log</p>
+        <div
+          v-for="l in buildLogs"
+          :key="l.seq"
+          class="log-line"
+          :class="l.stream === 'stderr' ? 'log-err' : ''"
+        >
           <span class="log-time">{{ fmtTime(l.createdAt) }}</span>
           <span class="log-text">{{ l.line }}</span>
         </div>
@@ -266,24 +289,37 @@ function fmtTime(ms: number) {
 
     <!-- Runtime logs -->
     <template v-else>
-      <div class="runtime-header">
-        <span class="live-badge">● LIVE</span>
-        <button class="secondary small" @click="loadRuntimeLogs">↺ รีเชื่อม</button>
-        <button class="secondary small" @click="runtimeLogs = []">ล้าง</button>
+      <div class="toolbar">
+        <span class="status status-running is-live">LIVE</span>
+        <button class="secondary small" @click="loadRuntimeLogs">
+          <AppIcon name="refresh" :size="13" />
+          รีเชื่อม
+        </button>
+        <button class="ghost small" @click="runtimeLogs = []">ล้าง</button>
+        <span class="spacer" />
         <label class="autoscroll-label">
-          <input type="checkbox" v-model="autoScroll" />
+          <input v-model="autoScroll" type="checkbox" />
           Auto-scroll
         </label>
       </div>
 
-      <p v-if="runtimeError" class="error-text small">{{ runtimeError }}</p>
-      <p v-if="loadingRuntime" class="muted small">กำลังโหลด…</p>
+      <p v-if="runtimeError" class="alert alert-bad small">
+        <AppIcon name="alert" :size="14" />
+        <span>{{ runtimeError }}</span>
+      </p>
 
       <div ref="logBox" class="log-box" @scroll="onScroll">
-        <p v-if="runtimeLogs.length === 0 && !loadingRuntime" class="muted small center">
-          รอ log จาก container…
-        </p>
-        <div v-for="l in runtimeLogs" :key="l.seq" class="log-line" :class="l.stream === 'stderr' ? 'log-err' : ''">
+        <div v-if="loadingRuntime" class="stack-sm">
+          <span class="skeleton" style="height: 14px; width: 90%" />
+          <span class="skeleton" style="height: 14px; width: 75%" />
+        </div>
+        <p v-else-if="runtimeLogs.length === 0" class="muted small center">รอ log จาก container…</p>
+        <div
+          v-for="l in runtimeLogs"
+          :key="l.seq"
+          class="log-line"
+          :class="l.stream === 'stderr' ? 'log-err' : ''"
+        >
           <span class="log-time">{{ fmtTime(l.loggedAt) }}</span>
           <span class="log-text">{{ l.line }}</span>
         </div>
@@ -293,58 +329,40 @@ function fmtTime(ms: number) {
 </template>
 
 <style scoped>
-.logs-tab { display: flex; flex-direction: column; gap: 0.75rem; }
-
-.mode-row { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--border); }
-.mode-btn {
-  padding: 0.35rem 0.75rem;
-  border: none;
-  background: none;
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 0.875rem;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
+.mode-tabs {
+  align-self: flex-start;
 }
-.mode-btn.active { color: var(--fg); border-bottom-color: var(--accent); }
 
-.dep-selector { display: flex; align-items: center; gap: 0.5rem; }
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+
 .dep-select {
   flex: 1;
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  color: var(--fg);
-  font-size: 0.875rem;
+  min-width: 160px;
 }
 
-.runtime-header { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-
-.live-badge {
-  font-size: 0.75rem;
-  color: #16a34a;
-  font-weight: 700;
-  animation: pulse 1.5s infinite;
-}
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-
+/* .log-box, .log-line, .log-time, .log-text มาจาก main.css ทั้งหมด */
 .log-box {
-  background: #0d1117;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.75rem;
-  height: 400px;
-  overflow-y: auto;
-  font-family: ui-monospace, monospace;
-  font-size: 0.8rem;
-  line-height: 1.5;
+  height: 420px;
 }
-.log-line { display: flex; gap: 0.75rem; }
-.log-time { color: #6e7681; flex-shrink: 0; }
-.log-text { color: #e6edf3; white-space: pre-wrap; word-break: break-all; }
-.log-err .log-text { color: #ff7b72; }
-.center { text-align: center; }
+.log-err .log-text {
+  color: var(--bad);
+}
+.center {
+  text-align: center;
+  padding: var(--s-4);
+}
 
-.autoscroll-label { display: flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; color: var(--muted); }
+.autoscroll-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--t-sm);
+  color: var(--text-muted);
+  margin: 0;
+}
 </style>

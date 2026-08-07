@@ -13,61 +13,142 @@ const props = defineProps<{
 const emit = defineEmits<{ confirm: []; cancel: [] }>();
 
 const typed = ref("");
+const typedInput = ref<HTMLInputElement | null>(null);
+
 watch(
   () => props.open,
-  (open) => {
-    if (open) typed.value = "";
+  async (open) => {
+    if (!open) return;
+    typed.value = "";
+    await nextTick();
+    typedInput.value?.focus();
   },
 );
 
 const canConfirm = computed(
   () => !props.busy && (!props.requireTyped || typed.value === props.requireTyped),
 );
+
+/** Esc ปิด dialog — ผูกที่ document เพราะ focus อาจอยู่ที่ input ใน dialog */
+onMounted(() => {
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && props.open && !props.busy) emit("cancel");
+  };
+  document.addEventListener("keydown", onKey);
+  onUnmounted(() => document.removeEventListener("keydown", onKey));
+});
 </script>
 
 <template>
-  <div v-if="open" class="backdrop" @click.self="emit('cancel')">
-    <div class="card dialog" role="dialog" aria-modal="true">
-      <h2>{{ title }}</h2>
-      <p class="muted">{{ message }}</p>
+  <Teleport to="body">
+    <Transition name="fade">
+      <div v-if="open" class="backdrop" @click.self="!busy && emit('cancel')">
+        <div class="dialog" role="alertdialog" aria-modal="true" :aria-label="title">
+          <div class="dialog-head">
+            <span class="warn-mark" aria-hidden="true">
+              <AppIcon name="alert" :size="17" />
+            </span>
+            <div class="stack-sm">
+              <h2>{{ title }}</h2>
+              <p class="muted small">{{ message }}</p>
+            </div>
+          </div>
 
-      <label v-if="requireTyped">
-        <span>พิมพ์ <code>{{ requireTyped }}</code> เพื่อยืนยัน</span>
-        <input v-model="typed" autocomplete="off" />
-      </label>
+          <label v-if="requireTyped" class="confirm-field">
+            <span>
+              พิมพ์ <code>{{ requireTyped }}</code> เพื่อยืนยัน
+            </span>
+            <input
+              ref="typedInput"
+              v-model="typed"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+              :disabled="busy"
+              @keydown.enter.prevent="canConfirm && emit('confirm')"
+            />
+          </label>
 
-      <div class="actions">
-        <button :disabled="busy" @click="emit('cancel')">ยกเลิก</button>
-        <button class="danger" :disabled="!canConfirm" @click="emit('confirm')">
-          {{ busy ? "กำลังดำเนินการ…" : (confirmLabel ?? "ยืนยัน") }}
-        </button>
+          <div class="actions-end">
+            <button class="secondary" :disabled="busy" @click="emit('cancel')">ยกเลิก</button>
+            <button class="danger-solid" :disabled="!canConfirm" @click="emit('confirm')">
+              <span v-if="busy" class="spinner" />
+              {{ busy ? "กำลังดำเนินการ…" : (confirmLabel ?? "ยืนยัน") }}
+            </button>
+          </div>
+        </div>
       </div>
-    </div>
-  </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
 .backdrop {
   position: fixed;
   inset: 0;
-  background: rgb(0 0 0 / 60%);
+  background: rgb(4 6 10 / 72%);
+  backdrop-filter: blur(3px);
   display: grid;
   place-items: center;
-  padding: 1.5rem;
-  z-index: 50;
+  padding: var(--s-5);
+  z-index: 100;
 }
+
 .dialog {
-  max-width: 420px;
   width: 100%;
-}
-h2 {
-  margin: 0 0 0.5rem;
-  font-size: 1.05rem;
-}
-.actions {
+  max-width: 440px;
   display: flex;
-  justify-content: flex-end;
-  gap: 0.75rem;
-  margin-top: 1.25rem;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding: var(--s-5);
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg), var(--shadow-inset);
+}
+
+.dialog-head {
+  display: flex;
+  gap: var(--s-3);
+}
+
+.warn-mark {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r);
+  background: var(--bad-tint);
+  border: 1px solid var(--bad-edge);
+  color: var(--bad);
+}
+
+.dialog h2 {
+  font-size: var(--t-md);
+}
+
+.confirm-field {
+  margin: 0;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity var(--fast);
+}
+.fade-enter-active .dialog,
+.fade-leave-active .dialog {
+  transition:
+    transform var(--normal),
+    opacity var(--normal);
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+.fade-enter-from .dialog,
+.fade-leave-to .dialog {
+  transform: translateY(8px) scale(0.98);
+  opacity: 0;
 }
 </style>

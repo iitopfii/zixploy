@@ -79,30 +79,71 @@ interface Deployment {
 
 const deployments = ref<Deployment[]>([]);
 const nextCursor = ref<string | undefined>(undefined);
+const total = ref(0);
 const loadingList = ref(true);
 const listError = ref("");
+
+const PAGE_SIZE = 10;
+
+/**
+ * Pagination แบบ keyset (cursor) ไม่ใช่ offset
+ *
+ * deployment ใหม่ถูก insert ที่หัวรายการตลอดเวลา — offset pagination จะทำให้แถวเลื่อน
+ * แล้วเห็นรายการซ้ำหรือข้ามหายเมื่อมี deploy เกิดขึ้นระหว่างที่เปิดหน้าอยู่
+ * cursor ผูกกับ (created_at, id) จึงไม่เลื่อนตาม
+ *
+ * ข้อแลกเปลี่ยน: cursor เดินหน้าอย่างเดียว — เก็บ stack ของ cursor ที่ผ่านมาไว้เอง
+ * เพื่อให้ปุ่ม "ก่อนหน้า" ทำงานได้ (cursorStack[i] = cursor ที่ใช้โหลดหน้า i)
+ */
+const cursorStack = ref<Array<string | undefined>>([undefined]);
+const pageIndex = ref(0);
+
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
+const rangeStart = computed(() => (total.value === 0 ? 0 : pageIndex.value * PAGE_SIZE + 1));
+const rangeEnd = computed(() => pageIndex.value * PAGE_SIZE + deployments.value.length);
 
 async function fetchDeployments(cursor?: string) {
   listError.value = "";
   try {
     const { data, error } = await api.api.v1.projects({ id: props.projectId }).deployments.get({
-      query: cursor ? { cursor } : {},
+      query: { limit: String(PAGE_SIZE), ...(cursor ? { cursor } : {}) },
     });
     if (error) {
       listError.value = "โหลดรายการ deploy ไม่ได้";
       return;
     }
-    if (cursor) {
-      deployments.value.push(...(data?.items ?? []));
-    } else {
-      deployments.value = data?.items ?? [];
-    }
+    deployments.value = data?.items ?? [];
     nextCursor.value = data?.nextCursor;
+    total.value = data?.total ?? 0;
   } catch {
     listError.value = "ติดต่อ API ไม่ได้";
   } finally {
     loadingList.value = false;
   }
+}
+
+async function goNext() {
+  if (!nextCursor.value) return;
+  const cursor = nextCursor.value;
+  loadingList.value = true;
+  // เก็บ cursor ของหน้าถัดไปไว้ใน stack ก่อน เพื่อให้ย้อนกลับมาหน้านี้ได้
+  cursorStack.value = [...cursorStack.value.slice(0, pageIndex.value + 1), cursor];
+  pageIndex.value++;
+  await fetchDeployments(cursor);
+}
+
+async function goPrev() {
+  if (pageIndex.value === 0) return;
+  loadingList.value = true;
+  pageIndex.value--;
+  await fetchDeployments(cursorStack.value[pageIndex.value]);
+}
+
+/** กลับหน้าแรก — ใช้หลังลบ เพราะ cursor เดิมอาจชี้ไปยังแถวที่หายไปแล้ว */
+async function resetToFirstPage() {
+  cursorStack.value = [undefined];
+  pageIndex.value = 0;
+  await fetchDeployments();
 }
 
 await fetchDeployments();
@@ -204,6 +245,73 @@ async function rollback(targetDeploymentId: string) {
           "rollback ล้มเหลว",
       );
   });
+}
+
+// ---------------------------------------------------------------------------
+// ลบประวัติ
+// ---------------------------------------------------------------------------
+
+const deletingId = ref<string | null>(null);
+const confirmPrune = ref(false);
+const pruning = ref(false);
+
+/**
+ * ลบรายการเดียว
+ *
+ * API ปฏิเสธเองถ้าเป็นตัวที่ให้บริการอยู่หรือกำลังทำงาน — ไม่ซ่อนปุ่มไว้ล่วงหน้า
+ * แต่แสดงข้อความจาก server เพราะเงื่อนไข "ตัวไหน active" เปลี่ยนได้ระหว่างที่เปิดหน้าอยู่
+ */
+async function removeDeployment(id: string) {
+  deletingId.value = id;
+  actionError.value = "";
+  actionOk.value = "";
+  try {
+    const { error } = await api.api.v1
+      .projects({ id: props.projectId })
+      .deployments({ deploymentId: id })
+      .delete();
+    if (error) {
+      actionError.value =
+        (error.value as { error?: { message?: string } } | null)?.error?.message ?? "ลบไม่สำเร็จ";
+      return;
+    }
+    // cursor เดิมอาจชี้ไปยังแถวที่เพิ่งหายไป — กลับหน้าแรกแทนการโหลดหน้าเดิมซ้ำ
+    await resetToFirstPage();
+    actionOk.value = "ลบแล้ว";
+  } catch {
+    actionError.value = "ติดต่อ API ไม่ได้";
+  } finally {
+    deletingId.value = null;
+  }
+}
+
+async function pruneHistory() {
+  pruning.value = true;
+  actionError.value = "";
+  actionOk.value = "";
+  try {
+    const { data, error } = await api.api.v1
+      .projects({ id: props.projectId })
+      .deployments.prune.post({});
+    if (error) {
+      actionError.value =
+        (error.value as { error?: { message?: string } } | null)?.error?.message ??
+        "ล้างประวัติไม่สำเร็จ";
+      return;
+    }
+    confirmPrune.value = false;
+    await resetToFirstPage();
+
+    const skipped = data?.skipped?.length ?? 0;
+    actionOk.value =
+      skipped > 0
+        ? `ลบ ${data?.deleted ?? 0} รายการ — เหลือไว้ ${skipped} รายการที่ลบไม่ได้ (ให้บริการอยู่หรือกำลังทำงาน)`
+        : `ลบประวัติ ${data?.deleted ?? 0} รายการแล้ว`;
+  } catch {
+    actionError.value = "ติดต่อ API ไม่ได้";
+  } finally {
+    pruning.value = false;
+  }
 }
 
 async function cancel(deploymentId: string) {
@@ -309,8 +417,27 @@ function fmtDuration(start: number | null, end: number | null) {
     <!-- Deployment list -->
     <div>
       <div class="row-between section-head">
-        <h2 class="section-title">ประวัติ Deployment</h2>
-        <button class="ghost small icon" :disabled="loadingList" title="รีเฟรช" aria-label="รีเฟรช" @click="fetchDeployments()">
+        <h2 class="section-title">
+          ประวัติ Deployment
+          <span v-if="total > 0" class="badge tiny">{{ total }}</span>
+        </h2>
+        <span class="spacer" />
+        <button
+          v-if="!archived && total > 0"
+          class="danger small"
+          :disabled="pruning || loadingList"
+          @click="confirmPrune = true"
+        >
+          <AppIcon name="trash" :size="13" />
+          ล้างประวัติ
+        </button>
+        <button
+          class="ghost small icon"
+          :disabled="loadingList"
+          title="รีเฟรช"
+          aria-label="รีเฟรช"
+          @click="resetToFirstPage()"
+        >
           <AppIcon name="refresh" :size="14" />
         </button>
       </div>
@@ -367,18 +494,51 @@ function fmtDuration(start: number | null, end: number | null) {
             >
               Rollback
             </button>
+
+            <span class="spacer" />
+
+            <!-- ปุ่มลบแสดงทุกแถว — API เป็นผู้ตัดสินว่าลบได้ไหม เพราะเงื่อนไข
+                 "ตัวไหนกำลังให้บริการ" เปลี่ยนได้ระหว่างที่เปิดหน้าอยู่ -->
+            <button
+              class="ghost tiny delete-btn"
+              :disabled="!!busy || deletingId === d.id"
+              title="ลบรายการนี้"
+              @click="removeDeployment(d.id)"
+            >
+              <span v-if="deletingId === d.id" class="spinner" />
+              <AppIcon v-else name="trash" :size="12" />
+            </button>
           </div>
         </li>
       </ul>
 
-      <button
-        v-if="nextCursor && !loadingList"
-        class="secondary small load-more"
-        @click="fetchDeployments(nextCursor)"
-      >
-        โหลดเพิ่มเติม…
-      </button>
+      <!-- Pagination -->
+      <div v-if="!loadingList && total > 0" class="pager">
+        <span class="muted tiny">
+          แสดง {{ rangeStart }}–{{ rangeEnd }} จาก {{ total }}
+        </span>
+        <span class="spacer" />
+        <button class="secondary small" :disabled="pageIndex === 0" @click="goPrev">
+          <AppIcon name="arrowLeft" :size="13" />
+          ก่อนหน้า
+        </button>
+        <span class="muted tiny page-num">{{ pageIndex + 1 }} / {{ totalPages }}</span>
+        <button class="secondary small" :disabled="!nextCursor" @click="goNext">
+          ถัดไป
+          <AppIcon name="chevronRight" :size="13" />
+        </button>
+      </div>
     </div>
+
+    <ConfirmDialog
+      :open="confirmPrune"
+      title="ล้างประวัติ Deployment"
+      message="ลบประวัติทั้งหมดพร้อม build log — ยกเว้นเวอร์ชันที่ให้บริการอยู่และรายการที่กำลังทำงาน ซึ่งจะถูกเก็บไว้ให้อัตโนมัติ ไม่กระทบแอปที่รันอยู่"
+      confirm-label="ล้างประวัติ"
+      :busy="pruning"
+      @cancel="confirmPrune = false"
+      @confirm="pruneHistory"
+    />
   </div>
 </template>
 
@@ -453,6 +613,36 @@ function fmtDuration(start: number | null, end: number | null) {
 .switch-track.on .switch-thumb {
   transform: translateX(16px);
   background: var(--accent-fg);
+}
+
+/* ── Pagination ── */
+.pager {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--border-subtle);
+}
+.page-num {
+  min-width: 3.5em;
+  text-align: center;
+}
+
+/* ปุ่มลบจางไว้ก่อน ชัดขึ้นเมื่อ hover การ์ด — ไม่ให้แย่งสายตาจาก Rollback/Cancel */
+.delete-btn {
+  color: var(--text-faint);
+  opacity: 0.6;
+  transition:
+    opacity var(--fast),
+    color var(--fast);
+}
+.deploy-item:hover .delete-btn {
+  opacity: 1;
+}
+.delete-btn:hover:not(:disabled) {
+  color: var(--bad);
+  background: var(--bad-tint);
 }
 
 .section-head {

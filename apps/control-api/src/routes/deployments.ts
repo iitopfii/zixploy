@@ -17,6 +17,7 @@ import type { Database } from "bun:sqlite";
 import { API_PREFIX, AppError, type DeploymentStatus, isUlid } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
 import { getClientIp, recordAuditEvent } from "../audit/log";
+import { countDeployments, deleteDeployment, pruneDeploymentHistory } from "../deploys/history";
 import {
   cancelDeployment,
   type DeployJobPayload,
@@ -55,6 +56,12 @@ const SELECT_COLUMNS = `id, project_id, status, trigger, commit_sha, commit_mess
   image_tag, image_digest, container_id, failure_code, failure_message,
   queued_at, started_at, finished_at, cloning_at, building_at, starting_at, health_checking_at, activating_at,
   created_at, updated_at`;
+
+/** ผลของการลบ — skipped บอกเหตุผลรายตัวเพื่อให้ UI อธิบายได้ว่าทำไมบางอันยังอยู่ */
+const deleteResultSchema = t.Object({
+  deleted: t.Number(),
+  skipped: t.Array(t.Object({ id: t.String(), reason: t.String() })),
+});
 
 const deploymentSchema = t.Object({
   id: t.String(),
@@ -443,7 +450,12 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
         const nextCursor =
           hasMore && last ? encodeCursor({ createdAt: last.created_at, id: last.id }) : undefined;
 
-        return { items: page.map(toDeployment), ...(nextCursor ? { nextCursor } : {}) };
+        return {
+          items: page.map(toDeployment),
+          // total ให้ UI แสดง "แสดง 1-20 จาก N" และรู้ว่ามีกี่หน้า
+          total: countDeployments(db, params.id),
+          ...(nextCursor ? { nextCursor } : {}),
+        };
       },
       {
         query: t.Object({
@@ -452,8 +464,57 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
         }),
         response: t.Object({
           items: t.Array(deploymentSchema),
+          total: t.Number(),
           nextCursor: t.Optional(t.String()),
         }),
+      },
+    )
+
+    // DELETE /projects/:id/deployments/:deploymentId — ลบรายการเดียว
+    .delete(
+      "/:id/deployments/:deploymentId",
+      ({ params, request, requireSession }) => {
+        const session = requireSession();
+        loadProjectForDeploy(db, params.id);
+        if (!isUlid(params.deploymentId)) {
+          throw new AppError("DEPLOYMENT_NOT_FOUND", "ไม่พบ deployment นี้");
+        }
+
+        const result = deleteDeployment(db, params.id, params.deploymentId);
+        recordAuditEvent(db, {
+          actorUserId: session.userId,
+          action: "deployment_deleted",
+          resourceType: "deployment",
+          resourceId: params.deploymentId,
+          metadata: { projectId: params.id },
+          ip: getClientIp(request),
+        });
+        return result;
+      },
+      { response: deleteResultSchema },
+    )
+
+    // POST /projects/:id/deployments/prune — ล้างประวัติ (เก็บ N ล่าสุด)
+    .post(
+      "/:id/deployments/prune",
+      ({ params, body, request, requireSession }) => {
+        const session = requireSession();
+        loadProjectForDeploy(db, params.id);
+
+        const result = pruneDeploymentHistory(db, params.id, body?.keep ?? 0);
+        recordAuditEvent(db, {
+          actorUserId: session.userId,
+          action: "deployment_history_pruned",
+          resourceType: "project",
+          resourceId: params.id,
+          metadata: { deleted: result.deleted, keep: body?.keep ?? 0 },
+          ip: getClientIp(request),
+        });
+        return result;
+      },
+      {
+        body: t.Optional(t.Object({ keep: t.Optional(t.Integer({ minimum: 0, maximum: 100 })) })),
+        response: deleteResultSchema,
       },
     );
 

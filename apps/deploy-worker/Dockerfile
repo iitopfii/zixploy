@@ -20,6 +20,6 @@ COPY migrations/          ./migrations/
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
 # Worker needs docker CLI — install from Alpine apk
-RUN apk add --no-cache docker-cli git
+RUN apk add --no-cache docker-cli docker-cli-buildx git
 
 CMD ["bun", "run", "apps/deploy-worker/src/index.ts"]

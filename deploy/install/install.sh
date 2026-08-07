@@ -190,10 +190,28 @@ done
 
 BASE_URL=$(grep -E '^ZIXPLOY_BASE_URL=' "$ENV_FILE" | cut -d= -f2-)
 
-if docker compose exec -T control-api bun run apps/control-api/src/cli/bootstrap-admin.ts --check >/dev/null 2>&1; then
-  ADMIN_EXISTS=1
-else
-  ADMIN_EXISTS=0
+# มี user อยู่แล้วหรือยัง — ถามจาก DB ตรง ๆ
+# (bootstrap-admin.ts ไม่มีโหมด --check และจะ exit 1 ถ้าไม่ส่ง env มาให้)
+ADMIN_COUNT=$(docker compose exec -T control-api sh -c \
+  'bun -e "const{Database}=require(\"bun:sqlite\");const db=new Database(\"/data/control.db\");console.log(db.query(\"SELECT COUNT(*) c FROM users\").get().c)"' \
+  2>/dev/null | tr -dc '0-9')
+[ -n "$ADMIN_COUNT" ] || ADMIN_COUNT=0
+
+NEW_ADMIN=0
+if [ "$ADMIN_COUNT" -eq 0 ]; then
+  step "สร้างบัญชีผู้ดูแลระบบ…"
+  # สุ่มรหัสผ่านให้ เพราะ curl | sh รับ input จากผู้ใช้ไม่ได้ (stdin เป็นตัวสคริปต์เอง)
+  # ส่งผ่าน env ของ exec ไม่ใช่ argument — argument จะโผล่ใน `ps` ของทั้งเครื่อง
+  ADMIN_PASS=$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | cut -c1-20)
+  if docker compose exec -T \
+      -e ZIXPLOY_ADMIN_USERNAME=admin \
+      -e ZIXPLOY_ADMIN_PASSWORD="$ADMIN_PASS" \
+      control-api bun run apps/control-api/src/cli/bootstrap-admin.ts >/dev/null 2>&1; then
+    NEW_ADMIN=1
+    ok "สร้างบัญชี admin แล้ว"
+  else
+    warn "สร้างบัญชี admin อัตโนมัติไม่สำเร็จ — สร้างเองภายหลังได้ (ดูคำสั่งด้านล่าง)"
+  fi
 fi
 
 say ""
@@ -204,14 +222,22 @@ say "  ไฟล์ติดตั้ง:    $INSTALL_DIR"
 say "  master key:     $MASTER_KEY  ${Y}(สำรองไว้ด้วย)${N}"
 say ""
 
-if [ "$ADMIN_EXISTS" -eq 0 ]; then
-  say "  ${B}สร้างบัญชีผู้ดูแลระบบ:${N}"
-  say "    cd $INSTALL_DIR && docker compose exec control-api \\"
-  say "      bun run apps/control-api/src/cli/bootstrap-admin.ts"
+if [ "$NEW_ADMIN" -eq 1 ]; then
+  say "  ${B}บัญชีผู้ดูแลระบบ${N}"
+  say "    username:  ${B}admin${N}"
+  say "    password:  ${B}${ADMIN_PASS}${N}"
+  say "    ${Y}จดไว้ตอนนี้ — จะไม่แสดงอีก และควรเปลี่ยนหลัง login ครั้งแรก${N}"
+  say ""
+elif [ "$ADMIN_COUNT" -eq 0 ]; then
+  say "  ${B}สร้างบัญชีผู้ดูแลระบบเอง:${N}"
+  say "    cd $INSTALL_DIR && docker compose exec \\"
+  say "      -e ZIXPLOY_ADMIN_USERNAME=admin -e ZIXPLOY_ADMIN_PASSWORD='รหัสผ่านที่ต้องการ' \\"
+  say "      control-api bun run apps/control-api/src/cli/bootstrap-admin.ts"
   say ""
 fi
 
 say "  คำสั่งที่ใช้บ่อย:"
 say "    cd $INSTALL_DIR && docker compose logs -f     # ดู log"
 say "    cd $INSTALL_DIR && docker compose restart     # รีสตาร์ท"
+say "    cd $INSTALL_DIR && docker compose pull && docker compose up -d   # อัปเดตเอง"
 say ""

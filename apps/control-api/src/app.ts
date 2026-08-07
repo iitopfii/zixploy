@@ -16,6 +16,7 @@ import { domainRoutes } from "./routes/domains";
 import { environmentRoutes } from "./routes/environment";
 import { githubRoutes } from "./routes/github";
 import { logRoutes } from "./routes/logs";
+import { monitoringRoutes } from "./routes/monitoring";
 import { projectRoutes } from "./routes/projects";
 import { systemRoutes } from "./routes/system";
 import { volumeRoutes } from "./routes/volumes";
@@ -68,6 +69,7 @@ export function buildApp(db: Database, options: AppOptions = {}) {
     .use(domainRoutes(db, masterKeys))
     .use(logRoutes(db))
     .use(volumeRoutes(db))
+    .use(monitoringRoutes(db))
     .use(auditRoutes(db));
 }
 

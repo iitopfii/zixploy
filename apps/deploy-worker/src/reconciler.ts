@@ -28,6 +28,7 @@ import type { Database } from "bun:sqlite";
 import { LABELS } from "@zixploy/shared";
 import { markProjectDegraded } from "./db/project-config";
 import type { DockerCliClient } from "./docker/cli-client";
+import { parseLabelString } from "./docker/labels";
 
 const STATE_RECONCILE_INTERVAL_MS = 30_000;
 
@@ -48,17 +49,6 @@ function listRunningProjectsWithContainer(db: Database): RunningProjectRow[] {
        WHERE p.status = 'running' AND p.archived_at IS NULL`,
     )
     .all();
-}
-
-/** แปลง Docker `--format {{json .}}` Labels field (comma-separated "k=v,k2=v2") เป็น map */
-function parseLabelString(labelsStr: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const pair of labelsStr.split(",")) {
-    const idx = pair.indexOf("=");
-    if (idx === -1) continue;
-    out[pair.slice(0, idx)] = pair.slice(idx + 1);
-  }
-  return out;
 }
 
 function deploymentExists(db: Database, deploymentId: string, projectId: string): boolean {

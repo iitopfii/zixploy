@@ -54,6 +54,31 @@ export const LOG_SETTINGS = {
   pageLimit: 500,
 } as const;
 
+/**
+ * Resource monitoring (Phase 9)
+ *
+ * worker เก็บตัวอย่างทุก sampleIntervalMs → เขียน host_metrics/container_metrics
+ * แล้ว prune แถวที่เก่ากว่า retentionMs ทุก pruneIntervalMs
+ *
+ * ที่ 15 วิ/ตัวอย่าง × 24 ชม. = 5,760 แถวสำหรับ host และ 5,760 แถวต่อ project
+ * (10 project ≈ 63k แถว) — SQLite รับได้สบายและ prune เป็น DELETE ตามช่วง rowid ที่ต่อเนื่อง
+ */
+export const MONITORING = {
+  /** ความถี่เก็บตัวอย่าง — ต่ำกว่านี้ `docker stats` (ซึ่งใช้เวลา ~1-2 วิ) จะซ้อนรอบตัวเอง */
+  sampleIntervalMs: 15_000,
+  /** อายุข้อมูลที่เก็บไว้ */
+  retentionMs: 24 * 60 * 60 * 1000,
+  /** ความถี่ prune — ไม่ต้องทุกรอบเก็บ เพราะ DELETE บ่อยเกินจำเป็นเปลือง I/O */
+  pruneIntervalMs: 5 * 60 * 1000,
+  /** ช่วงเวลาสูงสุดที่ API ยอมให้ query ย้อนหลัง (กัน range ใหญ่เกินจนดึงทั้งตาราง) */
+  maxRangeMs: 24 * 60 * 60 * 1000,
+  /**
+   * จำนวนจุดสูงสุดที่ API คืนต่อหนึ่ง series — เกินนี้จะ downsample ด้วยการหยิบทุก ๆ N จุด
+   * (กราฟกว้าง ~900px วาดละเอียดกว่านี้ก็ไม่เห็นความต่าง แต่ payload โตขึ้นหลายเท่า)
+   */
+  maxSeriesPoints: 480,
+} as const;
+
 /** Docker volume driver ที่อนุญาต — MVP: local เท่านั้น (Phase 7) */
 export const VOLUME_ALLOWED_DRIVERS = ["local"] as const;
 export type VolumeDriver = (typeof VOLUME_ALLOWED_DRIVERS)[number];

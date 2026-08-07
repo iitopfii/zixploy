@@ -16,6 +16,7 @@ import type {
   ContainerCreateParams,
   ContainerInspect,
   ContainerSummary,
+  DockerStatsEntry,
   ImageInspect,
   ImageSummary,
   VolumeInspect,
@@ -185,6 +186,61 @@ export class DockerCliClient {
       return (parsed[0] as ContainerInspect | undefined) ?? null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * inspect หลาย container ในคำสั่งเดียว — Phase 9 (monitoring)
+   *
+   * loop เรียก inspectContainer() ทีละตัวจะ spawn subprocess เท่าจำนวน container ทุกรอบเก็บ
+   * (ทุก 15 วิ) ซึ่งเปลืองเกินจำเป็น — `docker inspect a b c` คืน JSON array เดียวจบ
+   *
+   * ID ที่ไม่มีอยู่จะถูกข้ามไปเงียบ ๆ (docker คืน exit code != 0 แต่ยัง print array ของตัวที่เจอ)
+   * — คืนเฉพาะตัวที่ inspect ได้ ผู้เรียกจับคู่กลับด้วย Id เอง
+   */
+  async inspectContainers(containerIds: string[]): Promise<ContainerInspect[]> {
+    if (containerIds.length === 0) return [];
+    const result = await this.exec(["inspect", ...containerIds]);
+    try {
+      const parsed = JSON.parse(result.stdout) as unknown[];
+      return Array.isArray(parsed) ? (parsed as ContainerInspect[]) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * `docker stats --no-stream` ของ container ที่ระบุ — Phase 9 (monitoring)
+   *
+   * --no-stream ให้ docker สุ่มตัวอย่าง CPU สองครั้งห่างกัน ~1 วิ แล้วจบ (คำสั่งนี้จึงช้ากว่า
+   * คำสั่ง docker อื่น ๆ อย่างเห็นได้ชัด — เป็นเหตุผลที่ sampleIntervalMs ต้องไม่ต่ำกว่านั้นมาก)
+   *
+   * ส่งเฉพาะ container ที่ running: ตัวที่หยุดแล้วจะรายงาน "--" ทุก field ซึ่ง parse ไม่ได้อยู่ดี
+   * คืน [] เมื่อ daemon มีปัญหา (ไม่ throw) — metrics ขาดหนึ่งรอบดีกว่า loop ตาย
+   */
+  async statsByIds(containerIds: string[]): Promise<DockerStatsEntry[]> {
+    if (containerIds.length === 0) return [];
+    try {
+      const result = await this.exec([
+        "stats",
+        "--no-stream",
+        "--format",
+        "{{json .}}",
+        ...containerIds,
+      ]);
+      if (result.code !== 0) return [];
+      return result.stdout
+        .split("\n")
+        .filter((line) => line.trim())
+        .flatMap((line) => {
+          try {
+            return [JSON.parse(line) as DockerStatsEntry];
+          } catch {
+            return [];
+          }
+        });
+    } catch {
+      return [];
     }
   }
 

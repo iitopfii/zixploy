@@ -31,6 +31,7 @@ const tabs = [
   { key: "source", label: "Source", icon: "github" as const },
   { key: "settings", label: "ตั้งค่า", icon: "settings" as const },
   { key: "deploy", label: "Deploy", icon: "rotate" as const },
+  { key: "metrics", label: "ทรัพยากร", icon: "activity" as const },
   { key: "environment", label: "Environment", icon: "key" as const },
   { key: "domains", label: "Domains", icon: "globe" as const },
   { key: "logs", label: "Logs", icon: "terminal" as const },
@@ -508,6 +509,11 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
             :has-source="isConnected"
             :archived="!!project.archivedAt"
           />
+        </div>
+
+        <!-- Metrics -->
+        <div v-else-if="activeTab === 'metrics'" class="card">
+          <MetricsTab :project-id="id" />
         </div>
 
         <!-- Environment -->

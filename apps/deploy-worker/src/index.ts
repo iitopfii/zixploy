@@ -19,6 +19,7 @@ import { DockerCliClient } from "./docker/cli-client";
 import { loadMasterKeys } from "./github/master-key";
 import { heartbeatLoop } from "./heartbeat";
 import { runtimeLogLoop } from "./logs/runtime-poller";
+import { metricsLoop } from "./metrics/collector";
 import { createDispatcher } from "./pipeline/dispatch";
 import { claimNextJob, completeJob, failJob, LeaseLostError, withLeaseRenewal } from "./queue";
 import { stateReconcileLoop } from "./reconciler";
@@ -164,6 +165,9 @@ await Promise.all([
   runtimeLogLoop(db, docker, controller.signal),
   volumeReconcileLoop(db, docker, controller.signal),
   stateReconcileLoop(db, docker, controller.signal, (line) => log.warn(line, { workerId })),
+  metricsLoop(db, docker, controller.signal, {
+    onLog: (line) => log.warn(line, { workerId }),
+  }),
 ]);
 
 log.info("deploy-worker stopped", { workerId });

@@ -33,6 +33,16 @@ export interface ContainerInspect {
     /** key = network name — ตรวจสอบจริงกับ Docker Desktop */
     Networks: Record<string, { IPAddress: string }>;
   };
+  /**
+   * Phase 9 (monitoring) — memory limit จริงที่ตั้งไว้ตอน create, 0 = ไม่จำกัด
+   * ต้องอ่านจากที่นี่ ไม่ใช่จาก `docker stats` เพราะ stats รายงาน limit ของ container ที่ไม่ได้
+   * จำกัดเป็นขนาด RAM ทั้งเครื่อง ทำให้แยกไม่ออกว่า "จำกัดเท่า RAM เครื่อง" หรือ "ไม่ได้จำกัด"
+   *
+   * optional เพราะ inspect ของ Docker รุ่นเก่า/บาง context อาจไม่มี field นี้
+   */
+  HostConfig?: {
+    Memory?: number;
+  };
 }
 
 export interface ImageInspect {
@@ -49,6 +59,23 @@ export interface ContainerSummary {
   Names: string;
   Image: string;
   Labels: string;
+}
+
+/**
+ * หนึ่งบรรทัดจาก `docker stats --no-stream --format "{{json .}}"` — Phase 9 (monitoring)
+ *
+ * ทุก field เป็น **string ที่ format มาเพื่อคนอ่าน** ไม่ใช่ตัวเลขดิบ เช่น CPUPerc="0.05%",
+ * MemUsage="19.3MiB / 7.772GiB" — ต้อง parse ก่อนใช้ (ดู metrics/containers.ts)
+ */
+export interface DockerStatsEntry {
+  ID: string;
+  Name: string;
+  CPUPerc: string;
+  MemUsage: string;
+  MemPerc: string;
+  NetIO: string;
+  BlockIO: string;
+  PIDs: string;
 }
 
 export interface ImageSummary {

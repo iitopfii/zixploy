@@ -93,6 +93,10 @@ export const ERROR_CODES = {
   SERVICE_PROVISION_FAILED: 500,
   SERVICE_BUSY: 409,
 
+  // maintenance (phase 11)
+  MAINTENANCE_BUSY: 409,
+  MAINTENANCE_FAILED: 500,
+
   // system
   NOT_READY: 503,
 } as const;

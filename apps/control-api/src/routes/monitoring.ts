@@ -16,6 +16,7 @@
 import type { Database } from "bun:sqlite";
 import { API_PREFIX, AppError, isUlid, MONITORING } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
+import { activeMaintenance, enqueueMaintenance, recentMaintenance } from "../maintenance/store";
 import {
   downsampleByPeak,
   latestContainerPoint,
@@ -50,6 +51,26 @@ const containerPointSchema = t.Object({
   memLimitBytes: t.Number(),
   restartCount: t.Number(),
   running: t.Boolean(),
+});
+
+const maintenanceSchema = t.Object({
+  id: t.String(),
+  type: t.Union([
+    t.Literal("prune_build_cache"),
+    t.Literal("prune_images"),
+    t.Literal("prune_all"),
+  ]),
+  status: t.Union([
+    t.Literal("pending"),
+    t.Literal("leased"),
+    t.Literal("done"),
+    t.Literal("failed"),
+  ]),
+  reclaimedBytes: t.Nullable(t.Number()),
+  summary: t.Nullable(t.String()),
+  failureMessage: t.Nullable(t.String()),
+  createdAt: t.Number(),
+  finishedAt: t.Nullable(t.Number()),
 });
 
 const rangeSchema = t.Object({
@@ -108,6 +129,45 @@ export function monitoringRoutes(db: Database) {
             latest: t.Nullable(hostPointSchema),
             points: t.Array(hostPointSchema),
           }),
+        },
+      )
+
+      // ── Maintenance (Phase 11) ──
+      // GET /system/maintenance — งานที่ค้างอยู่ + ประวัติล่าสุด
+      .get(
+        "/system/maintenance",
+        () => ({
+          active: activeMaintenance(db),
+          recent: recentMaintenance(db, 5),
+        }),
+        {
+          response: t.Object({
+            active: t.Nullable(maintenanceSchema),
+            recent: t.Array(maintenanceSchema),
+          }),
+        },
+      )
+
+      // POST /system/maintenance/cleanup — สั่งล้าง cache (worker เป็นคนทำจริง)
+      .post(
+        "/system/maintenance/cleanup",
+        ({ body, set, session }) => {
+          // เก็บ userId ไม่ใช่ username — username เปลี่ยนได้ แต่ id คงที่ (ตามที่ audit log ทำ)
+          const job = enqueueMaintenance(db, body.type ?? "prune_all", session?.userId ?? null);
+          set.status = 202;
+          return job;
+        },
+        {
+          body: t.Object({
+            type: t.Optional(
+              t.Union([
+                t.Literal("prune_build_cache"),
+                t.Literal("prune_images"),
+                t.Literal("prune_all"),
+              ]),
+            ),
+          }),
+          response: maintenanceSchema,
         },
       )
 

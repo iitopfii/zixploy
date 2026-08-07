@@ -21,6 +21,19 @@ interface ProjectRow {
   degraded_at: number | null;
   created_at: number;
   updated_at: number;
+  /**
+   * Phase 11 — สถานะ deployment ที่ยังไม่จบ (มาจาก subquery ไม่ใช่ column ใน projects)
+   *
+   * ต้องแยกจาก projects.status เพราะสองอย่างนี้ตอบคนละคำถาม:
+   *   projects.status     = "แอปให้บริการอยู่ไหม" (running/stopped)
+   *   deployments.status  = "การ build ครั้งนี้ไปถึงไหน" (building/starting/...)
+   * build ที่ล้มเหลวไม่ทำให้แอปล่ม (ADR-0004) — projects.status จึงต้องไม่กลายเป็น failed
+   * ตามไปด้วย ไม่งั้น dashboard จะบอกว่าแอปตายทั้งที่ยังให้บริการปกติ
+   */
+  active_deployment_status: string | null;
+  active_deployment_sha: string | null;
+  /** สถานะ deployment ล่าสุดที่จบแล้ว — ใช้ชี้ว่า "deploy ครั้งล่าสุดพัง" โดยไม่แตะ project status */
+  last_deployment_status: string | null;
 }
 
 const projectSchema = t.Object({
@@ -47,6 +60,9 @@ const projectSchema = t.Object({
   archivedAt: t.Nullable(t.Number()),
   createdAt: t.Number(),
   updatedAt: t.Number(),
+  /** deployment ที่ยังไม่จบ — null = ไม่มีงานค้าง (ดู comment ที่ ProjectRow) */
+  activeDeployment: t.Nullable(t.Object({ status: t.String(), commitSha: t.String() })),
+  lastDeploymentStatus: t.Nullable(t.String()),
 });
 
 const createBody = t.Object({
@@ -80,17 +96,36 @@ function toProject(row: ProjectRow) {
     archivedAt: row.archived_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    activeDeployment: row.active_deployment_status
+      ? { status: row.active_deployment_status, commitSha: row.active_deployment_sha ?? "" }
+      : null,
+    lastDeploymentStatus: row.last_deployment_status,
   };
 }
 
-const SELECT_COLUMNS = `id, name, status, installation_id, repo_id, repo_full_name, branch, auto_deploy,
-  dockerfile_path, build_context, internal_port, health_check_path, archived_at, degraded_at, created_at, updated_at`;
+/**
+ * subquery สอง lookup ต่อ project — ทั้งคู่มี partial index รองรับตั้งแต่ migration 0006
+ * (idx_deployments_in_flight, idx_deployments_project_created) จึงไม่ scan ตาราง
+ * ใช้ p. prefix เพราะ query หลักต้อง alias projects เป็น p
+ */
+const SELECT_COLUMNS = `p.id, p.name, p.status, p.installation_id, p.repo_id, p.repo_full_name,
+  p.branch, p.auto_deploy, p.dockerfile_path, p.build_context, p.internal_port,
+  p.health_check_path, p.archived_at, p.degraded_at, p.created_at, p.updated_at,
+  (SELECT d.status FROM deployments d
+    WHERE d.project_id = p.id AND d.status NOT IN ('succeeded','failed','cancelled')
+    ORDER BY d.created_at DESC LIMIT 1) AS active_deployment_status,
+  (SELECT substr(d.commit_sha, 1, 7) FROM deployments d
+    WHERE d.project_id = p.id AND d.status NOT IN ('succeeded','failed','cancelled')
+    ORDER BY d.created_at DESC LIMIT 1) AS active_deployment_sha,
+  (SELECT d.status FROM deployments d
+    WHERE d.project_id = p.id AND d.status IN ('succeeded','failed','cancelled')
+    ORDER BY d.created_at DESC LIMIT 1) AS last_deployment_status`;
 
 function loadProject(db: Database, id: string): ProjectRow {
   // ตรวจรูปแบบ ID ก่อนแตะ DB — public ID เป็น ULID เสมอ (ADR-0005)
   if (!isUlid(id)) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
   const row = db
-    .query<ProjectRow, [string]>(`SELECT ${SELECT_COLUMNS} FROM projects WHERE id = ?`)
+    .query<ProjectRow, [string]>(`SELECT ${SELECT_COLUMNS} FROM projects p WHERE p.id = ?`)
     .get(id);
   if (!row) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
   return row;
@@ -117,9 +152,9 @@ export function projectRoutes(db: Database) {
         const includeArchived = query.includeArchived === "true";
         const rows = db
           .query<ProjectRow, []>(
-            `SELECT ${SELECT_COLUMNS} FROM projects
-             ${includeArchived ? "" : "WHERE archived_at IS NULL"}
-             ORDER BY id DESC`,
+            `SELECT ${SELECT_COLUMNS} FROM projects p
+             ${includeArchived ? "" : "WHERE p.archived_at IS NULL"}
+             ORDER BY p.id DESC`,
           )
           .all();
         return { items: rows.map(toProject) };

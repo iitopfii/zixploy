@@ -19,6 +19,7 @@ import { DockerCliClient } from "./docker/cli-client";
 import { loadMasterKeys } from "./github/master-key";
 import { heartbeatLoop } from "./heartbeat";
 import { runtimeLogLoop } from "./logs/runtime-poller";
+import { maintenanceLoop } from "./maintenance/loop";
 import { metricsLoop } from "./metrics/collector";
 import { createDispatcher } from "./pipeline/dispatch";
 import { claimNextJob, completeJob, failJob, LeaseLostError, withLeaseRenewal } from "./queue";
@@ -174,6 +175,7 @@ await Promise.all([
     masterKeys,
     onLog: (line) => log.info(line, { workerId }),
   }),
+  maintenanceLoop(db, workerId, controller.signal, (line) => log.info(line, { workerId })),
 ]);
 
 log.info("deploy-worker stopped", { workerId });

@@ -62,6 +62,55 @@ const loadSeries = computed(() => points.value.map((p) => ({ ts: p.ts, value: p.
 
 /** ข้อมูลล่าสุดเก่ากว่า 2 นาที = worker ไม่ได้เก็บอยู่ */
 const stale = computed(() => !!latest.value && Date.now() - latest.value.ts > 120_000);
+
+// ---------------------------------------------------------------------------
+// ล้าง cache (Phase 11)
+// ---------------------------------------------------------------------------
+
+const { data: maintenance, refresh: refreshMaintenance } = await useAsyncData(
+  "maintenance",
+  async () => (await api.api.v1.system.maintenance.get()).data,
+  { server: false },
+);
+
+const cleaning = computed(() => maintenance.value?.active != null);
+const cleanError = ref("");
+
+/** poll ถี่ระหว่างล้างอยู่ — prune ใช้เวลาได้หลายสิบวินาที */
+onMounted(() => {
+  let timer: ReturnType<typeof setInterval> | null = null;
+  watch(
+    cleaning,
+    (busy) => {
+      if (timer) clearInterval(timer);
+      if (busy) timer = setInterval(() => refreshMaintenance(), 3_000);
+    },
+    { immediate: true },
+  );
+  onUnmounted(() => timer && clearInterval(timer));
+});
+
+async function cleanCache() {
+  cleanError.value = "";
+  try {
+    const { error } = await api.api.v1.system.maintenance.cleanup.post({ type: "prune_all" });
+    if (error) {
+      const body = error.value as { error?: { message?: string } } | null;
+      cleanError.value = body?.error?.message ?? "สั่งล้างไม่สำเร็จ";
+      return;
+    }
+    await refreshMaintenance();
+  } catch {
+    cleanError.value = "ติดต่อ API ไม่ได้";
+  }
+}
+
+/** งานล่าสุดที่จบแล้ว — แสดงผลลัพธ์ครั้งก่อน */
+const lastCleanup = computed(
+  () =>
+    (maintenance.value?.recent ?? []).find((j) => j.status === "done" || j.status === "failed") ??
+    null,
+);
 </script>
 
 <template>
@@ -222,6 +271,53 @@ const stale = computed(() => !!latest.value && Date.now() - latest.value.ts > 12
         · แสดง {{ points.length }} จุด
       </p>
     </template>
+
+    <!-- ── ล้าง cache ──
+         อยู่หน้าเดียวกับกราฟดิสก์โดยตั้งใจ: เห็นดิสก์ใกล้เต็มแล้วกดล้างได้ทันที -->
+    <section class="card stack">
+      <div class="row-between wrap">
+        <div>
+          <h2 class="section-title">ล้างพื้นที่ดิสก์</h2>
+          <p class="muted small clean-desc">
+            ลบ build cache ที่เก่ากว่า 7 วัน และ image ที่ไม่มีอะไรใช้แล้ว
+            — ไม่แตะ image ของ deployment ที่ rollback ได้ และไม่แตะ database ที่หยุดอยู่
+          </p>
+        </div>
+        <button class="secondary" :disabled="cleaning" @click="cleanCache">
+          <span v-if="cleaning" class="spinner" />
+          <AppIcon v-else name="trash" :size="15" />
+          {{ cleaning ? "กำลังล้าง…" : "ล้าง cache" }}
+        </button>
+      </div>
+
+      <p v-if="cleanError" class="alert alert-bad">
+        <AppIcon name="alert" :size="15" />
+        <span>{{ cleanError }}</span>
+      </p>
+
+      <p v-if="cleaning" class="alert alert-info">
+        <AppIcon name="info" :size="15" />
+        <span>กำลังล้าง — อาจใช้เวลาสักครู่ ระหว่างนี้ deploy ยังทำงานได้ปกติ</span>
+      </p>
+
+      <div v-else-if="lastCleanup" class="inset last-clean">
+        <template v-if="lastCleanup.status === 'done'">
+          <AppIcon name="check" :size="15" class="ok-text" />
+          <span class="small">
+            ล้างล่าสุด {{ timeAgo(lastCleanup.finishedAt) }} — คืนพื้นที่ได้
+            <strong>{{ formatBytes(lastCleanup.reclaimedBytes ?? 0) }}</strong>
+            <span v-if="lastCleanup.summary" class="muted"> ({{ lastCleanup.summary }})</span>
+          </span>
+        </template>
+        <template v-else>
+          <AppIcon name="alert" :size="15" class="bad-text" />
+          <span class="small">
+            ล้างล่าสุด {{ timeAgo(lastCleanup.finishedAt) }} ไม่สำเร็จ —
+            {{ lastCleanup.failureMessage }}
+          </span>
+        </template>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -314,5 +410,16 @@ const stale = computed(() => !!latest.value && Date.now() - latest.value.ts > 12
   align-items: center;
   gap: 0.35rem;
   flex-wrap: wrap;
+}
+
+/* ── ล้าง cache ── */
+.clean-desc {
+  margin-top: 0.2rem;
+  max-width: 62ch;
+}
+.last-clean {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
 }
 </style>

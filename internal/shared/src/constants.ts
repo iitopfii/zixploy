@@ -79,6 +79,24 @@ export const MONITORING = {
   maxSeriesPoints: 480,
 } as const;
 
+/**
+ * System maintenance (Phase 11 — ล้าง cache/ขยะที่กินดิสก์)
+ *
+ * BuildKit cache โตไม่จำกัดตามจำนวน build — บนเครื่องเล็กเป็นสาเหตุอันดับหนึ่งที่ดิสก์เต็ม
+ * แล้ว deploy ครั้งถัดไปพังด้วย DISK_FULL
+ */
+export const MAINTENANCE = {
+  /** งาน prune หนึ่งครั้งนานสุดก่อนถือว่าค้าง */
+  jobTimeoutMs: 600_000,
+  /** worker poll คิว maintenance ทุกกี่ ms */
+  pollIntervalMs: 5_000,
+  /**
+   * เก็บ build cache ที่ยังใช้อยู่ล่าสุดไว้เท่านี้ (ชั่วโมง) — ตัดของเก่ากว่านี้ทิ้ง
+   * ไม่ล้างทั้งหมดโดย default เพราะ build ถัดไปจะช้ามากถ้าไม่มี cache เลย
+   */
+  keepCacheHours: 168,
+} as const;
+
 /** Docker volume driver ที่อนุญาต — MVP: local เท่านั้น (Phase 7) */
 export const VOLUME_ALLOWED_DRIVERS = ["local"] as const;
 export type VolumeDriver = (typeof VOLUME_ALLOWED_DRIVERS)[number];

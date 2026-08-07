@@ -508,6 +508,9 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
             :project-id="id"
             :has-source="isConnected"
             :archived="!!project.archivedAt"
+            :auto-deploy="project.autoDeploy"
+            :branch="project.branch"
+            @auto-deploy-changed="refresh()"
           />
         </div>
 

@@ -108,3 +108,23 @@ export const PROJECT_STATUS_LABEL: Record<string, string> = {
 export function projectStatusLabel(status: string): string {
   return PROJECT_STATUS_LABEL[status] ?? status;
 }
+
+/**
+ * สถานะของ deployment (การ build ครั้งหนึ่ง) — คนละชุดกับสถานะ project
+ * project บอกว่า "แอปให้บริการอยู่ไหม" ส่วนอันนี้บอกว่า "build ไปถึงขั้นไหน"
+ */
+export const DEPLOYMENT_STATUS_LABEL: Record<string, string> = {
+  queued: "เข้าคิว",
+  cloning: "ดึงโค้ด",
+  building: "กำลัง build",
+  starting: "กำลังเริ่ม",
+  health_checking: "ตรวจสุขภาพ",
+  activating: "สลับ traffic",
+  succeeded: "สำเร็จ",
+  failed: "ล้มเหลว",
+  cancelled: "ยกเลิกแล้ว",
+};
+
+export function deploymentStatusLabel(status: string): string {
+  return DEPLOYMENT_STATUS_LABEL[status] ?? status;
+}

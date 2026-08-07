@@ -5,9 +5,59 @@
  * Actions: deploy, redeploy, restart, stop, rollback, cancel
  * History: deployment list with status, timestamps, rollback button
  */
-const props = defineProps<{ projectId: string; hasSource: boolean; archived: boolean }>();
+const props = defineProps<{
+  projectId: string;
+  hasSource: boolean;
+  archived: boolean;
+  autoDeploy: boolean;
+  branch: string | null;
+}>();
+
+const emit = defineEmits<{ "auto-deploy-changed": [] }>();
 
 const api = useApi();
+
+// ---------------------------------------------------------------------------
+// Auto deploy toggle
+// ---------------------------------------------------------------------------
+
+/**
+ * เก็บ state ในเครื่องเพื่อให้สวิตช์ตอบสนองทันที แล้วค่อย sync กลับถ้า API ล้มเหลว
+ * (รอ round-trip ก่อนขยับทำให้รู้สึกว่าคลิกไม่ติด)
+ */
+const autoDeployLocal = ref(props.autoDeploy);
+watch(
+  () => props.autoDeploy,
+  (v) => (autoDeployLocal.value = v),
+);
+
+const savingAutoDeploy = ref(false);
+const autoDeployError = ref("");
+
+async function toggleAutoDeploy() {
+  if (savingAutoDeploy.value || props.archived) return;
+  const next = !autoDeployLocal.value;
+  autoDeployLocal.value = next;
+  savingAutoDeploy.value = true;
+  autoDeployError.value = "";
+  try {
+    const { error } = await api.api.v1.projects({ id: props.projectId }).patch({
+      autoDeploy: next,
+    });
+    if (error) {
+      autoDeployLocal.value = !next; // คืนค่าเดิมเมื่อบันทึกไม่สำเร็จ
+      const body = error.value as { error?: { message?: string } } | null;
+      autoDeployError.value = body?.error?.message ?? "บันทึกไม่สำเร็จ";
+      return;
+    }
+    emit("auto-deploy-changed");
+  } catch {
+    autoDeployLocal.value = !next;
+    autoDeployError.value = "ติดต่อ API ไม่ได้";
+  } finally {
+    savingAutoDeploy.value = false;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Deployment list
@@ -213,6 +263,49 @@ function fmtDuration(start: number | null, end: number | null) {
       </p>
     </div>
 
+    <!-- ── Auto deploy ──
+         อยู่ตรงนี้ไม่ใช่ในแท็บตั้งค่า เพราะเป็นสิ่งที่คนดูเวลาสงสัยว่า "ทำไม push แล้วไม่ deploy" -->
+    <section class="inset auto-deploy">
+      <div class="ad-main">
+        <button
+          class="switch"
+          role="switch"
+          :aria-checked="autoDeployLocal"
+          :disabled="savingAutoDeploy || archived || !hasSource"
+          @click="toggleAutoDeploy"
+        >
+          <span class="switch-track" :class="{ on: autoDeployLocal }">
+            <span class="switch-thumb" />
+          </span>
+        </button>
+
+        <div class="ad-text">
+          <span class="ad-title">
+            Auto deploy
+            <span class="badge tiny" :class="autoDeployLocal ? 'tone-ok' : 'tone-idle'">
+              {{ autoDeployLocal ? "เปิด" : "ปิด" }}
+            </span>
+            <span v-if="savingAutoDeploy" class="spinner" />
+          </span>
+          <span class="muted tiny">
+            <template v-if="autoDeployLocal">
+              push เข้า <code>{{ branch ?? "—" }}</code> แล้วระบบจะ build และ deploy ให้อัตโนมัติ
+            </template>
+            <template v-else>
+              ตอนนี้ push เข้า <code>{{ branch ?? "—" }}</code> จะ<strong>ไม่</strong>ทำอะไร —
+              ต้องกด Deploy เอง
+            </template>
+          </span>
+        </div>
+      </div>
+
+      <p v-if="!hasSource" class="field-hint">เชื่อม repository ก่อนจึงจะเปิด auto deploy ได้</p>
+      <p v-if="autoDeployError" class="alert alert-bad tiny">
+        <AppIcon name="alert" :size="14" />
+        <span>{{ autoDeployError }}</span>
+      </p>
+    </section>
+
     <!-- Deployment list -->
     <div>
       <div class="row-between section-head">
@@ -290,6 +383,78 @@ function fmtDuration(start: number | null, end: number | null) {
 </template>
 
 <style scoped>
+/* ── Auto deploy switch ── */
+.auto-deploy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.ad-main {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+}
+.ad-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.ad-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-weight: 600;
+  font-size: var(--t-sm);
+}
+
+/* สวิตช์เอง — ปุ่มโปร่งใสครอบ track เพื่อให้พื้นที่คลิกใหญ่กว่าตัวสวิตช์ */
+.switch {
+  height: auto;
+  padding: 2px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  flex-shrink: 0;
+}
+.switch:hover:not(:disabled) {
+  background: transparent;
+}
+.switch:disabled {
+  opacity: 0.45;
+}
+.switch-track {
+  display: block;
+  width: 38px;
+  height: 22px;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  position: relative;
+  transition:
+    background var(--fast),
+    border-color var(--fast);
+}
+.switch-track.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text);
+  transition: transform var(--fast);
+  box-shadow: var(--shadow-sm);
+}
+.switch-track.on .switch-thumb {
+  transform: translateX(16px);
+  background: var(--accent-fg);
+}
+
 .section-head {
   margin-bottom: var(--s-3);
 }

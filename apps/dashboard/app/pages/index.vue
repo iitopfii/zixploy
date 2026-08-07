@@ -16,14 +16,23 @@ const {
   { server: false },
 );
 
-/** สรุปจำนวนตามสถานะ — แถบบนสุดของหน้า ให้เห็นสุขภาพระบบรวมในแวบเดียว */
+/**
+ * สรุปจำนวนตามสถานะ — แถบบนสุดของหน้า ให้เห็นสุขภาพระบบรวมในแวบเดียว
+ *
+ * "กำลัง deploy" นับจาก activeDeployment ไม่ใช่ project.status เพราะสองอย่างนี้ตอบคนละคำถาม:
+ * project.status บอกว่าแอปให้บริการอยู่ไหม ส่วน deployment บอกว่า build ไปถึงไหน
+ * ระหว่าง build แอปเวอร์ชันเดิมยังรันอยู่ project.status จึงยังเป็น running/stopped ตามเดิม
+ * (ADR-0004 — build ที่ล้มเหลวต้องไม่กระทบ container ที่ให้บริการอยู่)
+ *
+ * "ต้องดูแล" นับ degraded (container หายไปจริง) หรือ deploy ครั้งล่าสุดพัง
+ */
 const stats = computed(() => {
   const items = projects.value ?? [];
   return {
     total: items.length,
     running: items.filter((p) => p.status === "running" && !p.degraded).length,
-    deploying: items.filter((p) => p.status === "deploying").length,
-    attention: items.filter((p) => p.status === "failed" || p.degraded).length,
+    deploying: items.filter((p) => p.activeDeployment != null).length,
+    attention: items.filter((p) => p.degraded || p.lastDeploymentStatus === "failed").length,
   };
 });
 
@@ -211,7 +220,19 @@ async function create() {
         <NuxtLink :to="`/projects/${project.id}`" class="card card-link project">
           <div class="project-head">
             <h3 class="truncate">{{ project.name }}</h3>
-            <span class="status" :class="`status-${project.degraded ? 'degraded' : project.status}`">
+            <!-- deployment ที่กำลังทำงานสำคัญกว่าสถานะแอป ณ ตอนนั้น — แสดงแทนชั่วคราว -->
+            <span
+              v-if="project.activeDeployment"
+              class="status status-deploying"
+              :title="`กำลัง ${project.activeDeployment.status}`"
+            >
+              {{ deploymentStatusLabel(project.activeDeployment.status) }}
+            </span>
+            <span
+              v-else
+              class="status"
+              :class="`status-${project.degraded ? 'degraded' : project.status}`"
+            >
               {{ project.degraded ? "ผิดปกติ" : projectStatusLabel(project.status) }}
             </span>
           </div>

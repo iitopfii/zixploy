@@ -98,16 +98,32 @@ function startBuildSse() {
   const lastSeq = buildLogs.value[buildLogs.value.length - 1]?.seq ?? 0;
   const url = `/api/v1/deployments/${selectedDepId.value}/logs/stream${lastSeq ? `?afterSeq=${lastSeq}` : ""}`;
   const es = new EventSource(url);
+
+  // รวบเป็นก้อนเหมือน runtime — build log ของ image ใหญ่ ๆ มาเป็นพันบรรทัดรวดเดียว
+  let pending: LogLine[] = [];
+  let flushQueued = false;
+
+  function flush() {
+    flushQueued = false;
+    if (pending.length === 0) return;
+    const batch = pending;
+    pending = [];
+    buildLogs.value.push(...batch);
+    scrollToBottom();
+  }
+
   es.onmessage = (ev) => {
-    if (ev.data === ":heartbeat") return;
     try {
-      const entry = JSON.parse(ev.data) as LogLine;
-      buildLogs.value.push(entry);
-      scrollToBottom();
+      pending.push(JSON.parse(ev.data) as LogLine);
     } catch {
-      /* ignore */
+      return;
+    }
+    if (!flushQueued) {
+      flushQueued = true;
+      requestAnimationFrame(flush);
     }
   };
+
   es.onerror = () => {
     es.close();
   };
@@ -161,23 +177,60 @@ async function loadRuntimeLogs() {
   }
 }
 
+/**
+ * จำนวนบรรทัดสูงสุดที่เก็บใน DOM
+ *
+ * ต่ำกว่า ring buffer ฝั่ง server (2,000) โดยตั้งใจ — แต่ละบรรทัดเป็น 3 DOM node
+ * 2,000 บรรทัด = 6,000 node ทำให้ทุก patch ของ Vue ช้าจนสังเกตได้
+ */
+const MAX_RENDERED_LINES = 800;
+/** ตัดทีละก้อนแทนตัดทีละบรรทัด — splice ทุกครั้งที่ push ทำให้ re-render ทั้ง list */
+const TRIM_CHUNK = 200;
+
 function startRuntimeSse() {
   stopRuntimeSse();
   runtimeSse = new AbortController();
+
+  // ส่ง seq ล่าสุดที่มีอยู่ ไม่งั้น server จะยิง ring buffer ทั้งก้อนกลับมาซ้ำ
   const lastSeq = runtimeLogs.value[runtimeLogs.value.length - 1]?.seq ?? 0;
   const url = `/api/v1/projects/${props.projectId}/runtime-logs/stream${lastSeq ? `?afterSeq=${lastSeq}` : ""}`;
   const es = new EventSource(url);
+
+  /**
+   * พักข้อความไว้ใน buffer แล้ว flush ทีเดียวต่อเฟรม
+   *
+   * push ตรงเข้า ref ทุกข้อความ = trigger reactivity + re-render ต่อบรรทัด
+   * ชุดละ 500 บรรทัดจึงทำให้เบราว์เซอร์ค้าง — รวบเป็นก้อนเดียวแล้ว render ครั้งเดียว
+   */
+  let pending: RuntimeLine[] = [];
+  let flushQueued = false;
+
+  function flush() {
+    flushQueued = false;
+    if (pending.length === 0) return;
+
+    const batch = pending;
+    pending = [];
+    runtimeLogs.value.push(...batch);
+
+    if (runtimeLogs.value.length > MAX_RENDERED_LINES) {
+      runtimeLogs.value.splice(0, runtimeLogs.value.length - MAX_RENDERED_LINES + TRIM_CHUNK);
+    }
+    scrollToBottom();
+  }
+
   es.onmessage = (ev) => {
-    if (ev.data === ":heartbeat") return;
     try {
-      const entry = JSON.parse(ev.data) as RuntimeLine;
-      runtimeLogs.value.push(entry);
-      if (runtimeLogs.value.length > 2000) runtimeLogs.value.splice(0, 500);
-      scrollToBottom();
+      pending.push(JSON.parse(ev.data) as RuntimeLine);
     } catch {
-      /* ignore */
+      return; // บรรทัดที่ parse ไม่ได้ ข้ามไป ไม่ให้ล้ม stream ทั้งเส้น
+    }
+    if (!flushQueued) {
+      flushQueued = true;
+      requestAnimationFrame(flush);
     }
   };
+
   es.onerror = () => {
     es.close();
   };
@@ -205,10 +258,25 @@ onUnmounted(stopRuntimeSse);
 const logBox = ref<HTMLElement | null>(null);
 const autoScroll = ref(true);
 
+/**
+ * รวบการ scroll ให้เหลือครั้งเดียวต่อเฟรม
+ *
+ * เดิมเรียก nextTick() ต่อ "ทุกข้อความ" ที่เข้ามา — log ที่มาเป็นชุด 500 บรรทัด
+ * จะ queue callback 500 ตัว แต่ละตัวอ่าน scrollHeight ซึ่งบังคับให้เบราว์เซอร์
+ * คำนวณ layout ใหม่ทันที (forced synchronous reflow) บน DOM ที่มีหลายพัน node
+ * → main thread ค้างยาว
+ *
+ * requestAnimationFrame + flag กันซ้ำ ทำให้ต่อให้มี 500 ข้อความก็ scroll ครั้งเดียว
+ */
+let scrollQueued = false;
+
 function scrollToBottom() {
-  if (!autoScroll.value || !logBox.value) return;
-  nextTick(() => {
-    if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight;
+  if (!autoScroll.value || scrollQueued) return;
+  scrollQueued = true;
+  requestAnimationFrame(() => {
+    scrollQueued = false;
+    const el = logBox.value;
+    if (el && autoScroll.value) el.scrollTop = el.scrollHeight;
   });
 }
 

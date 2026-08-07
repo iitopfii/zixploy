@@ -21,7 +21,7 @@ import type { Database } from "bun:sqlite";
 import { API_PREFIX, AppError, isTerminal, isUlid, LOG_SETTINGS } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
 import { listBuildLogs } from "../logs/build-store";
-import { listRuntimeLogs } from "../logs/runtime-store";
+import { listRuntimeLogs, tailRuntimeLogs } from "../logs/runtime-store";
 import { authPlugin, requireAuthenticated } from "../plugins/auth";
 
 // ---------------------------------------------------------------------------
@@ -61,6 +61,26 @@ function requireDeployment(db: Database, id: string): { id: string; status: stri
     .get(id);
   if (!row) throw new AppError("DEPLOYMENT_NOT_FOUND", "ไม่พบ deployment นี้");
   return row;
+}
+
+/**
+ * จุดเริ่มของ SSE stream — Last-Event-ID มาก่อน แล้วค่อย ?afterSeq
+ *
+ * Last-Event-ID เป็นกลไกมาตรฐานตอนเบราว์เซอร์ reconnect เอง (ส่ง id ของ event สุดท้ายที่ได้รับ)
+ * ส่วน ?afterSeq ใช้ตอนเปิด stream ครั้งแรก ซึ่ง client โหลด log ชุดแรกผ่าน REST ไปแล้ว
+ * และรู้ว่าตัวเองมีถึง seq ไหน
+ *
+ * **เดิมอ่านแค่ header** ทำให้ตอนเชื่อมครั้งแรก afterSeq = 0 เสมอ → server ยิง log
+ * ทั้ง ring buffer (2,000 บรรทัด ครั้งละ 500) กลับไปซ้ำกับที่ client มีอยู่แล้ว
+ * เบราว์เซอร์ต้อง render ซ้ำทั้งหมดจนค้าง และ key ของ Vue ชนกันเพราะ seq ซ้ำ
+ */
+function resolveAfterSeq(
+  lastEventId: string | undefined,
+  queryAfterSeq: string | undefined,
+): number {
+  if (lastEventId && /^\d+$/.test(lastEventId)) return Number(lastEventId);
+  if (queryAfterSeq && /^\d+$/.test(queryAfterSeq)) return Number(queryAfterSeq);
+  return 0;
 }
 
 function requireProject(db: Database, id: string): void {
@@ -275,13 +295,10 @@ export function logRoutes(db: Database) {
       )
 
       // GET /api/v1/deployments/:id/logs/stream — SSE
-      .get(`${API_PREFIX}/deployments/:id/logs/stream`, ({ params, headers }) => {
+      .get(`${API_PREFIX}/deployments/:id/logs/stream`, ({ params, headers, query }) => {
         requireDeployment(db, params.id);
 
-        // Last-Event-ID → resume from last received seq
-        const lastEventId = headers["last-event-id"];
-        const afterSeq = lastEventId && /^\d+$/.test(lastEventId) ? Number(lastEventId) : 0;
-
+        const afterSeq = resolveAfterSeq(headers["last-event-id"], query.afterSeq);
         const stream = buildLogSseStream(db, params.id, afterSeq);
         return new Response(stream, {
           headers: {
@@ -321,9 +338,11 @@ export function logRoutes(db: Database) {
         `${API_PREFIX}/projects/:id/runtime-logs`,
         ({ params, query }) => {
           requireProject(db, params.id);
-          const logs = listRuntimeLogs(db, params.id, {
-            ...(query.afterSeq !== undefined ? { afterSeq: query.afterSeq } : {}),
-          });
+          // ไม่ส่ง cursor = เปิดหน้าครั้งแรก → เอาบรรทัดล่าสุด ไม่ใช่เก่าสุดของ ring buffer
+          const logs =
+            query.afterSeq !== undefined
+              ? listRuntimeLogs(db, params.id, { afterSeq: query.afterSeq })
+              : tailRuntimeLogs(db, params.id);
           return { logs };
         },
         {
@@ -335,12 +354,10 @@ export function logRoutes(db: Database) {
       )
 
       // GET /api/v1/projects/:id/runtime-logs/stream — SSE
-      .get(`${API_PREFIX}/projects/:id/runtime-logs/stream`, ({ params, headers }) => {
+      .get(`${API_PREFIX}/projects/:id/runtime-logs/stream`, ({ params, headers, query }) => {
         requireProject(db, params.id);
 
-        const lastEventId = headers["last-event-id"];
-        const afterSeq = lastEventId && /^\d+$/.test(lastEventId) ? Number(lastEventId) : 0;
-
+        const afterSeq = resolveAfterSeq(headers["last-event-id"], query.afterSeq);
         const stream = runtimeLogSseStream(db, params.id, afterSeq);
         return new Response(stream, {
           headers: {

@@ -38,10 +38,11 @@ async function fetchVolumes() {
   loadError.value = "";
   try {
     const { data, error } = await api.api.v1.projects({ id: props.projectId }).volumes.get();
-    if (error) { loadError.value = "โหลด volumes ไม่ได้"; return; }
-    volumes.value = (data?.volumes ?? []).filter(
-      (v) => v.lifecycle !== "deleted"
-    ) as Volume[];
+    if (error) {
+      loadError.value = "โหลด volumes ไม่ได้";
+      return;
+    }
+    volumes.value = (data?.volumes ?? []).filter((v) => v.lifecycle !== "deleted") as Volume[];
   } catch {
     loadError.value = "ติดต่อ API ไม่ได้";
   } finally {
@@ -76,7 +77,9 @@ async function createVolume() {
       readOnly: createForm.readOnly,
     });
     if (error) {
-      createError.value = (error.value as { error?: { message?: string } } | null)?.error?.message ?? "สร้าง volume ไม่สำเร็จ";
+      createError.value =
+        (error.value as { error?: { message?: string } } | null)?.error?.message ??
+        "สร้าง volume ไม่สำเร็จ";
       return;
     }
     showCreate.value = false;
@@ -101,11 +104,14 @@ async function detach(volumeId: string) {
   detachingId.value = volumeId;
   detachError.value[volumeId] = "";
   try {
-    const { error } = await api.api.v1.projects({ id: props.projectId })
+    const { error } = await api.api.v1
+      .projects({ id: props.projectId })
       .volumes({ volumeId })
       .detach.post({});
     if (error) {
-      detachError.value[volumeId] = (error.value as { error?: { message?: string } } | null)?.error?.message ?? "detach ไม่สำเร็จ";
+      detachError.value[volumeId] =
+        (error.value as { error?: { message?: string } } | null)?.error?.message ??
+        "detach ไม่สำเร็จ";
       return;
     }
     await fetchVolumes();
@@ -125,13 +131,9 @@ const confirmInput = ref("");
 const deleting = ref(false);
 const deleteError = ref("");
 
-const confirmTarget = computed(() =>
-  volumes.value.find((v) => v.id === confirmDeleteId.value),
-);
+const confirmTarget = computed(() => volumes.value.find((v) => v.id === confirmDeleteId.value));
 
-const canDelete = computed(() =>
-  confirmInput.value === confirmTarget.value?.displayName,
-);
+const canDelete = computed(() => confirmInput.value === confirmTarget.value?.displayName);
 
 function openDelete(v: Volume) {
   confirmDeleteId.value = v.id;
@@ -144,11 +146,13 @@ async function deleteVolume() {
   deleting.value = true;
   deleteError.value = "";
   try {
-    const { error } = await api.api.v1.projects({ id: props.projectId })
+    const { error } = await api.api.v1
+      .projects({ id: props.projectId })
       .volumes({ volumeId: confirmDeleteId.value })
       .delete();
     if (error) {
-      deleteError.value = (error.value as { error?: { message?: string } } | null)?.error?.message ?? "ลบไม่สำเร็จ";
+      deleteError.value =
+        (error.value as { error?: { message?: string } } | null)?.error?.message ?? "ลบไม่สำเร็จ";
       return;
     }
     confirmDeleteId.value = null;

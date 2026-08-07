@@ -153,6 +153,17 @@ export function validateHostname(raw: string): string {
 // Traefik label generation
 // ---------------------------------------------------------------------------
 
+/** สถานะการตรวจ DNS — 'proxied' = ชี้ผ่าน Cloudflare edge (ตั้งใจ ไม่ใช่ error) */
+export type DnsStatus = "pending" | "valid" | "mismatch" | "proxied" | "unknown";
+
+/**
+ * แหล่งที่มาของ TLS certificate
+ * - `letsencrypt`: Traefik ขอ/ต่ออายุเองผ่าน ACME (ต้องให้ port 80 เข้าถึงได้จากภายนอก)
+ * - `custom`: ผู้ใช้อัปโหลด PEM เอง — Traefik อ่านจาก file provider (ดู tls/materialize.ts)
+ *   ใช้กรณี wildcard, EV cert, หรือ Cloudflare Origin CA (ที่ ACME ออกให้ไม่ได้)
+ */
+export type TlsMode = "letsencrypt" | "custom";
+
 /** ข้อมูล domain ที่จำเป็นสำหรับสร้าง Traefik labels */
 export interface DomainConfig {
   hostname: string;
@@ -160,6 +171,8 @@ export interface DomainConfig {
   httpsEnabled: boolean;
   redirectHttp: boolean;
   redirectMode: "none" | "www_to_root" | "root_to_www";
+  /** ไม่ระบุ → 'letsencrypt' (พฤติกรรมเดิมก่อน M5) */
+  tlsMode?: TlsMode;
 }
 
 /**
@@ -216,15 +229,30 @@ export function buildTraefikLabels(
   // ใช้ 12 chars สุดท้ายของ projectId (ULID sortable part) เพื่อให้ unique + อ่านง่าย
   const svcName = `zx-${projectId.slice(-12).toLowerCase()}`;
 
+  /**
+   * ตั้ง TLS labels ให้ router หนึ่งตัว
+   *
+   * `letsencrypt` → ระบุ certresolver ให้ Traefik ไปขอ cert ผ่าน ACME
+   * `custom`      → **ห้าม** ใส่ certresolver เด็ดขาด ไม่งั้น Traefik จะพยายามขอ ACME cert
+   *                 ทับ cert ที่ผู้ใช้อัปโหลด (ใส่ tls=true เฉย ๆ แล้วให้ file provider
+   *                 จับคู่ cert กับ SNI เอง — ดู tls/materialize.ts)
+   */
+  const applyTls = (routerName: string, tlsMode: TlsMode) => {
+    labels[`traefik.http.routers.${routerName}.tls`] = "true";
+    if (tlsMode === "letsencrypt") {
+      labels[`traefik.http.routers.${routerName}.tls.certresolver`] = "letsencrypt";
+    }
+  };
+
   for (const domain of domains) {
     const name = routerSafeName(domain.hostname);
+    const tlsMode: TlsMode = domain.tlsMode ?? "letsencrypt";
 
     if (domain.httpsEnabled) {
       // HTTPS router
       labels[`traefik.http.routers.${name}.rule`] = `Host(\`${domain.hostname}\`)`;
       labels[`traefik.http.routers.${name}.entrypoints`] = "websecure";
-      labels[`traefik.http.routers.${name}.tls`] = "true";
-      labels[`traefik.http.routers.${name}.tls.certresolver`] = "letsencrypt";
+      applyTls(name, tlsMode);
       labels[`traefik.http.routers.${name}.service`] = svcName;
 
       // HTTP → HTTPS redirect
@@ -254,10 +282,7 @@ export function buildTraefikLabels(
       labels[`traefik.http.routers.${wwwName}.entrypoints`] = domain.httpsEnabled
         ? "websecure"
         : "web";
-      if (domain.httpsEnabled) {
-        labels[`traefik.http.routers.${wwwName}.tls`] = "true";
-        labels[`traefik.http.routers.${wwwName}.tls.certresolver`] = "letsencrypt";
-      }
+      if (domain.httpsEnabled) applyTls(wwwName, tlsMode);
       labels[`traefik.http.routers.${wwwName}.middlewares`] = mw;
       labels[`traefik.http.middlewares.${mw}.redirectregex.regex`] =
         `^https?://www\\.${escapeRegexDots(domain.hostname)}/(.*)`;
@@ -274,10 +299,7 @@ export function buildTraefikLabels(
       labels[`traefik.http.routers.${rootName}.entrypoints`] = domain.httpsEnabled
         ? "websecure"
         : "web";
-      if (domain.httpsEnabled) {
-        labels[`traefik.http.routers.${rootName}.tls`] = "true";
-        labels[`traefik.http.routers.${rootName}.tls.certresolver`] = "letsencrypt";
-      }
+      if (domain.httpsEnabled) applyTls(rootName, tlsMode);
       labels[`traefik.http.routers.${rootName}.middlewares`] = mw;
       labels[`traefik.http.middlewares.${mw}.redirectregex.regex`] =
         `^https?://${escapeRegexDots(domain.hostname)}/(.*)`;

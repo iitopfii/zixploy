@@ -6,7 +6,7 @@
  */
 
 import type { Database } from "bun:sqlite";
-import { AppError, ulid } from "@zixploy/shared";
+import { AppError, type DnsStatus, type TlsMode, ulid } from "@zixploy/shared";
 
 // ---------------------------------------------------------------------------
 // Row types
@@ -22,6 +22,9 @@ export interface DomainRow {
   redirect_mode: string;
   dns_status: string;
   dns_checked_at: number | null;
+  tls_mode: string;
+  tls_cert_fingerprint: string | null;
+  tls_cert_not_after: number | null;
   enabled: number;
   created_at: number;
   updated_at: number;
@@ -39,8 +42,14 @@ export interface DomainDto {
   httpsEnabled: boolean;
   redirectHttp: boolean;
   redirectMode: "none" | "www_to_root" | "root_to_www";
-  dnsStatus: "pending" | "valid" | "mismatch" | "unknown";
+  dnsStatus: DnsStatus;
   dnsCheckedAt: number | null;
+  /** 'custom' = ผู้ใช้อัปโหลด PEM เอง, 'letsencrypt' = Traefik ขอ ACME ให้ */
+  tlsMode: TlsMode;
+  /** SHA-256 ของ custom cert — null เมื่อใช้ Let's Encrypt (ไม่ใช่ความลับ ใช้ให้ผู้ใช้ verify) */
+  tlsCertFingerprint: string | null;
+  /** วันหมดอายุ custom cert (epoch ms) — UI เตือนล่วงหน้าได้ ไม่มีการต่ออายุอัตโนมัติ */
+  tlsCertNotAfter: number | null;
   enabled: boolean;
   createdAt: number;
   updatedAt: number;
@@ -55,19 +64,25 @@ function toDto(row: DomainRow): DomainDto {
     httpsEnabled: row.https_enabled === 1,
     redirectHttp: row.redirect_http === 1,
     redirectMode: row.redirect_mode as DomainDto["redirectMode"],
-    dnsStatus: row.dns_status as DomainDto["dnsStatus"],
+    dnsStatus: row.dns_status as DnsStatus,
     dnsCheckedAt: row.dns_checked_at,
+    tlsMode: row.tls_mode as TlsMode,
+    tlsCertFingerprint: row.tls_cert_fingerprint,
+    tlsCertNotAfter: row.tls_cert_not_after,
     enabled: row.enabled === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
+// ไม่ SELECT tls_cert_ciphertext/tls_key_ciphertext โดยตั้งใจ — DomainDto ไหลออก HTTP
+// การไม่ดึงมาตั้งแต่ต้นทำให้ leak โดยพลาดเป็นไปไม่ได้ (ดู tls-store.ts สำหรับ path ที่ต้องใช้จริง)
 const SELECT_ALL = `
   id, project_id, hostname, internal_port,
   https_enabled, redirect_http, redirect_mode,
-  dns_status, dns_checked_at, enabled,
-  created_at, updated_at
+  dns_status, dns_checked_at,
+  tls_mode, tls_cert_fingerprint, tls_cert_not_after,
+  enabled, created_at, updated_at
 `;
 
 // ---------------------------------------------------------------------------
@@ -180,11 +195,7 @@ export function deleteDomain(db: Database, id: string): void {
 }
 
 /** อัปเดต dns_status + dns_checked_at — เรียกจาก DNS check service */
-export function updateDnsStatus(
-  db: Database,
-  id: string,
-  status: "pending" | "valid" | "mismatch" | "unknown",
-): DomainDto {
+export function updateDnsStatus(db: Database, id: string, status: DnsStatus): DomainDto {
   const row = getDomain(db, id);
   if (!row) throw new AppError("DOMAIN_NOT_FOUND", "ไม่พบ domain นี้");
 

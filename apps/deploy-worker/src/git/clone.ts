@@ -85,8 +85,7 @@ export async function cloneCommit(params: CloneParams): Promise<void> {
   const { repoFullName, commitSha, token, destDir, timeoutMs, signal, onLog } = params;
   // URL-based auth: x-access-token:<token>@github.com (ไม่ผ่าน git remote add → token ไม่ถูกบันทึกลง .git/config)
   // เมื่อ remoteUrl ถูก inject (tests/local) จะ override และไม่มี token ใน URL เลย
-  const url =
-    params.remoteUrl ?? `https://x-access-token:${token}@github.com/${repoFullName}.git`;
+  const url = params.remoteUrl ?? `https://x-access-token:${token}@github.com/${repoFullName}.git`;
 
   const timeoutController = new AbortController();
   const timer = setTimeout(() => timeoutController.abort(), timeoutMs);
@@ -107,11 +106,7 @@ export async function cloneCommit(params: CloneParams): Promise<void> {
     // -c credential.helper= ปิด credential helper ทั้งหมดเพื่อกัน git พยายาม prompt หรือ
     // ใช้ stored credentials อื่นที่อาจ override URL-based auth
     result = await run(
-      [
-        "git", "-C", destDir,
-        "-c", "credential.helper=",
-        "fetch", "--depth", "1", url, commitSha,
-      ],
+      ["git", "-C", destDir, "-c", "credential.helper=", "fetch", "--depth", "1", url, commitSha],
       { signal: combinedSignal, onLog },
     );
     if (result.code !== 0) {

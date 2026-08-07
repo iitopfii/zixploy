@@ -65,12 +65,8 @@ let sseAbort: AbortController | null = null;
 
 const IN_FLIGHT = ["queued", "cloning", "building", "starting", "health_checking", "activating"];
 
-const selectedDep = computed(() =>
-  deploymentList.value.find((d) => d.id === selectedDepId.value),
-);
-const isLive = computed(() =>
-  !!selectedDep.value && IN_FLIGHT.includes(selectedDep.value.status),
-);
+const selectedDep = computed(() => deploymentList.value.find((d) => d.id === selectedDepId.value));
+const isLive = computed(() => !!selectedDep.value && IN_FLIGHT.includes(selectedDep.value.status));
 
 async function loadBuildLogs() {
   if (!selectedDepId.value) return;
@@ -83,7 +79,10 @@ async function loadBuildLogs() {
     const { data, error } = await api.api.v1.deployments({ id: selectedDepId.value }).logs.get({
       query: {},
     });
-    if (error) { buildLogError.value = "โหลด logs ไม่ได้"; return; }
+    if (error) {
+      buildLogError.value = "โหลด logs ไม่ได้";
+      return;
+    }
     buildLogs.value = (data?.logs ?? []) as LogLine[];
     if (isLive.value) startBuildSse();
   } catch {
@@ -105,9 +104,13 @@ function startBuildSse() {
       const entry = JSON.parse(ev.data) as LogLine;
       buildLogs.value.push(entry);
       scrollToBottom();
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   };
-  es.onerror = () => { es.close(); };
+  es.onerror = () => {
+    es.close();
+  };
   sseAbort.signal.addEventListener("abort", () => es.close());
 }
 
@@ -145,7 +148,10 @@ async function loadRuntimeLogs() {
     const { data, error } = await api.api.v1.projects({ id: props.projectId })["runtime-logs"].get({
       query: {},
     });
-    if (error) { runtimeError.value = "โหลด runtime logs ไม่ได้"; return; }
+    if (error) {
+      runtimeError.value = "โหลด runtime logs ไม่ได้";
+      return;
+    }
     runtimeLogs.value = (data?.logs ?? []) as RuntimeLine[];
     startRuntimeSse();
   } catch {
@@ -168,9 +174,13 @@ function startRuntimeSse() {
       runtimeLogs.value.push(entry);
       if (runtimeLogs.value.length > 2000) runtimeLogs.value.splice(0, 500);
       scrollToBottom();
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   };
-  es.onerror = () => { es.close(); };
+  es.onerror = () => {
+    es.close();
+  };
   runtimeSse.signal.addEventListener("abort", () => es.close());
 }
 
@@ -181,7 +191,10 @@ function stopRuntimeSse() {
 
 watch(mode, (m) => {
   if (m === "runtime") loadRuntimeLogs();
-  else { stopRuntimeSse(); loadBuildLogs(); }
+  else {
+    stopRuntimeSse();
+    loadBuildLogs();
+  }
 });
 onUnmounted(stopRuntimeSse);
 
@@ -209,8 +222,12 @@ function onScroll() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function shortSha(sha: string) { return sha.slice(0, 7); }
-function fmtTime(ms: number) { return new Date(ms).toLocaleString("th-TH", { timeStyle: "short" }); }
+function shortSha(sha: string) {
+  return sha.slice(0, 7);
+}
+function fmtTime(ms: number) {
+  return new Date(ms).toLocaleString("th-TH", { timeStyle: "short" });
+}
 </script>
 
 <template>

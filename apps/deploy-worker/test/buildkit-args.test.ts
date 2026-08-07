@@ -60,7 +60,9 @@ describe("buildBuildxArgs — resource sandbox (Phase 8 M1)", () => {
     expect(args).not.toContain("cpu-quota=25000");
     // nproc ยังใช้ค่าที่ override ได้
     expect(args).toContain("nproc=16:16");
-    expect(args).not.toContain(`nproc=${BUILD_SANDBOX_LIMITS.nprocSoft}:${BUILD_SANDBOX_LIMITS.nprocHard}`);
+    expect(args).not.toContain(
+      `nproc=${BUILD_SANDBOX_LIMITS.nprocSoft}:${BUILD_SANDBOX_LIMITS.nprocHard}`,
+    );
   });
 
   test("ไม่กระทบ flags เดิม (target/build-arg/secret/label/context) ", () => {

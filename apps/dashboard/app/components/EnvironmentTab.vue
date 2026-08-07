@@ -31,7 +31,10 @@ async function fetchEnv() {
   loadError.value = "";
   try {
     const { data, error } = await api.api.v1.projects({ id: props.projectId }).environment.get();
-    if (error) { loadError.value = "โหลด env vars ไม่ได้"; return; }
+    if (error) {
+      loadError.value = "โหลด env vars ไม่ได้";
+      return;
+    }
     existingMeta.value = (data?.variables ?? []) as EnvMeta[];
   } catch {
     loadError.value = "ติดต่อ API ไม่ได้";
@@ -48,11 +51,11 @@ await fetchEnv();
 
 interface EditorRow {
   key: string;
-  value: string;           // new value (empty = keep existing for existing keys)
+  value: string; // new value (empty = keep existing for existing keys)
   isSecret: boolean;
   scope: "runtime" | "build" | "both";
   enabled: boolean;
-  isExisting: boolean;     // true = has existing encrypted value in DB
+  isExisting: boolean; // true = has existing encrypted value in DB
 }
 
 const rows = ref<EditorRow[]>([]);
@@ -76,7 +79,14 @@ initRows();
 watch(existingMeta, initRows);
 
 function addRow() {
-  rows.value.push({ key: "", value: "", isSecret: false, scope: "runtime", enabled: true, isExisting: false });
+  rows.value.push({
+    key: "",
+    value: "",
+    isSecret: false,
+    scope: "runtime",
+    enabled: true,
+    isExisting: false,
+  });
   dirty.value = true;
 }
 
@@ -85,7 +95,9 @@ function removeRow(i: number) {
   dirty.value = true;
 }
 
-function onRowChange() { dirty.value = true; }
+function onRowChange() {
+  dirty.value = true;
+}
 
 // ---------------------------------------------------------------------------
 // Import from .env text
@@ -100,9 +112,11 @@ async function importDotEnv() {
   importing.value = true;
   importError.value = "";
   try {
-    const { data, error } = await api.api.v1.projects({ id: props.projectId }).environment.import.post({
-      content: importContent.value,
-    });
+    const { data, error } = await api.api.v1
+      .projects({ id: props.projectId })
+      .environment.import.post({
+        content: importContent.value,
+      });
     if (error) {
       const msg = (error.value as { error?: { message?: string } } | null)?.error?.message;
       importError.value = msg ?? "parse ไม่ได้";
@@ -115,7 +129,14 @@ async function importDotEnv() {
       if (existing) {
         if (v.value) existing.value = v.value;
       } else {
-        rows.value.push({ key: v.key, value: v.value, isSecret: false, scope: "runtime", enabled: true, isExisting: false });
+        rows.value.push({
+          key: v.key,
+          value: v.value,
+          isSecret: false,
+          scope: "runtime",
+          enabled: true,
+          isExisting: false,
+        });
       }
     }
     dirty.value = true;
@@ -160,7 +181,9 @@ async function save() {
     }));
 
   try {
-    const { error } = await api.api.v1.projects({ id: props.projectId }).environment.put({ variables });
+    const { error } = await api.api.v1
+      .projects({ id: props.projectId })
+      .environment.put({ variables });
     if (error) {
       const msg = (error.value as { error?: { message?: string } } | null)?.error?.message;
       saveError.value = msg ?? "บันทึกไม่สำเร็จ";

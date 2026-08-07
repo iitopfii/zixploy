@@ -28,9 +28,23 @@
 
 - Resolve A และ AAAA records
 - เปรียบเทียบกับ configured public IPs ของ server
-- แสดง `pending`, `valid`, `mismatch`, `unknown`
+- แสดง `pending`, `valid`, `mismatch`, `proxied`, `unknown`
 - DNS mismatch ไม่จำเป็นต้องห้าม save แต่ต้องเตือนก่อนเปิด HTTPS
 - ใช้ timeout/cache เพื่อไม่ให้ DNS resolver ทำ API ช้า
+
+### Cloudflare proxy (M5)
+
+เมื่อผู้ใช้เปิด Cloudflare proxy (เมฆส้ม) DNS จะ resolve เป็น Cloudflare edge IP เสมอ
+ไม่มีทางชี้มาที่ origin IP ได้เลย — การรายงานว่า `mismatch` จึงผิดและทำให้ผู้ใช้ไปปิด
+proxy ทิ้งโดยไม่จำเป็น
+
+- ทุก IP ที่ resolve ได้อยู่ใน Cloudflare range → `proxied` (ปกติ ไม่ใช่ error)
+- Cloudflare ปนกับ IP อื่นที่ไม่รู้จัก → `mismatch` (มักเป็น record ค้างที่ตั้งผิด)
+- origin IP ตรงแม้จะมี Cloudflare ปน → `valid` (ชนะทุกกรณี)
+- CIDR ranges อยู่ใน `internal/shared/src/cloudflare.ts` — ต้องตรงกับ Traefik
+  `forwardedHeaders.trustedIPs` ใน `deploy/server/docker-compose.yml` เสมอ
+  (ไม่ประกาศ trustedIPs = rate limit/audit log เห็นแต่ IP ของ Cloudflare ไม่ใช่ client จริง;
+  ใช้ `insecure=true` แทน = ใครก็ spoof X-Forwarded-For ได้)
 
 ## Traefik Integration
 
@@ -48,8 +62,49 @@ traefik.http.services.<service>.loadbalancer.server.port=<port>
 - `exposedByDefault=false`
 - Traefik และ app อยู่ใน dedicated proxy network
 - Persist ACME storage และตั้ง permission เหมาะสม
-- ใช้ staging ACME ใน test environment
+- ใช้ staging ACME ใน test environment (`ACME_CA_SERVER`)
 - backup certificate storage แต่ไม่แชร์ file storage ระหว่างหลาย Traefik instances
+
+## Certificate Management (M5)
+
+แต่ละ domain เลือก `tls_mode` ได้ 2 แบบ:
+
+| | `letsencrypt` (default) | `custom` |
+|--|--|--|
+| ที่มา cert | Traefik ขอผ่าน ACME HTTP-01 | ผู้ใช้อัปโหลด PEM |
+| ต่ออายุ | อัตโนมัติ | ต้องอัปโหลดใบใหม่เอง |
+| wildcard / EV / Cloudflare Origin CA | ไม่ได้ | ได้ |
+| Traefik label | `tls.certresolver=letsencrypt` | `tls=true` เท่านั้น |
+
+**สำคัญ**: `tls_mode='custom'` ต้อง **ไม่** ใส่ `certresolver` ใน label — ไม่งั้น Traefik
+จะพยายามขอ ACME cert ทับใบที่อัปโหลดไว้
+
+### Storage และ materialization
+
+- cert + key เข้ารหัส AES-256-GCM ก่อน persist เสมอ
+  AAD: `domain_tls:<domain_id>:cert` / `domain_tls:<domain_id>:key`
+  (ผูกกับทั้ง domain **และ** field — สลับช่อง cert↔key แล้ว decrypt ไม่ได้)
+- DB เป็น source of truth; ไฟล์บน volume เป็น projection ให้ Traefik อ่าน
+- `syncCertificates()` เป็น **full sync** ทุกครั้ง เรียกหลัง: upload/delete cert,
+  enable/disable domain, ลบ domain, และตอน control-api บูต
+- private key เขียนด้วย mode `0600`; config เขียนแบบ atomic (tmp → rename)
+- ชื่อไฟล์มาจาก domain id (ULID) ไม่ใช่ hostname ที่ผู้ใช้ป้อน
+
+### Validation ก่อนรับ
+
+ปฏิเสธพร้อม error code ที่แยกได้ (`TLS_CERT_KEY_MISMATCH`, `TLS_CERT_HOSTNAME_MISMATCH`,
+`TLS_CERT_EXPIRED`, `TLS_KEY_INVALID`, `TLS_CERT_INVALID`):
+
+- cert/key ไม่ใช่ PEM ที่ parse ได้
+- key ไม่ใช่คู่ของ cert (`checkPrivateKey`)
+- key มี passphrase (Traefik อ่านไม่ได้)
+- cert หมดอายุ / ยังไม่ถึงวันเริ่มใช้
+- cert ไม่ครอบ hostname ของ domain (รองรับ wildcard 1 ระดับตาม RFC 6125)
+
+### API ห้ามคืน PEM
+
+ไม่มี endpoint ใดคืน plaintext cert หรือ key — คืนแค่ metadata (fingerprint, subject,
+issuer, hostnames, expiry) เปลี่ยน = อัปโหลดทับ, เลิกใช้ = DELETE
 
 ## Routing Activation
 
@@ -67,6 +122,11 @@ POST   /api/v1/projects/:id/domains
 PATCH  /api/v1/projects/:id/domains/:domainId
 DELETE /api/v1/projects/:id/domains/:domainId
 POST   /api/v1/projects/:id/domains/:domainId/check
+
+# custom TLS certificate (M5)
+GET    /api/v1/projects/:id/domains/:domainId/certificate   # metadata เท่านั้น
+PUT    /api/v1/projects/:id/domains/:domainId/certificate   # upload/replace
+DELETE /api/v1/projects/:id/domains/:domainId/certificate   # กลับไปใช้ Let's Encrypt
 ```
 
 ## Dashboard
@@ -89,6 +149,8 @@ POST   /api/v1/projects/:id/domains/:domainId/check
 - [x] สร้าง route/certificate probes
 - [x] สร้าง domain UI และ status polling
 - [x] เพิ่ม duplicate-domain locking ใน DB
+- [x] M5: custom TLS certificate (upload/validate/encrypt/materialize)
+- [x] M5: Cloudflare proxy support (DNS `proxied` status + Traefik trustedIPs)
 
 ## การทดสอบ
 

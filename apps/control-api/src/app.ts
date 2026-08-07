@@ -65,7 +65,7 @@ export function buildApp(db: Database, options: AppOptions = {}) {
     .use(deploymentRoutes(db, registry))
     .use(webhookRoutes(db, registry))
     .use(environmentRoutes(db, masterKeys))
-    .use(domainRoutes(db))
+    .use(domainRoutes(db, masterKeys))
     .use(logRoutes(db))
     .use(volumeRoutes(db))
     .use(auditRoutes(db));

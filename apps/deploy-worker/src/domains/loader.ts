@@ -6,7 +6,7 @@
  */
 
 import type { Database } from "bun:sqlite";
-import type { DomainConfig } from "@zixploy/shared";
+import type { DomainConfig, TlsMode } from "@zixploy/shared";
 
 interface DomainRow {
   hostname: string;
@@ -14,6 +14,7 @@ interface DomainRow {
   https_enabled: number;
   redirect_http: number;
   redirect_mode: string;
+  tls_mode: string;
 }
 
 /**
@@ -23,7 +24,7 @@ interface DomainRow {
 export function loadProjectDomains(db: Database, projectId: string): DomainConfig[] {
   const rows = db
     .query<DomainRow, [string]>(
-      `SELECT hostname, internal_port, https_enabled, redirect_http, redirect_mode
+      `SELECT hostname, internal_port, https_enabled, redirect_http, redirect_mode, tls_mode
        FROM project_domains
        WHERE project_id = ? AND enabled = 1
        ORDER BY created_at ASC`,
@@ -36,5 +37,7 @@ export function loadProjectDomains(db: Database, projectId: string): DomainConfi
     httpsEnabled: row.https_enabled === 1,
     redirectHttp: row.redirect_http === 1,
     redirectMode: row.redirect_mode as DomainConfig["redirectMode"],
+    // custom → label ต้องไม่มี certresolver ไม่งั้น Traefik ขอ ACME cert ทับใบที่อัปโหลดไว้
+    tlsMode: row.tls_mode as TlsMode,
   }));
 }

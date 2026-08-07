@@ -50,7 +50,7 @@ function hostOf(value: string): string | null {
     // Host header อาจมี port (เช่น "127.0.0.1:3001", "example.com:8080", "[::1]:443")
     // strip port ออก: จับ host ส่วนที่ไม่ใช่ port suffix
     const m = value.match(/^(\[.+?\]|[^:]+)(?::\d+)?$/);
-    return m ? m[1] : value;
+    return m?.[1] ?? value;
   } catch {
     return null;
   }

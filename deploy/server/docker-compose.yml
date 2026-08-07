@@ -1,14 +1,25 @@
-# Zixploy — Server Deployment (HTTP-only, no domain required)
+# Zixploy — Server Deployment
 # ใช้กับ: docker compose -f deploy/server/docker-compose.yml up -d --build
 #
-# สถาปัตยกรรม (ไม่ใช้ Let's Encrypt เพราะยังไม่มี domain):
-#   port 80 → Traefik → /api/* → control-api:3001
-#                              → /*     → dashboard:3000
+# สถาปัตยกรรม:
+#   port 80  → Traefik → /api/* → control-api:3001
+#                               → /*     → dashboard:3000
+#   port 443 → Traefik → project containers (routing จาก Docker labels ที่ worker สร้าง)
 #   worker เข้า Docker socket โดยตรง
+#
+# TLS มี 2 ทางพร้อมกัน (ต่อ domain เลือกได้):
+#   1. Let's Encrypt — certresolver=letsencrypt, ACME HTTP-01 challenge ผ่าน port 80
+#   2. Custom certificate — control-api เขียน PEM ลง zixploy-certs แล้ว Traefik อ่านผ่าน
+#      file provider (ดู apps/control-api/src/domains/tls-materialize.ts)
+#      ใช้กับ wildcard, EV cert หรือ Cloudflare Origin CA ที่ ACME ออกให้ไม่ได้
+#
+# Cloudflare: เมื่อ proxy เปิด ทุก request มาจาก Cloudflare edge — ต้องประกาศ trustedIPs
+# ไม่งั้น rate limit/audit log จะเห็นแต่ IP ของ Cloudflare ไม่ใช่ client จริง
+# ค่า CIDR ต้องตรงกับ internal/shared/src/cloudflare.ts เสมอ
 
 services:
 
-  # ── Traefik (HTTP only) ────────────────────────────────────────────────────
+  # ── Traefik ────────────────────────────────────────────────────────────────
   traefik:
     image: traefik:v3.6
     container_name: zixploy-traefik
@@ -17,13 +28,34 @@ services:
       - --providers.docker=true
       - --providers.docker.exposedByDefault=false
       - --providers.docker.network=zixploy-proxy
+      # file provider สำหรับ custom certificate — watch ไฟล์ที่ control-api เขียน
+      - --providers.file.directory=/certs/dynamic
+      - --providers.file.watch=true
       - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      # ── Cloudflare trusted IPs (ต้องตรงกับ internal/shared/src/cloudflare.ts) ──
+      # ไม่ใช้ insecure=true เด็ดขาด — จะเชื่อ X-Forwarded-For จากใครก็ได้ = spoof IP ได้ฟรี
+      - --entrypoints.web.forwardedHeaders.trustedIPs=173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,2a06:98c0::/29,2c0f:f248::/32
+      - --entrypoints.websecure.forwardedHeaders.trustedIPs=173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,2a06:98c0::/29,2c0f:f248::/32
+      # ── ACME (Let's Encrypt) ──
+      # ACME_EMAIL ต้องตั้งใน .env — Let's Encrypt ใช้แจ้งเตือนก่อน cert หมดอายุ
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@localhost}
+      - --certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      # staging server สำหรับทดสอบ — production มี rate limit 5 cert/domain/สัปดาห์
+      # ตั้ง ACME_CA_SERVER=https://acme-staging-v02.api.letsencrypt.org/directory ตอนเทสต์
+      - --certificatesresolvers.letsencrypt.acme.caserver=${ACME_CA_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
       - --api=false
       - --log.level=INFO
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # ro: Traefik อ่าน cert อย่างเดียว — เขียนโดย control-api เท่านั้น
+      - zixploy-certs:/certs:ro
+      - zixploy-acme:/acme
     networks:
       - zixploy-proxy
     healthcheck:
@@ -46,13 +78,20 @@ services:
       ZIXPLOY_LOG_LEVEL: info
       ZIXPLOY_BASE_URL: http://${SERVER_IP:-localhost}
       ZIXPLOY_BIND_HOST: "0.0.0.0"
+      # IP สาธารณะของ server — DNS check เทียบ A/AAAA record กับค่านี้
+      # ไม่ตั้ง = ทุก domain ได้ mismatch (fail closed) ยกเว้นที่ผ่าน Cloudflare
+      ZIXPLOY_PUBLIC_IPS: ${SERVER_IP:-127.0.0.1}
       ZIXPLOY_MASTER_KEY_FILE: /run/secrets/master_key
       ZIXPLOY_BACKUP_DB_DIR: /backups/db
       ZIXPLOY_BACKUP_KEYS_DIR: /backups/keys
       ZIXPLOY_BACKUP_RETENTION: "14"
+      # custom TLS certificate — control-api เขียน, Traefik อ่าน (mount จุดเดียวกันทั้งคู่)
+      ZIXPLOY_TLS_DIR: /certs
     volumes:
       - zixploy-data:/data
       - zixploy-backups:/backups
+      # rw: control-api เป็นตัวเดียวที่เขียน cert (Traefik mount :ro)
+      - zixploy-certs:/certs
       - /etc/zixploy/master.key:/run/secrets/master_key:ro
     expose:
       - "3001"
@@ -145,3 +184,10 @@ volumes:
     name: zixploy-workspaces
   zixploy-backups:
     name: zixploy-backups
+  # custom TLS certificate ที่ผู้ใช้อัปโหลด — private key อยู่ในนี้ ต้อง backup แบบเข้ารหัส
+  # (source of truth คือ DB ที่เข้ารหัสไว้แล้ว — volume นี้ regenerate ได้จาก DB เสมอ)
+  zixploy-certs:
+    name: zixploy-certs
+  # ACME account key + cert ที่ Let's Encrypt ออกให้ — หายแล้วต้องขอใหม่ (ติด rate limit)
+  zixploy-acme:
+    name: zixploy-acme

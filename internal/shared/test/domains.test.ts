@@ -369,3 +369,112 @@ describe("buildTraefikLabels — security: no raw user input in label names", ()
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// tlsMode — custom certificate (M5)
+// ---------------------------------------------------------------------------
+
+describe("buildTraefikLabels — tlsMode", () => {
+  function labelsFor(
+    tlsMode: "letsencrypt" | "custom" | undefined,
+    extra: Partial<Parameters<typeof buildTraefikLabels>[0][number]> = {},
+  ) {
+    return buildTraefikLabels(
+      [
+        {
+          hostname: "example.com",
+          internalPort: 3000,
+          httpsEnabled: true,
+          redirectHttp: false,
+          redirectMode: "none",
+          ...(tlsMode ? { tlsMode } : {}),
+          ...extra,
+        },
+      ],
+      PROJECT_ID,
+    );
+  }
+
+  test("ไม่ระบุ tlsMode → letsencrypt (พฤติกรรมเดิมก่อน M5)", () => {
+    expect(labelsFor(undefined)["traefik.http.routers.example-com.tls.certresolver"]).toBe(
+      "letsencrypt",
+    );
+  });
+
+  test("tlsMode='letsencrypt' → มี certresolver", () => {
+    expect(labelsFor("letsencrypt")["traefik.http.routers.example-com.tls.certresolver"]).toBe(
+      "letsencrypt",
+    );
+  });
+
+  test("tlsMode='custom' → tls=true แต่ **ไม่มี** certresolver", () => {
+    // ถ้าใส่ certresolver ตอนใช้ custom cert Traefik จะพยายามขอ ACME cert ทับใบที่อัปโหลดไว้
+    const labels = labelsFor("custom");
+    expect(labels["traefik.http.routers.example-com.tls"]).toBe("true");
+    expect(labels["traefik.http.routers.example-com.tls.certresolver"]).toBeUndefined();
+  });
+
+  test("tlsMode='custom' — ไม่มี certresolver ใน label ใดเลย รวม redirect router", () => {
+    // www_to_root สร้าง router เพิ่มอีกตัวที่ก็ต้องไม่มี certresolver เช่นกัน
+    const labels = labelsFor("custom", { redirectMode: "www_to_root", redirectHttp: true });
+    const withResolver = Object.keys(labels).filter((k) => k.includes("certresolver"));
+    expect(withResolver).toEqual([]);
+  });
+
+  test("tlsMode='letsencrypt' + www_to_root → router ทั้งสองตัวมี certresolver", () => {
+    const labels = labelsFor("letsencrypt", { redirectMode: "www_to_root" });
+    expect(labels["traefik.http.routers.example-com.tls.certresolver"]).toBe("letsencrypt");
+    expect(labels["traefik.http.routers.www-example-com.tls.certresolver"]).toBe("letsencrypt");
+  });
+
+  test("tlsMode='custom' + root_to_www → router ทั้งสองตัวไม่มี certresolver แต่มี tls", () => {
+    const labels = labelsFor("custom", { redirectMode: "root_to_www" });
+    expect(labels["traefik.http.routers.example-com.tls"]).toBe("true");
+    expect(labels["traefik.http.routers.example-com-root.tls"]).toBe("true");
+    expect(Object.keys(labels).filter((k) => k.includes("certresolver"))).toEqual([]);
+  });
+
+  test("httpsEnabled=false → ไม่มี tls label ไม่ว่า tlsMode จะเป็นอะไร", () => {
+    const labels = buildTraefikLabels(
+      [
+        {
+          hostname: "example.com",
+          internalPort: 3000,
+          httpsEnabled: false,
+          redirectHttp: false,
+          redirectMode: "none",
+          tlsMode: "custom",
+        },
+      ],
+      PROJECT_ID,
+    );
+    expect(Object.keys(labels).filter((k) => k.includes(".tls"))).toEqual([]);
+  });
+
+  test("domain หลายตัวที่ใช้ tlsMode ต่างกัน — แยกกันถูกต้อง", () => {
+    const labels = buildTraefikLabels(
+      [
+        {
+          hostname: "auto.example.com",
+          internalPort: 3000,
+          httpsEnabled: true,
+          redirectHttp: false,
+          redirectMode: "none",
+          tlsMode: "letsencrypt",
+        },
+        {
+          hostname: "manual.example.com",
+          internalPort: 3000,
+          httpsEnabled: true,
+          redirectHttp: false,
+          redirectMode: "none",
+          tlsMode: "custom",
+        },
+      ],
+      PROJECT_ID,
+    );
+    expect(labels["traefik.http.routers.auto-example-com.tls.certresolver"]).toBe("letsencrypt");
+    expect(labels["traefik.http.routers.manual-example-com.tls.certresolver"]).toBeUndefined();
+    expect(labels["traefik.http.routers.manual-example-com.tls"]).toBe("true");
+  });
+});

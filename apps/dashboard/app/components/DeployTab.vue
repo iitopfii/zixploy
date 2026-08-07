@@ -38,7 +38,10 @@ async function fetchDeployments(cursor?: string) {
     const { data, error } = await api.api.v1.projects({ id: props.projectId }).deployments.get({
       query: cursor ? { cursor } : {},
     });
-    if (error) { listError.value = "โหลดรายการ deploy ไม่ได้"; return; }
+    if (error) {
+      listError.value = "โหลดรายการ deploy ไม่ได้";
+      return;
+    }
     if (cursor) {
       deployments.value.push(...(data?.items ?? []));
     } else {
@@ -70,7 +73,9 @@ function schedulePoll() {
 }
 
 watch(hasInFlight, schedulePoll, { immediate: true });
-onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer); });
+onUnmounted(() => {
+  if (pollTimer) clearTimeout(pollTimer);
+});
 
 // ---------------------------------------------------------------------------
 // Actions
@@ -99,42 +104,65 @@ async function doAction(label: string, fn: () => Promise<void>) {
 async function deploy() {
   await doAction("Deploy", async () => {
     const { error } = await api.api.v1.projects({ id: props.projectId }).deploy.post({});
-    if (error) throw new Error((error.value as { error?: { message?: string } } | null)?.error?.message ?? "deploy ล้มเหลว");
+    if (error)
+      throw new Error(
+        (error.value as { error?: { message?: string } } | null)?.error?.message ?? "deploy ล้มเหลว",
+      );
   });
 }
 
 async function redeploy() {
   await doAction("Redeploy", async () => {
     const { error } = await api.api.v1.projects({ id: props.projectId }).redeploy.post({});
-    if (error) throw new Error((error.value as { error?: { message?: string } } | null)?.error?.message ?? "redeploy ล้มเหลว");
+    if (error)
+      throw new Error(
+        (error.value as { error?: { message?: string } } | null)?.error?.message ??
+          "redeploy ล้มเหลว",
+      );
   });
 }
 
 async function restart() {
   await doAction("Restart", async () => {
     const { error } = await api.api.v1.projects({ id: props.projectId }).restart.post({});
-    if (error) throw new Error((error.value as { error?: { message?: string } } | null)?.error?.message ?? "restart ล้มเหลว");
+    if (error)
+      throw new Error(
+        (error.value as { error?: { message?: string } } | null)?.error?.message ??
+          "restart ล้มเหลว",
+      );
   });
 }
 
 async function stop() {
   await doAction("Stop", async () => {
     const { error } = await api.api.v1.projects({ id: props.projectId }).stop.post({});
-    if (error) throw new Error((error.value as { error?: { message?: string } } | null)?.error?.message ?? "stop ล้มเหลว");
+    if (error)
+      throw new Error(
+        (error.value as { error?: { message?: string } } | null)?.error?.message ?? "stop ล้มเหลว",
+      );
   });
 }
 
 async function rollback(targetDeploymentId: string) {
   await doAction("Rollback", async () => {
-    const { error } = await api.api.v1.projects({ id: props.projectId }).rollback.post({ targetDeploymentId });
-    if (error) throw new Error((error.value as { error?: { message?: string } } | null)?.error?.message ?? "rollback ล้มเหลว");
+    const { error } = await api.api.v1
+      .projects({ id: props.projectId })
+      .rollback.post({ targetDeploymentId });
+    if (error)
+      throw new Error(
+        (error.value as { error?: { message?: string } } | null)?.error?.message ??
+          "rollback ล้มเหลว",
+      );
   });
 }
 
 async function cancel(deploymentId: string) {
   await doAction("Cancel", async () => {
     const { error } = await api.api.v1.deployments({ id: deploymentId }).cancel.post({});
-    if (error) throw new Error((error.value as { error?: { message?: string } } | null)?.error?.message ?? "cancel ล้มเหลว");
+    if (error)
+      throw new Error(
+        (error.value as { error?: { message?: string } } | null)?.error?.message ?? "cancel ล้มเหลว",
+      );
   });
 }
 
@@ -160,7 +188,9 @@ function fmtDuration(start: number | null, end: number | null) {
   return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-function shortSha(sha: string) { return sha.slice(0, 7); }
+function shortSha(sha: string) {
+  return sha.slice(0, 7);
+}
 </script>
 
 <template>

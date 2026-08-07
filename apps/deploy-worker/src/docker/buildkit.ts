@@ -111,6 +111,9 @@ export function buildBuildxArgs(params: BuildImageParams): string[] {
 
   // -f resolve เทียบ cwd ของ subprocess เอง (repo root) ไม่ใช่ contextDir — ต้องส่ง absolute path เสมอ
   const absoluteDockerfilePath = resolve(contextDir, dockerfilePath);
+  // หมายเหตุ: docker buildx build v0.24.0 ไม่รองรับ --memory/--cpu-quota/--cpu-period ตรง ๆ
+  // (ต่างจาก legacy docker build) — รองรับเพียง --ulimit และ --shm-size
+  // Memory/CPU limits ระดับ build ต้องตั้งผ่าน buildkitd daemon config แทน (future work)
   const args = [
     "buildx",
     "build",
@@ -120,12 +123,6 @@ export function buildBuildxArgs(params: BuildImageParams): string[] {
     "-t",
     tag,
     "--load",
-    "--resource",
-    `memory=${limits.memoryMb}m`,
-    "--resource",
-    `cpu-quota=${limits.cpuQuota}`,
-    "--resource",
-    `cpu-period=${limits.cpuPeriod}`,
     "--ulimit",
     `nproc=${limits.nprocSoft}:${limits.nprocHard}`,
   ];

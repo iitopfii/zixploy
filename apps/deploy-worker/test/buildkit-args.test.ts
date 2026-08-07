@@ -19,13 +19,19 @@ function baseParams() {
 }
 
 describe("buildBuildxArgs — resource sandbox (Phase 8 M1)", () => {
-  test("ใส่ --resource memory/cpu-quota/cpu-period จาก BUILD_SANDBOX_LIMITS โดย default", () => {
+  // หมายเหตุ: docker buildx build v0.24.0 ไม่รองรับ --memory/--cpu-quota ตรง ๆ
+  // (มีเฉพาะ --ulimit และ --shm-size) — memory/CPU limits ต้องตั้งที่ buildkitd daemon แทน
+  // ดู: https://docs.docker.com/reference/cli/docker/buildx/build/
+  test("ไม่ใช้ --resource (ไม่มีใน buildx) — ใช้ --ulimit เท่านั้นที่ buildx รองรับ", () => {
     const args = buildBuildxArgs(baseParams());
 
-    expect(args).toContain("--resource");
-    expect(args).toContain(`memory=${BUILD_SANDBOX_LIMITS.memoryMb}m`);
-    expect(args).toContain(`cpu-quota=${BUILD_SANDBOX_LIMITS.cpuQuota}`);
-    expect(args).toContain(`cpu-period=${BUILD_SANDBOX_LIMITS.cpuPeriod}`);
+    // buildx ไม่มี --resource flag
+    expect(args).not.toContain("--resource");
+    // --ulimit สำหรับ nproc (fork bomb protection) ยังอยู่
+    expect(args).toContain("--ulimit");
+    expect(args).toContain(
+      `nproc=${BUILD_SANDBOX_LIMITS.nprocSoft}:${BUILD_SANDBOX_LIMITS.nprocHard}`,
+    );
   });
 
   test("ใส่ --ulimit nproc=soft:hard จาก BUILD_SANDBOX_LIMITS โดย default (fork bomb protection)", () => {
@@ -37,7 +43,7 @@ describe("buildBuildxArgs — resource sandbox (Phase 8 M1)", () => {
     );
   });
 
-  test("resourceLimits override ใช้ค่าที่ระบุแทน default", () => {
+  test("resourceLimits override ใช้ค่า nproc ที่ระบุแทน default", () => {
     const args = buildBuildxArgs({
       ...baseParams(),
       resourceLimits: {
@@ -49,10 +55,12 @@ describe("buildBuildxArgs — resource sandbox (Phase 8 M1)", () => {
       },
     });
 
-    expect(args).toContain("memory=64m");
-    expect(args).toContain("cpu-quota=25000");
+    // memory/cpu ไม่อยู่ใน args (buildx ไม่รองรับ)
+    expect(args).not.toContain("memory=64m");
+    expect(args).not.toContain("cpu-quota=25000");
+    // nproc ยังใช้ค่าที่ override ได้
     expect(args).toContain("nproc=16:16");
-    expect(args).not.toContain(`memory=${BUILD_SANDBOX_LIMITS.memoryMb}m`);
+    expect(args).not.toContain(`nproc=${BUILD_SANDBOX_LIMITS.nprocSoft}:${BUILD_SANDBOX_LIMITS.nprocHard}`);
   });
 
   test("ไม่กระทบ flags เดิม (target/build-arg/secret/label/context) ", () => {

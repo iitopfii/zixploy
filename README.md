@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/brand/zixploy-mark.png" alt="" width="96">
+<img src="assets/zixploy-mark.png" alt="" width="96">
 
 # Zixploy
 
@@ -65,8 +65,6 @@ curl -sSL https://raw.githubusercontent.com/iitopfii/zixploy.com/main/deploy/ins
 - ทุก resource ที่ระบบสร้างมี ownership label — cleanup จะไม่แตะของที่ไม่ใช่ของตัวเอง
 - ความลับทุกชนิดเข้ารหัสก่อนบันทึก และผ่าน redaction ก่อนออก log
 
-รายละเอียดการตัดสินใจเชิงสถาปัตยกรรมอยู่ใน [docs/adr/](docs/adr/)
-
 ## การใช้งาน
 
 หลังติดตั้ง ระบบจะอยู่ที่ `http://<ip-เซิร์ฟเวอร์>` เข้าสู่ระบบด้วยบัญชีที่ตัวติดตั้งสร้างให้
@@ -128,7 +126,6 @@ internal/
   db/              SQLite connection, migration runner, backup
 migrations/        SQL migrations
 deploy/install/    Production compose + installer
-docs/              เอกสารออกแบบและ decision records
 ```
 
 ## ออกเวอร์ชันใหม่

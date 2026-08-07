@@ -8,4 +8,5 @@ export * from "./logger";
 export * from "./naming";
 export * from "./services";
 export * from "./tls";
+export * from "./version";
 export * from "./volumes";

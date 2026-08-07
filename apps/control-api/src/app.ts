@@ -20,6 +20,7 @@ import { monitoringRoutes } from "./routes/monitoring";
 import { projectRoutes } from "./routes/projects";
 import { serviceRoutes } from "./routes/services";
 import { systemRoutes } from "./routes/system";
+import { updateRoutes } from "./routes/updates";
 import { volumeRoutes } from "./routes/volumes";
 import { webhookRoutes } from "./routes/webhook";
 
@@ -72,6 +73,7 @@ export function buildApp(db: Database, options: AppOptions = {}) {
     .use(volumeRoutes(db))
     .use(serviceRoutes(db, masterKeys))
     .use(monitoringRoutes(db))
+    .use(updateRoutes(db))
     .use(auditRoutes(db));
 }
 

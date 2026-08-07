@@ -8,10 +8,13 @@
 import type { Database } from "bun:sqlite";
 import { MAINTENANCE } from "@zixploy/shared";
 import { runPrune } from "./prune";
+import { startSelfUpdate } from "./self-update";
 
 interface JobRow {
   id: string;
   type: string;
+  /** เฉพาะ self_update — tag ที่จะอัปไป */
+  target_version: string | null;
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -54,7 +57,7 @@ function claimNext(db: Database, workerId: string, now: number): JobRow | null {
   db.transaction(() => {
     const row = db
       .query<JobRow, []>(
-        "SELECT id, type FROM maintenance_jobs WHERE status = 'pending' ORDER BY created_at LIMIT 1",
+        "SELECT id, type, target_version FROM maintenance_jobs WHERE status = 'pending' ORDER BY created_at LIMIT 1",
       )
       .get();
     if (!row) return;
@@ -96,6 +99,29 @@ export async function maintenanceLoop(
     onLog(`maintenance job claimed: ${claimed.type}`);
 
     try {
+      if (claimed.type === "self_update") {
+        if (!claimed.target_version) {
+          throw new Error("งาน self_update ไม่มี target_version");
+        }
+        /**
+         * mark done ทันทีที่ spawn updater สำเร็จ — ไม่รอให้อัปเดตเสร็จ
+         *
+         * เพราะ updater จะ recreate worker ตัวนี้ทิ้ง ถ้ารอผลก่อนเขียน DB จะไม่มีโอกาส
+         * ได้เขียนเลย งานค้าง leased ตลอดไปแล้ว recoverStale จะ mark เป็น failed
+         * ทั้งที่อัปเดตสำเร็จ — เขียนก่อนจึงเป็นทางเดียวที่บันทึกผลได้จริง
+         */
+        const result = await startSelfUpdate(claimed.target_version);
+        db.query(
+          `UPDATE maintenance_jobs
+              SET status = 'done', summary = ?,
+                  lease_owner = NULL, lease_expires_at = NULL,
+                  updated_at = ?, finished_at = ?
+            WHERE id = ?`,
+        ).run(result.summary, Date.now(), Date.now(), claimed.id);
+        onLog(`self-update started: ${claimed.target_version}`);
+        continue;
+      }
+
       const result = await runPrune(claimed.type as Parameters<typeof runPrune>[0]);
       db.query(
         `UPDATE maintenance_jobs

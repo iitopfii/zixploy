@@ -80,6 +80,7 @@ const initial = computed(() => (session.value.username ?? "?").charAt(0).toUpper
       </nav>
 
       <div class="sidebar-foot">
+        <UpdateStatus />
         <SystemHealth />
 
         <div v-if="session.authenticated" class="user">

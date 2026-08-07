@@ -1,0 +1,95 @@
+name: Release
+
+# ยิงเมื่อ push tag แบบ v0.1.0 เท่านั้น — ไม่ build ทุก commit เพราะ multi-arch build
+# ใช้เวลาหลายนาทีและ image ที่ไม่ได้ตั้งใจปล่อยไม่ควรไปโผล่ให้ตัวตรวจ update เห็น
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "เวอร์ชันที่จะ build (เช่น 0.1.0) — ใช้ทดสอบ pipeline"
+        required: true
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # จำเป็นสำหรับ push ไป GHCR ด้วย GITHUB_TOKEN ที่มีให้อยู่แล้ว
+      # ไม่ต้องสร้าง PAT หรือเก็บ secret เพิ่ม
+      packages: write
+
+    strategy:
+      # แต่ละ image build แยกกันได้ — fail-fast=false เพื่อให้เห็นว่าพังกี่ตัวในรอบเดียว
+      fail-fast: false
+      matrix:
+        service:
+          - control-api
+          - deploy-worker
+          - dashboard
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: หาเวอร์ชันจาก tag
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "building version $VERSION"
+
+      # QEMU สำหรับ build arm64 บน runner ที่เป็น amd64 — VPS ราคาถูกหลายเจ้าเป็น arm
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build และ push
+        uses: docker/build-push-action@v6
+        with:
+          # build context เป็น repo root เพราะ Dockerfile อ้าง workspace ทั้งก้อน (monorepo)
+          context: .
+          file: apps/${{ matrix.service }}/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/zixploy-${{ matrix.service }}:${{ steps.version.outputs.value }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/zixploy-${{ matrix.service }}:latest
+          # cache ข้าม run ผ่าน GitHub Actions cache — build ครั้งถัดไปเร็วขึ้นมาก
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+  # ประกาศผลรวมหลัง image ครบทุกตัว — ตัวตรวจ update ในระบบอ่าน tag จาก control-api
+  # เป็นตัวแทน ถ้ามีบางตัว push ไม่สำเร็จจะกลายเป็นชวนอัปเดตไปเวอร์ชันที่ไม่ครบ
+  verify:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: ตรวจว่า image ครบทุกตัวจริง
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          [ -n "${{ github.event.inputs.version }}" ] && VERSION="${{ github.event.inputs.version }}"
+          for SVC in control-api deploy-worker dashboard; do
+            REF="ghcr.io/${{ github.repository_owner }}/zixploy-$SVC:$VERSION"
+            echo "ตรวจ $REF"
+            docker manifest inspect "$REF" >/dev/null || exit 1
+          done
+          echo "ครบทุก image"

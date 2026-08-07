@@ -18,6 +18,32 @@ export interface ContainerCreateParams {
   networkName: string;
   /** Named volumes ที่ต้องการ mount (Phase 7) — ต้องสร้าง volume ใน Docker ก่อนเรียก createContainer */
   volumes?: VolumeMount[];
+  /**
+   * Publish port ออก host (Phase 10 — managed services)
+   *
+   * bind กับ 0.0.0.0 เสมอตามที่ Docker default ทำ — ผู้ใช้ที่เปิด port ต้องรู้ตัวว่าเปิดออก
+   * อินเทอร์เน็ต (API เตือนตอนตั้งค่า) ไม่ silently bind 127.0.0.1 ซึ่งจะทำให้ต่อจากเครื่องอื่นไม่ได้
+   * โดยไม่มีอะไรบอก
+   *
+   * ไม่มี field นี้ = ไม่เปิด port เลย (default ที่ปลอดภัย — เข้าถึงได้เฉพาะใน Docker network)
+   */
+  publishPorts?: Array<{ hostPort: number; containerPort: number }>;
+  /**
+   * Docker HEALTHCHECK — Docker รันคำสั่งนี้เองในคอนเทนเนอร์เป็นระยะ
+   *
+   * ใช้แทนการ poll จาก worker เพราะ (1) สถานะติดกับตัว container ตลอดอายุ ไม่ใช่แค่ตอน provision
+   * (2) reconciler/monitoring อ่าน State.Health ได้ฟรี (3) คำสั่งรันในคอนเทนเนอร์ จึงอ้าง
+   * env ที่มี credential ได้โดยไม่ต้องส่งค่าจริงผ่าน argv ของ host
+   *
+   * cmd[0] = "CMD" หรือ "CMD-SHELL" ตามรูปแบบของ Docker
+   */
+  healthCheck?: {
+    cmd: string[];
+    intervalSec: number;
+    timeoutSec: number;
+    retries: number;
+    startPeriodSec: number;
+  };
 }
 
 export interface ContainerInspect {
@@ -26,6 +52,14 @@ export interface ContainerInspect {
   State: {
     Status: string;
     Running: boolean;
+    /**
+     * Phase 10 — มีเฉพาะ container ที่ตั้ง HEALTHCHECK ไว้
+     * Status: "starting" | "healthy" | "unhealthy"
+     */
+    Health?: {
+      Status: string;
+      FailingStreak?: number;
+    };
   };
   /** top-level field ใน `docker inspect` — ไม่ได้อยู่ใต้ State (ตรวจสอบจริงกับ Docker Desktop) */
   RestartCount: number;

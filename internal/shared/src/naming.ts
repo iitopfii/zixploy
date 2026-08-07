@@ -31,6 +31,31 @@ export function volumeName(projectId: string, volumeId: string): string {
   return `zxvol-${projectId.toLowerCase()}-${volumeId.toLowerCase()}`;
 }
 
+/**
+ * Managed service (database) — Phase 10
+ *
+ * ไม่มี deploymentId เพราะ service ไม่ได้ build ใหม่ทุกครั้ง: container ผูกกับ service id
+ * ตัวเดียวตลอดอายุ (recreate ใช้ชื่อเดิม ทำให้ remove-before-create เป็น idempotent)
+ */
+export function serviceContainerName(serviceId: string): string {
+  assertUlid(serviceId, "serviceId");
+  return `zxsvc-${serviceId.toLowerCase()}`;
+}
+
+export function serviceVolumeName(serviceId: string): string {
+  assertUlid(serviceId, "serviceId");
+  return `zxsvcvol-${serviceId.toLowerCase()}`;
+}
+
+/** Labels สำหรับ container/volume ของ managed service (ADR-0005) */
+export function serviceLabels(serviceId: string): Record<string, string> {
+  assertUlid(serviceId, "serviceId");
+  return {
+    [LABELS.managed]: "true",
+    [LABELS.serviceId]: serviceId,
+  };
+}
+
 export const proxyNetworkName = PROXY_NETWORK;
 
 /** Labels สำหรับ container/image ของ deployment หนึ่งงาน */

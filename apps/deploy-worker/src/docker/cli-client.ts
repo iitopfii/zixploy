@@ -140,6 +140,27 @@ export class DockerCliClient {
       const spec = `type=volume,source=${v.dockerName},target=${v.mountPath}${v.readOnly ? ",readonly" : ""}`;
       args.push("--mount", spec);
     }
+    // Phase 10 — publish port ออก host สำหรับ managed service ที่ผู้ใช้เลือกเปิด
+    for (const p of params.publishPorts ?? []) {
+      args.push("--publish", `${p.hostPort}:${p.containerPort}`);
+    }
+    if (params.healthCheck) {
+      const hc = params.healthCheck;
+      args.push(
+        // cmd ถูกส่งเป็น argument เดี่ยว ๆ ไม่ใช่ shell string — Docker เก็บเป็น CMD-SHELL เอง
+        // เมื่อขึ้นต้นด้วย "CMD-SHELL" (ดู healthCmd() ใน service catalog)
+        "--health-cmd",
+        hc.cmd[0] === "CMD-SHELL" ? hc.cmd.slice(1).join(" ") : hc.cmd.join(" "),
+        "--health-interval",
+        `${hc.intervalSec}s`,
+        "--health-timeout",
+        `${hc.timeoutSec}s`,
+        "--health-retries",
+        String(hc.retries),
+        "--health-start-period",
+        `${hc.startPeriodSec}s`,
+      );
+    }
 
     assertDockerArgsSafe(args);
 
@@ -151,6 +172,39 @@ export class DockerCliClient {
       throw new AppError("DOCKER_UNAVAILABLE", `docker create ล้มเหลว: ${truncate(result.stderr)}`);
     }
     return { containerId: result.stdout.trim() };
+  }
+
+  /**
+   * ดึง image จาก registry — Phase 10 (managed services)
+   *
+   * แยกจาก createContainer เพราะ pull ครั้งแรกของ database image ใช้เวลาหลายสิบวินาที
+   * ถ้าปล่อยให้ `docker create` ดึงเอง จะไม่รู้ว่าค้างอยู่ขั้นไหนและชน commandTimeoutMs
+   *
+   * timeout ยาวเป็นพิเศษ (ไม่ใช้ commandTimeoutMs ปกติ) เพราะเป็น network I/O ล้วน
+   */
+  async pullImage(image: string, timeoutMs = 600_000): Promise<void> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const proc = Bun.spawn(["docker", "pull", image], {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: this.options.dockerHost
+          ? { ...process.env, DOCKER_HOST: this.options.dockerHost }
+          : process.env,
+        signal: controller.signal,
+      });
+      const code = await proc.exited;
+      const stderr = await readWithGracePeriod(proc.stderr);
+      if (code !== 0) {
+        throw new AppError(
+          "SERVICE_PROVISION_FAILED",
+          `ดึง image ${image} ไม่สำเร็จ: ${truncate(stderr)}`,
+        );
+      }
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async startContainer(containerId: string): Promise<void> {

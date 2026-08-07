@@ -6,5 +6,6 @@ export * from "./errors";
 export * from "./id";
 export * from "./logger";
 export * from "./naming";
+export * from "./services";
 export * from "./tls";
 export * from "./volumes";

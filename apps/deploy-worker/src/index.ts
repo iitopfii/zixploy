@@ -23,6 +23,7 @@ import { metricsLoop } from "./metrics/collector";
 import { createDispatcher } from "./pipeline/dispatch";
 import { claimNextJob, completeJob, failJob, LeaseLostError, withLeaseRenewal } from "./queue";
 import { stateReconcileLoop } from "./reconciler";
+import { serviceJobLoop } from "./services/loop";
 import { volumeReconcileLoop } from "./volumes/reconciler";
 
 const workerId = `worker-${ulid()}`;
@@ -167,6 +168,11 @@ await Promise.all([
   stateReconcileLoop(db, docker, controller.signal, (line) => log.warn(line, { workerId })),
   metricsLoop(db, docker, controller.signal, {
     onLog: (line) => log.warn(line, { workerId }),
+  }),
+  // คิวแยกจาก deploy — database provisioning ใช้เวลานาน ไม่ควรบล็อก deploy ของ app
+  serviceJobLoop(db, docker, workerId, controller.signal, {
+    masterKeys,
+    onLog: (line) => log.info(line, { workerId }),
   }),
 ]);
 

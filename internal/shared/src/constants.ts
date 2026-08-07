@@ -123,4 +123,26 @@ export const LABELS = {
   projectId: "platform.project_id",
   deploymentId: "platform.deployment_id",
   volumeId: "platform.volume_id",
+  /** managed service (database) — Phase 10 */
+  serviceId: "platform.service_id",
+} as const;
+
+/**
+ * Managed services (Phase 10 — one-click databases)
+ */
+export const SERVICE_SETTINGS = {
+  /** ความยาวรหัสผ่านที่ generate (ตัวอักษร base62 → ~178 bit entropy) */
+  passwordLength: 30,
+  /** ช่วง port ที่ยอมให้เปิดออก host — ต่ำกว่า 1024 เป็น privileged, สูงกว่านี้ชน ephemeral range */
+  exposedPortMin: 1024,
+  exposedPortMax: 60000,
+  /**
+   * Port ที่ระบบใช้เองอยู่แล้ว — เปิดทับจะทำให้ Traefik/SSH ล่ม
+   * ตรวจที่ API ก่อนบันทึก (worker ตรวจซ้ำอีกชั้นตอน create)
+   */
+  reservedPorts: [22, 80, 443, 3000, 3001] as readonly number[],
+  /** memory limit เริ่มต้นต่อ service — database ไม่จำกัดเลยเสี่ยงกิน RAM จนเครื่องตาย */
+  defaultMemoryMb: 512,
+  /** รอ container ขึ้นเป็น healthy นานสุดก่อนถือว่า provision ล้มเหลว */
+  readyTimeoutMs: 180_000,
 } as const;

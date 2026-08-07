@@ -41,7 +41,7 @@ async function submit() {
 <template>
   <div class="auth">
     <div class="auth-brand">
-      <span class="logo" aria-hidden="true">Z</span>
+      <img src="/logo-mark.png" alt="Zixploy" class="logo" width="46" height="46" />
       <div>
         <h1>Zixploy</h1>
         <p class="muted small">Deployment Platform</p>
@@ -131,17 +131,12 @@ async function submit() {
 }
 
 .logo {
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  border-radius: var(--r);
-  background: linear-gradient(140deg, var(--accent) 0%, #8b5cf6 100%);
-  color: #05080f;
-  font-weight: 800;
-  font-size: 19px;
-  letter-spacing: -0.02em;
-  box-shadow: 0 4px 16px rgb(91 140 255 / 30%);
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  object-fit: contain;
+  /* เรืองแสงแรงกว่าใน sidebar เพราะเป็นจุดโฟกัสเดียวของหน้า */
+  filter: drop-shadow(0 4px 14px rgb(91 140 255 / 38%));
 }
 
 .auth-card {

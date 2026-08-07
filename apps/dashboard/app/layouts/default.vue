@@ -46,7 +46,7 @@ const initial = computed(() => (session.value.username ?? "?").charAt(0).toUpper
         <AppIcon :name="navOpen ? 'x' : 'menu'" :size="18" />
       </button>
       <NuxtLink to="/" class="brand-mark">
-        <span class="logo" aria-hidden="true">Z</span>
+        <img src="/logo-mark.png" alt="" class="logo" width="26" height="26" />
         <span class="brand-name">Zixploy</span>
       </NuxtLink>
       <SystemHealth compact />
@@ -57,7 +57,7 @@ const initial = computed(() => (session.value.username ?? "?").charAt(0).toUpper
 
     <aside class="sidebar" :class="{ open: navOpen }">
       <NuxtLink to="/" class="brand">
-        <span class="logo" aria-hidden="true">Z</span>
+        <img src="/logo-mark.png" alt="Zixploy" class="logo" width="30" height="30" />
         <span class="brand-text">
           <span class="brand-name">Zixploy</span>
           <span class="brand-sub">Deployment Platform</span>
@@ -137,19 +137,15 @@ const initial = computed(() => (session.value.username ?? "?").charAt(0).toUpper
   text-decoration: none;
 }
 
+/* โลโก้เป็น PNG พื้นโปร่ง — ตัวสายฟ้าที่เจาะทะลุ Z ปล่อยให้พื้นหลังลอดผ่าน
+   จึงอ่านออกทั้งบน --bg-subtle (sidebar) และ --surface-1 (การ์ด login) */
 .logo {
   width: 30px;
   height: 30px;
   flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  border-radius: var(--r-sm);
-  background: linear-gradient(140deg, var(--accent) 0%, #8b5cf6 100%);
-  color: #05080f;
-  font-weight: 800;
-  font-size: 15px;
-  letter-spacing: -0.02em;
-  box-shadow: 0 2px 8px rgb(91 140 255 / 25%);
+  object-fit: contain;
+  /* เรืองแสงจาง ๆ ให้ mark ลอยจากพื้นมืด แทน box-shadow ที่จะเห็นเป็นกรอบสี่เหลี่ยม */
+  filter: drop-shadow(0 2px 6px rgb(91 140 255 / 30%));
 }
 
 .brand-text {
@@ -285,6 +281,10 @@ const initial = computed(() => (session.value.username ?? "?").charAt(0).toUpper
   }
   .mobile-bar .brand-mark:hover {
     text-decoration: none;
+  }
+  .mobile-bar .logo {
+    width: 26px;
+    height: 26px;
   }
 
   .sidebar {

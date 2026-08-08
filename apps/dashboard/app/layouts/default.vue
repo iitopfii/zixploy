@@ -84,8 +84,10 @@ const initial = computed(() => (session.value.username ?? "?").charAt(0).toUpper
         <SystemHealth />
 
         <div v-if="session.authenticated" class="user">
-          <span class="avatar" aria-hidden="true">{{ initial }}</span>
-          <span class="user-name truncate">{{ session.username }}</span>
+          <NuxtLink to="/settings/account" class="user-link" title="ตั้งค่าบัญชี">
+            <span class="avatar" aria-hidden="true">{{ initial }}</span>
+            <span class="user-name truncate">{{ session.username }}</span>
+          </NuxtLink>
           <button
             class="ghost icon small"
             :disabled="loggingOut"
@@ -232,6 +234,23 @@ const initial = computed(() => (session.value.username ?? "?").charAt(0).toUpper
   font-size: var(--t-xs);
   font-weight: 600;
   color: var(--text-secondary);
+}
+/* ทั้งชื่อและ avatar เป็นลิงก์เดียว — พื้นที่คลิกใหญ่กว่าไอคอนเล็ก ๆ */
+.user-link {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: 1;
+  min-width: 0;
+  padding: var(--s-1);
+  margin: calc(var(--s-1) * -1);
+  border-radius: var(--r);
+  color: inherit;
+  transition: background var(--fast);
+}
+.user-link:hover {
+  background: var(--surface-2);
+  text-decoration: none;
 }
 .user-name {
   flex: 1;

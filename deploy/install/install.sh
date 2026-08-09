@@ -49,6 +49,31 @@ case "$ARCH" in
 esac
 ok "ระบบ: Linux/$ARCH"
 
+# หาเลข semver ล่าสุดจาก GHCR โดยตรง — endpoint และตรรกะเดียวกับที่ control-api ใช้ตรวจ
+# update เอง (internal/shared/src/version.ts, UPDATE_CHECK) เพื่อไม่ให้สองที่ตัดสิน
+# "เวอร์ชันล่าสุดคืออะไร" ไม่ตรงกัน — package บน GHCR เป็นสาธารณะ อ่าน tag ได้โดยไม่ต้อง
+# login แต่ registry ยังบังคับให้มี bearer token เสมอ จึงขอ token แบบ anonymous ก่อน
+#
+# กรอง tag ที่ไม่ใช่ semver ("latest", "main", sha) และ pre-release ออก แล้วเลือกตัวมากสุด
+# ด้วย sort -V (version sort) — พิมพ์ผลลัพธ์ออก stdout, ไม่มีอะไรพิมพ์ = หาไม่ได้
+resolve_latest_version() {
+  TOKEN=$(curl -fsSL --max-time 8 \
+    "https://ghcr.io/token?scope=repository%3Aiitopfii%2Fzixploy-control-api%3Apull&service=ghcr.io" \
+    2>/dev/null | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  [ -n "$TOKEN" ] || return 1
+
+  TAGS_JSON=$(curl -fsSL --max-time 8 \
+    -H "Authorization: Bearer $TOKEN" \
+    "https://ghcr.io/v2/iitopfii/zixploy-control-api/tags/list" 2>/dev/null)
+  [ -n "$TAGS_JSON" ] || return 1
+
+  printf '%s' "$TAGS_JSON" \
+    | tr ',' '\n' \
+    | sed -n 's/.*"\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' \
+    | sort -V \
+    | tail -n1
+}
+
 # port 80/443 ต้องว่าง — Traefik bind ทั้งคู่ ถ้าไม่ว่างจะ start ไม่ขึ้นแล้วหาสาเหตุยาก
 check_port() {
   if command -v ss >/dev/null 2>&1; then
@@ -141,7 +166,24 @@ else
   SERVER_IP="${ZIXPLOY_SERVER_IP:-$SERVER_IP}"
   ok "public IP: $SERVER_IP"
 
-  VERSION="${ZIXPLOY_VERSION:-latest}"
+  # ค่าเริ่มต้นต้องเป็นเลขเวอร์ชันจริง (เช่น "0.1.0") ไม่ใช่คำว่า "latest"
+  #
+  # image tag "latest" ใช้ pull ได้ปกติ แต่ระบบใช้ ZIXPLOY_VERSION ตัวเดียวกันนี้เป็น
+  # "เวอร์ชันของตัวเอง" ด้วย (ดู internal/shared/src/version.ts) เพื่อเทียบกับ release ใหม่
+  # บน registry — คำว่า "latest" ไม่ใช่ semver เทียบไม่ได้เลย ปุ่ม Update จะไม่ขึ้นตลอดไป
+  # แม้จะมี release ใหม่ออกกี่ครั้งก็ตาม จึงต้อง resolve เป็นเลขจริงตั้งแต่ตอนติดตั้ง
+  if [ -n "${ZIXPLOY_VERSION:-}" ]; then
+    VERSION="$ZIXPLOY_VERSION"
+  else
+    step "หาเวอร์ชันล่าสุด…"
+    VERSION=$(resolve_latest_version) || VERSION=""
+    if [ -n "$VERSION" ]; then
+      ok "เวอร์ชันล่าสุด: $VERSION"
+    else
+      VERSION="latest"
+      warn "หาเลขเวอร์ชันจาก registry ไม่ได้ — ใช้ tag latest แทน (ปุ่มอัปเดตในระบบจะใช้ไม่ได้จนกว่าจะตั้ง ZIXPLOY_VERSION เป็นเลขจริงเอง)"
+    fi
+  fi
 
   cat > "$ENV_FILE" <<EOF
 # สร้างโดย install.sh — แก้ได้ แล้วรัน: cd $INSTALL_DIR && docker compose up -d

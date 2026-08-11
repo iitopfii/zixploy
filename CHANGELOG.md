@@ -7,6 +7,11 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+### Added
+- Source แบบวาง Dockerfile ตรง ๆ แทนการเชื่อม GitHub repository (dashboard → Source tab)
+- นำเข้า build config จาก docker-compose.yml (dashboard → Settings)
+- ตัวติดตั้ง (`install.sh`) เปลี่ยน HTTP/HTTPS port ได้ผ่าน `ZIXPLOY_HTTP_PORT`/`ZIXPLOY_HTTPS_PORT`
+
 ---
 
 ## [0.1.0] — 2026-08-07

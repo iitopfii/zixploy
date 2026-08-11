@@ -74,7 +74,19 @@ resolve_latest_version() {
     | tail -n1
 }
 
-# port 80/443 ต้องว่าง — Traefik bind ทั้งคู่ ถ้าไม่ว่างจะ start ไม่ขึ้นแล้วหาสาเหตุยาก
+# HTTP/HTTPS port ที่จะเปิดรับบนเครื่องนี้ — ค่าเริ่มต้น 80/443 เหมือน Traefik ทั่วไป
+# เปลี่ยนได้ด้วย ZIXPLOY_HTTP_PORT/ZIXPLOY_HTTPS_PORT=xxxx ก่อนรันสคริปต์ (ตั้งครั้งแรกเท่านั้น
+# เหมือน ZIXPLOY_VERSION — ติดตั้งซ้ำจะอ่านค่าที่ตั้งไว้ใน .env เดิม ไม่ถามซ้ำ)
+HTTP_PORT="${ZIXPLOY_HTTP_PORT:-}"
+HTTPS_PORT="${ZIXPLOY_HTTPS_PORT:-}"
+if [ -f "$ENV_FILE" ]; then
+  [ -n "$HTTP_PORT" ] || HTTP_PORT=$(grep -E '^ZIXPLOY_HTTP_PORT=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
+  [ -n "$HTTPS_PORT" ] || HTTPS_PORT=$(grep -E '^ZIXPLOY_HTTPS_PORT=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
+fi
+HTTP_PORT="${HTTP_PORT:-80}"
+HTTPS_PORT="${HTTPS_PORT:-443}"
+
+# port ที่เลือกต้องว่าง — Traefik bind ทั้งคู่ ถ้าไม่ว่างจะ start ไม่ขึ้นแล้วหาสาเหตุยาก
 check_port() {
   if command -v ss >/dev/null 2>&1; then
     ss -lntH "sport = :$1" 2>/dev/null | grep -q . && return 1
@@ -83,7 +95,7 @@ check_port() {
   fi
   return 0
 }
-for PORT in 80 443; do
+for PORT in "$HTTP_PORT" "$HTTPS_PORT"; do
   # ถ้า Traefik ของเราถือ port อยู่ ถือว่าปกติ (กำลังติดตั้งซ้ำ)
   if ! check_port "$PORT"; then
     if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^zixploy-traefik$'; then
@@ -93,7 +105,13 @@ for PORT in 80 443; do
     fi
   fi
 done
-ok "port 80 และ 443 ว่าง"
+ok "port $HTTP_PORT และ $HTTPS_PORT ว่าง"
+
+if [ "$HTTP_PORT" != "80" ]; then
+  warn "HTTP port เป็น $HTTP_PORT (ไม่ใช่ 80) — Let's Encrypt อัตโนมัติใช้ไม่ได้ เพราะ HTTP-01"
+  warn "challenge ต้องมี port 80 จริงจากอินเทอร์เน็ต ต้องอัปโหลด TLS certificate เองแทน"
+  warn "(dashboard → Domains → Custom TLS หลังติดตั้งเสร็จ)"
+fi
 
 # ---------------------------------------------------------------------------
 # Docker
@@ -185,12 +203,24 @@ else
     fi
   fi
 
+  # BASE_URL ต้องมี port ต่อท้ายด้วยถ้าไม่ใช่ 80 — ไม่งั้น webhook/callback URL ที่ระบบ
+  # generate ให้ (เช่น GitHub App manifest) จะชี้ไปที่ port 80 ที่ไม่มีอะไรฟังอยู่จริง
+  if [ "$HTTP_PORT" = "80" ]; then
+    BASE_URL_VALUE="http://$SERVER_IP"
+  else
+    BASE_URL_VALUE="http://$SERVER_IP:$HTTP_PORT"
+  fi
+
   cat > "$ENV_FILE" <<EOF
 # สร้างโดย install.sh — แก้ได้ แล้วรัน: cd $INSTALL_DIR && docker compose up -d
 ZIXPLOY_VERSION=$VERSION
 SERVER_IP=$SERVER_IP
-ZIXPLOY_BASE_URL=http://$SERVER_IP
+ZIXPLOY_BASE_URL=$BASE_URL_VALUE
 ZIXPLOY_INSTALL_DIR=$INSTALL_DIR
+# port ฝั่ง host ที่ Traefik รับทราฟฟิก — เปลี่ยนจาก 80/443 ได้ แต่ HTTP_PORT != 80 แปลว่า
+# Let's Encrypt อัตโนมัติใช้ไม่ได้ (ต้องอัปโหลด TLS certificate เองแทน — ดูใน dashboard)
+ZIXPLOY_HTTP_PORT=$HTTP_PORT
+ZIXPLOY_HTTPS_PORT=$HTTPS_PORT
 # อีเมลสำหรับ Let's Encrypt แจ้งเตือนก่อน cert หมดอายุ
 # ปล่อยว่างได้ แต่ห้ามใส่ค่าที่ไม่ใช่อีเมลจริง — LE ปฏิเสธทั้ง account
 # ถ้า domain ของอีเมลไม่มีจุด แล้วขอ cert ไม่ได้ทั้งเซิร์ฟเวอร์
@@ -216,7 +246,7 @@ step "รอให้ระบบพร้อม…"
 READY=0
 i=0
 while [ $i -lt 60 ]; do
-  if curl -fsS --max-time 3 "http://127.0.0.1/api/v1/system/health" >/dev/null 2>&1; then
+  if curl -fsS --max-time 3 "http://127.0.0.1:$HTTP_PORT/api/v1/system/health" >/dev/null 2>&1; then
     READY=1
     break
   fi

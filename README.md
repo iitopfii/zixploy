@@ -22,6 +22,23 @@ curl -sSL https://raw.githubusercontent.com/iitopfii/zixploy.com/main/deploy/ins
 แล้วเปิดระบบพร้อมบัญชีผู้ดูแลระบบชุดแรก — ใช้เวลาไม่กี่นาที
 
 **ความต้องการขั้นต่ำ:** Linux (amd64 หรือ arm64) · RAM 2 GB · พื้นที่ว่าง 20 GB · port 80 และ 443 ว่าง
+(เปลี่ยนได้ด้วย `ZIXPLOY_HTTP_PORT`/`ZIXPLOY_HTTPS_PORT` — ดูหัวข้อ [เปลี่ยน port ติดตั้ง](#เปลี่ยน-port-ติดตั้ง) แต่ Let's Encrypt อัตโนมัติต้องใช้ port 80 จริงเท่านั้น)
+
+### เปลี่ยน port ติดตั้ง
+
+ถ้า port 80/443 ถูกใช้อยู่แล้ว หรือไม่อยากให้ Zixploy ยึด port มาตรฐาน — ตั้งค่าก่อนรันตัวติดตั้ง:
+
+```bash
+ZIXPLOY_HTTP_PORT=8080 ZIXPLOY_HTTPS_PORT=8443 \
+  curl -sSL https://raw.githubusercontent.com/iitopfii/zixploy.com/main/deploy/install/install.sh | sudo -E sh
+```
+
+ค่านี้ถูกจดไว้ใน `.env` ตอนติดตั้งครั้งแรกเท่านั้น (เหมือน `ZIXPLOY_VERSION`) — ติดตั้งซ้ำจะไม่ถามใหม่
+เปลี่ยนทีหลังได้โดยแก้ `.env` เองแล้ว `docker compose up -d`
+
+**ข้อควรระวัง:** ถ้า `ZIXPLOY_HTTP_PORT` ไม่ใช่ `80` ระบบออกใบรับรอง Let's Encrypt อัตโนมัติจะใช้ไม่ได้
+(HTTP-01 challenge ต้องมี port 80 จริงที่อินเทอร์เน็ตเข้าถึงได้) — ต้องอัปโหลด TLS certificate เอง
+แทนที่ dashboard → Domains → Custom TLS
 
 ## ความสามารถ
 

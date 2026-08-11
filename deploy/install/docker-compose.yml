@@ -4,7 +4,11 @@
 # สำเร็จรูปจาก GHCR เท่านั้น เซิร์ฟเวอร์จึงไม่ต้องมีซอร์สและไม่ต้องมี toolchain สำหรับ build
 #
 # ทุกค่าที่ต่างกันในแต่ละเครื่องอยู่ใน .env ที่ install.sh สร้างให้ (ZIXPLOY_VERSION,
-# SERVER_IP, ACME_EMAIL) — ตัวไฟล์นี้เหมือนกันทุกเครื่องจึงอัปทับได้เสมอตอน update
+# SERVER_IP, ACME_EMAIL, ZIXPLOY_HTTP_PORT/ZIXPLOY_HTTPS_PORT) — ตัวไฟล์นี้เหมือนกันทุกเครื่อง
+# จึงอัปทับได้เสมอตอน update
+#
+# ZIXPLOY_HTTP_PORT/ZIXPLOY_HTTPS_PORT เปลี่ยนแค่ port ฝั่ง host เท่านั้น — entrypoint ภายใน
+# Traefik (ใน command: ด้านล่าง) ยังคง :80/:443 เสมอ ไม่ต้องแก้คู่กัน (ดู install.sh)
 
 services:
   traefik:
@@ -31,8 +35,10 @@ services:
       - --ping=true
       - --log.level=INFO
     ports:
-      - "80:80"
-      - "443:443"
+      # host:container — เปลี่ยนได้ผ่าน ZIXPLOY_HTTP_PORT/ZIXPLOY_HTTPS_PORT ใน .env (ฝั่ง container
+      # ต้องคงที่ :80/:443 เพราะ Traefik เองรู้จักตัวเองที่ entrypoint นี้เท่านั้น — ดู command: ด้านบน)
+      - "${ZIXPLOY_HTTP_PORT:-80}:80"
+      - "${ZIXPLOY_HTTPS_PORT:-443}:443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - zixploy-certs:/certs:ro

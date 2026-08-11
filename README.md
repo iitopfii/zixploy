@@ -4,12 +4,11 @@
 
 # Zixploy
 
-**แพลตฟอร์ม deploy แบบเบา สำหรับเซิร์ฟเวอร์เดียว — เน้น auto-deploy จาก GitHub**
+**PaaS โอเพนซอร์สแบบ self-hosted ที่ทำให้ deploy แอปจาก GitHub เป็นเรื่องง่าย**
 
-เชื่อม repository ครั้งเดียว แล้วทุก push เข้า branch ที่ตั้งไว้จะกลายเป็น deployment ใหม่โดยอัตโนมัติ —
-build, health check, สลับ traffic แบบ zero-downtime ให้ครบในตัว โดยไม่ต้องพึ่งคลาวด์หรือ orchestrator
-ที่ซับซ้อนอย่าง Kubernetes ติดตั้งบนเซิร์ฟเวอร์ของตัวเองด้วยคำสั่งเดียว รันบน Bun + SQLite
-ใช้ทรัพยากรน้อยพอสำหรับ VPS ขนาดเล็ก
+เชื่อม repository ครั้งเดียว แล้วปล่อยให้ทุก push กลายเป็น deployment ใหม่โดยอัตโนมัติ — ไม่ต้องพึ่งคลาวด์หรือ Kubernetes
+
+Auto Deploy · Zero-downtime · Domain + HTTPS อัตโนมัติ · ฐานข้อมูลสำเร็จรูป · Environment Variables เข้ารหัส · Monitoring · Rollback · อัปเดตในตัว
 
 [![CI](https://github.com/iitopfii/zixploy.com/actions/workflows/ci.yml/badge.svg)](https://github.com/iitopfii/zixploy.com/actions/workflows/ci.yml)
 [![Release](https://github.com/iitopfii/zixploy.com/actions/workflows/release.yml/badge.svg)](https://github.com/iitopfii/zixploy.com/actions/workflows/release.yml)

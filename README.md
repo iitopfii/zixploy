@@ -22,23 +22,40 @@ curl -sSL https://raw.githubusercontent.com/iitopfii/zixploy.com/main/deploy/ins
 แล้วเปิดระบบพร้อมบัญชีผู้ดูแลระบบชุดแรก — ใช้เวลาไม่กี่นาที
 
 **ความต้องการขั้นต่ำ:** Linux (amd64 หรือ arm64) · RAM 2 GB · พื้นที่ว่าง 20 GB · port 80 และ 443 ว่าง
-(เปลี่ยนได้ด้วย `ZIXPLOY_HTTP_PORT`/`ZIXPLOY_HTTPS_PORT` — ดูหัวข้อ [เปลี่ยน port ติดตั้ง](#เปลี่ยน-port-ติดตั้ง) แต่ Let's Encrypt อัตโนมัติต้องใช้ port 80 จริงเท่านั้น)
+(เปลี่ยนได้ — ดูหัวข้อ [ตั้งค่าตอนติดตั้ง](#ตั้งค่าตอนติดตั้ง) แต่ Let's Encrypt อัตโนมัติต้องใช้ port 80 จริงเท่านั้น)
 
-### เปลี่ยน port ติดตั้ง
+### ตั้งค่าตอนติดตั้ง
 
-ถ้า port 80/443 ถูกใช้อยู่แล้ว หรือไม่อยากให้ Zixploy ยึด port มาตรฐาน — ตั้งค่าก่อนรันตัวติดตั้ง:
+ตัวติดตั้งปรับได้ผ่าน environment variable ก่อนรันคำสั่ง `curl | sh` — ทุกตัวมีค่าเริ่มต้นที่ใช้ได้เลย
+ไม่ต้องตั้งอะไรถ้าไม่มีความต้องการพิเศษ:
+
+| ตัวแปร | ค่าเริ่มต้น | ใช้ทำอะไร |
+|---|---|---|
+| `ZIXPLOY_HTTP_PORT` | `80` | port ฝั่ง host สำหรับ HTTP — เปลี่ยนถ้า port 80 ถูกใช้อยู่แล้ว |
+| `ZIXPLOY_HTTPS_PORT` | `443` | port ฝั่ง host สำหรับ HTTPS |
+| `ZIXPLOY_INSTALL_DIR` | `/opt/zixploy` | ตำแหน่งที่เก็บ `docker-compose.yml`/`.env` บนเครื่อง |
+| `ZIXPLOY_SERVER_IP` | ตรวจจับอัตโนมัติ | บังคับ public IP เอง — ใช้เมื่อเครื่องอยู่หลัง NAT/ตรวจจับอัตโนมัติผิด |
+| `ZIXPLOY_VERSION` | เวอร์ชันล่าสุดบน registry | ปักเวอร์ชันที่ต้องการแทนการติดตั้งล่าสุดเสมอ (เช่น `0.1.0`) |
+| `ZIXPLOY_ACME_EMAIL` | ว่าง | อีเมลรับแจ้งเตือนก่อน TLS certificate หมดอายุจาก Let's Encrypt |
+
+ตัวอย่างตั้งหลายค่าพร้อมกัน:
 
 ```bash
-ZIXPLOY_HTTP_PORT=8080 ZIXPLOY_HTTPS_PORT=8443 \
+ZIXPLOY_HTTP_PORT=8080 ZIXPLOY_HTTPS_PORT=8443 ZIXPLOY_ACME_EMAIL=ops@example.com \
   curl -sSL https://raw.githubusercontent.com/iitopfii/zixploy.com/main/deploy/install/install.sh | sudo -E sh
 ```
 
-ค่านี้ถูกจดไว้ใน `.env` ตอนติดตั้งครั้งแรกเท่านั้น (เหมือน `ZIXPLOY_VERSION`) — ติดตั้งซ้ำจะไม่ถามใหม่
-เปลี่ยนทีหลังได้โดยแก้ `.env` เองแล้ว `docker compose up -d`
+> `sudo -E` (ตัวใหญ่) จำเป็นเพื่อส่งต่อ environment variable ที่ตั้งไว้ให้สคริปต์ที่รันด้วย root —
+> ถ้าใช้ `sudo` เฉย ๆ ค่าที่ตั้งไว้จะหายและกลับไปใช้ค่าเริ่มต้นทั้งหมด
 
-**ข้อควรระวัง:** ถ้า `ZIXPLOY_HTTP_PORT` ไม่ใช่ `80` ระบบออกใบรับรอง Let's Encrypt อัตโนมัติจะใช้ไม่ได้
-(HTTP-01 challenge ต้องมี port 80 จริงที่อินเทอร์เน็ตเข้าถึงได้) — ต้องอัปโหลด TLS certificate เอง
-แทนที่ dashboard → Domains → Custom TLS
+ทุกค่าถูกจดไว้ใน `.env` **ตอนติดตั้งครั้งแรกเท่านั้น** — รันตัวติดตั้งซ้ำบนเครื่องที่มีอยู่แล้วจะไม่ถามใหม่
+หรือเขียนทับค่าที่ตั้งไว้ (ปลอดภัยสำหรับรันซ้ำเพื่อซ่อมการติดตั้งที่ค้างกลางทาง) เปลี่ยนค่าทีหลังได้เสมอ
+โดยแก้ `$ZIXPLOY_INSTALL_DIR/.env` เองแล้วรัน `docker compose up -d`
+
+**ข้อควรระวังเรื่อง port:** ถ้า `ZIXPLOY_HTTP_PORT` ไม่ใช่ `80` ระบบออกใบรับรอง Let's Encrypt อัตโนมัติ
+จะ**ใช้ไม่ได้** (HTTP-01 challenge ต้องมี port 80 จริงที่อินเทอร์เน็ตเข้าถึงได้เสมอ ไม่ว่าจะตั้ง
+`ZIXPLOY_HTTP_PORT` เป็นอะไรก็ตาม) — ต้องอัปโหลด TLS certificate เองแทนที่ dashboard → Domains →
+Custom TLS
 
 ## ความสามารถ
 

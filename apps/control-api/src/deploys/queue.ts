@@ -12,6 +12,14 @@
 import type { Database } from "bun:sqlite";
 import { AppError, type DeploymentStatus, isTerminal, ulid } from "@zixploy/shared";
 
+/**
+ * source แยกตาม source_type ของ project (Phase 13) — 'github' ต้อง clone ผ่าน installation token,
+ * 'dockerfile' ใช้เนื้อหาที่ผู้ใช้วางเองตรง ๆ ไม่มี clone/token เลย
+ */
+export type DeployJobSource =
+  | { type: "github"; installationId: number; repoFullName: string }
+  | { type: "dockerfile"; dockerfileContent: string };
+
 export type DeployJobPayload =
   | {
       kind: "build";
@@ -19,8 +27,7 @@ export type DeployJobPayload =
       commitSha: string;
       commitMessage: string | null;
       commitAuthor: string | null;
-      installationId: number;
-      repoFullName: string;
+      source: DeployJobSource;
     }
   | { kind: "rollback"; targetDeploymentId: string; imageTag: string; imageDigest: string }
   | { kind: "restart" }
@@ -82,8 +89,11 @@ export function enqueuePushDeploy(
       commitSha: params.commitSha,
       commitMessage: params.commitMessage,
       commitAuthor: params.commitAuthor,
-      installationId: params.installationId,
-      repoFullName: params.repoFullName,
+      source: {
+        type: "github",
+        installationId: params.installationId,
+        repoFullName: params.repoFullName,
+      },
     };
     const run = db.transaction(() => {
       db.query("UPDATE deploy_jobs SET payload = ?, updated_at = ? WHERE id = ?").run(
@@ -113,8 +123,11 @@ export function enqueuePushDeploy(
     commitSha: params.commitSha,
     commitMessage: params.commitMessage,
     commitAuthor: params.commitAuthor,
-    installationId: params.installationId,
-    repoFullName: params.repoFullName,
+    source: {
+      type: "github",
+      installationId: params.installationId,
+      repoFullName: params.repoFullName,
+    },
   };
   const run = db.transaction(() => {
     db.query(

@@ -9,7 +9,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadMigrations, migrateUp, migrationsDir, openDatabase } from "@zixploy/db";
@@ -176,8 +176,7 @@ describe("runBuildOrRollbackPipeline — happy path (build)", () => {
         commitSha: "a".repeat(40),
         commitMessage: null,
         commitAuthor: null,
-        installationId: 111,
-        repoFullName: "org/repo",
+        source: { type: "github", installationId: 111, repoFullName: "org/repo" },
       },
       new AbortController().signal,
     );
@@ -242,8 +241,7 @@ describe("runBuildOrRollbackPipeline — happy path (build)", () => {
         commitSha: "a".repeat(40),
         commitMessage: null,
         commitAuthor: null,
-        installationId: 111,
-        repoFullName: "org/repo",
+        source: { type: "github", installationId: 111, repoFullName: "org/repo" },
       },
       new AbortController().signal,
     );
@@ -284,13 +282,68 @@ describe("runBuildOrRollbackPipeline — happy path (build)", () => {
         commitSha: "a".repeat(40),
         commitMessage: null,
         commitAuthor: null,
-        installationId: 111,
-        repoFullName: "org/repo",
+        source: { type: "github", installationId: 111, repoFullName: "org/repo" },
       },
       new AbortController().signal,
     );
 
     expect(captured.activateCalledWith?.oldContainerId).toBe("old-container-99");
+  });
+});
+
+describe("runBuildOrRollbackPipeline — dockerfile-paste source (Phase 13)", () => {
+  test("ไม่มี git clone/mint token เลย — เขียน Dockerfile ที่วางเองลง build context ตรง ๆ แล้ว build สำเร็จ", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    const deploymentId = insertDeployment(db, projectId);
+    const job = makeJob(projectId, deploymentId);
+
+    let cloneCalled = false;
+    let mintTokenCalled = false;
+    let writtenContent = "";
+    const deps = baseDeps({
+      db,
+      cloneCommit: async () => {
+        cloneCalled = true;
+      },
+      mintInstallationToken: async () => {
+        mintTokenCalled = true;
+        return { token: "unused", expiresAt: new Date() };
+      },
+      buildImage: async (params) => {
+        // ยังไม่ถูกลบเพราะ removeWorkspace() รันหลัง buildImage() resolve เท่านั้น (ดู pipeline/build.ts finally)
+        writtenContent = readFileSync(join(params.contextDir, "Dockerfile"), "utf8");
+        return { imageId: "sha256:abc123", digest: "sha256:abc123" };
+      },
+    });
+
+    const pastedContent = "FROM scratch\nCOPY . /app\n";
+    const result = await runBuildOrRollbackPipeline(
+      deps,
+      job,
+      {
+        kind: "build",
+        trigger: "manual",
+        commitSha: "deadbeef".repeat(5),
+        commitMessage: null,
+        commitAuthor: null,
+        source: { type: "dockerfile", dockerfileContent: pastedContent },
+      },
+      new AbortController().signal,
+    );
+
+    expect(result.outcome).toBe("done");
+    // ไม่มี clone / mint token เกิดขึ้นเลย — สอง dependency ที่ผูกกับ GitHub เฉพาะ
+    expect(cloneCalled).toBe(false);
+    expect(mintTokenCalled).toBe(false);
+
+    const deployment = db
+      .query<{ status: string }, [string]>("SELECT status FROM deployments WHERE id = ?")
+      .get(deploymentId);
+    expect(deployment?.status).toBe("succeeded");
+
+    // เนื้อหาที่เขียนลง workspace ต้องตรงกับที่วางไว้เป๊ะ
+    expect(writtenContent).toBe(pastedContent);
   });
 });
 
@@ -320,8 +373,7 @@ describe("runBuildOrRollbackPipeline — failure cases (old container untouched)
         commitSha: "a".repeat(40),
         commitMessage: null,
         commitAuthor: null,
-        installationId: 111,
-        repoFullName: "org/repo",
+        source: { type: "github", installationId: 111, repoFullName: "org/repo" },
       },
       new AbortController().signal,
     );
@@ -366,8 +418,7 @@ describe("runBuildOrRollbackPipeline — failure cases (old container untouched)
         commitSha: "a".repeat(40),
         commitMessage: null,
         commitAuthor: null,
-        installationId: 111,
-        repoFullName: "org/repo",
+        source: { type: "github", installationId: 111, repoFullName: "org/repo" },
       },
       new AbortController().signal,
     );
@@ -408,8 +459,7 @@ describe("runBuildOrRollbackPipeline — failure cases (old container untouched)
         commitSha: "a".repeat(40),
         commitMessage: null,
         commitAuthor: null,
-        installationId: 111,
-        repoFullName: "org/repo",
+        source: { type: "github", installationId: 111, repoFullName: "org/repo" },
       },
       new AbortController().signal,
     );
@@ -456,8 +506,7 @@ describe("runBuildOrRollbackPipeline — failure cases (old container untouched)
         commitSha: "a".repeat(40),
         commitMessage: null,
         commitAuthor: null,
-        installationId: 111,
-        repoFullName: "org/repo",
+        source: { type: "github", installationId: 111, repoFullName: "org/repo" },
       },
       new AbortController().signal,
     );
@@ -509,8 +558,7 @@ describe("runBuildOrRollbackPipeline — failure cases (old container untouched)
         commitSha: "a".repeat(40),
         commitMessage: null,
         commitAuthor: null,
-        installationId: 111,
-        repoFullName: "org/repo",
+        source: { type: "github", installationId: 111, repoFullName: "org/repo" },
       },
       new AbortController().signal,
     );
@@ -545,8 +593,7 @@ describe("runBuildOrRollbackPipeline — idempotent retry", () => {
         commitSha: "a".repeat(40),
         commitMessage: null,
         commitAuthor: null,
-        installationId: 111,
-        repoFullName: "org/repo",
+        source: { type: "github", installationId: 111, repoFullName: "org/repo" },
       },
       new AbortController().signal,
     );
@@ -683,8 +730,7 @@ describe("runBuildOrRollbackPipeline — M7 hardening", () => {
         commitSha: "a".repeat(40),
         commitMessage: null,
         commitAuthor: null,
-        installationId: 111,
-        repoFullName: "org/repo",
+        source: { type: "github", installationId: 111, repoFullName: "org/repo" },
       },
       new AbortController().signal,
     );
@@ -714,8 +760,7 @@ describe("runBuildOrRollbackPipeline — M7 hardening", () => {
         commitSha: "a".repeat(40),
         commitMessage: null,
         commitAuthor: null,
-        installationId: 111,
-        repoFullName: "org/repo",
+        source: { type: "github", installationId: 111, repoFullName: "org/repo" },
       },
       new AbortController().signal,
     );
@@ -744,8 +789,7 @@ describe("runBuildOrRollbackPipeline — M7 hardening", () => {
         commitSha: "a".repeat(40),
         commitMessage: null,
         commitAuthor: null,
-        installationId: 111,
-        repoFullName: "org/repo",
+        source: { type: "github", installationId: 111, repoFullName: "org/repo" },
       },
       new AbortController().signal,
     );
@@ -791,8 +835,7 @@ describe("runBuildOrRollbackPipeline — M7 hardening", () => {
         commitSha: "a".repeat(40),
         commitMessage: null,
         commitAuthor: null,
-        installationId: 111,
-        repoFullName: "org/repo",
+        source: { type: "github", installationId: 111, repoFullName: "org/repo" },
       },
       new AbortController().signal,
     );

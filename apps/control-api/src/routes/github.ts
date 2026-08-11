@@ -87,6 +87,7 @@ const sourceBody = t.Object({
 // project schema subset ที่ source endpoints คืน (ไม่ต้องคืน full project)
 const projectSourceSchema = t.Object({
   id: t.String(),
+  sourceType: t.Union([t.Literal("github"), t.Literal("dockerfile")]),
   installationId: t.Nullable(t.String()),
   repoId: t.Nullable(t.Number()),
   repoFullName: t.Nullable(t.String()),
@@ -96,6 +97,7 @@ const projectSourceSchema = t.Object({
 
 interface ProjectSourceRow {
   id: string;
+  source_type: string;
   installation_id: string | null;
   repo_id: number | null;
   repo_full_name: string | null;
@@ -531,10 +533,12 @@ export function githubRoutes(db: Database, registry: GitHubAppRegistry) {
         // validate branch
         await service.validateBranch(body.installationId, body.repoFullName, body.branch);
 
-        // อัปเดต project
+        // อัปเดต project — เชื่อม GitHub ทับ source แบบ dockerfile-paste ที่อาจตั้งไว้ก่อนหน้า (mutual exclusive)
         const now = Date.now();
         db.query(
           `UPDATE projects SET
+            source_type = 'github',
+            dockerfile_content = NULL,
             installation_id = ?,
             repo_id = ?,
             repo_full_name = ?,
@@ -552,12 +556,13 @@ export function githubRoutes(db: Database, registry: GitHubAppRegistry) {
 
         const updated = db
           .query<ProjectSourceRow, [string]>(
-            "SELECT id, installation_id, repo_id, repo_full_name, branch, updated_at FROM projects WHERE id = ?",
+            "SELECT id, source_type, installation_id, repo_id, repo_full_name, branch, updated_at FROM projects WHERE id = ?",
           )
           .get(params.id)!;
 
         return {
           id: updated.id,
+          sourceType: updated.source_type as "github" | "dockerfile",
           installationId: updated.installation_id,
           repoId: updated.repo_id,
           repoFullName: updated.repo_full_name,
@@ -586,21 +591,31 @@ export function githubRoutes(db: Database, registry: GitHubAppRegistry) {
           throw new AppError("PROJECT_ARCHIVED", "project นี้ถูก archive แล้ว");
         }
 
+        // reset กลับเป็น baseline 'github' ที่ยังไม่เชื่อม — ล้าง dockerfile_content ด้วยเผื่อเคยตั้งไว้
         const now = Date.now();
         db.query(
-          "UPDATE projects SET installation_id = NULL, repo_id = NULL, repo_full_name = NULL, branch = NULL, updated_at = ? WHERE id = ?",
+          `UPDATE projects SET
+            source_type = 'github',
+            dockerfile_content = NULL,
+            installation_id = NULL,
+            repo_id = NULL,
+            repo_full_name = NULL,
+            branch = NULL,
+            updated_at = ?
+          WHERE id = ?`,
         ).run(now, params.id);
 
         log.info("project source disconnected", { projectId: params.id });
 
         const updated = db
           .query<ProjectSourceRow, [string]>(
-            "SELECT id, installation_id, repo_id, repo_full_name, branch, updated_at FROM projects WHERE id = ?",
+            "SELECT id, source_type, installation_id, repo_id, repo_full_name, branch, updated_at FROM projects WHERE id = ?",
           )
           .get(params.id)!;
 
         return {
           id: updated.id,
+          sourceType: updated.source_type as "github" | "dockerfile",
           installationId: updated.installation_id,
           repoId: updated.repo_id,
           repoFullName: updated.repo_full_name,

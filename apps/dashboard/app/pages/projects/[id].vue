@@ -92,10 +92,47 @@ const activeInstallations = computed(
   () => installationsData.value?.items.filter((i) => i.status === "active") ?? [],
 );
 
+// Dockerfile-paste source (Phase 13) — แยก fetch เพราะเนื้อหาอาจใหญ่ ไม่รวมอยู่ใน project object ทั่วไป
+const {
+  data: dockerfileSource,
+  pending: dockerfileSourcePending,
+  refresh: refreshDockerfileSource,
+} = await useAsyncData(
+  () => `dockerfile-source-${id.value}`,
+  async () => {
+    const { data } = await api.api.v1.projects({ id: id.value }).source.dockerfile.get();
+    return data;
+  },
+  { server: false, watch: [id] },
+);
+
 const sourceError = ref("");
 const sourceSaving = ref(false);
 const sourceSuccess = ref(false);
 const showPicker = ref(false);
+/** โหมดที่เลือกตอนยังไม่เคยตั้ง source อะไรเลย — null = ยังไม่เลือก (แสดงตัวเลือก) */
+const chosenSourceMode = ref<"github" | "dockerfile" | null>(null);
+
+async function switchToDockerfileMode() {
+  chosenSourceMode.value = "dockerfile";
+  showPicker.value = false;
+  sourceError.value = "";
+}
+async function switchToGitHubMode() {
+  chosenSourceMode.value = "github";
+  sourceError.value = "";
+}
+async function onDockerfileSourceSaved() {
+  chosenSourceMode.value = null;
+  await Promise.all([refresh(), refreshDockerfileSource()]);
+}
+
+/** โหมด source ที่ควรแสดงตอนนี้ — null = ยังไม่เชื่อมอะไรเลยและยังไม่ได้เลือก (แสดงตัวเลือก) */
+const effectiveSourceMode = computed<"github" | "dockerfile" | null>(() => {
+  if (isConnected.value)
+    return project.value?.sourceType === "dockerfile" ? "dockerfile" : "github";
+  return chosenSourceMode.value;
+});
 
 /** installation ที่ project นี้เชื่อมอยู่ (ถ้ามี) */
 const connectedInstallation = computed(() => {
@@ -104,7 +141,13 @@ const connectedInstallation = computed(() => {
   return installationsData.value?.items.find((i) => i.id === installationId) ?? null;
 });
 
-const isConnected = computed(() => !!project.value?.repoFullName);
+/** เชื่อมต่อแล้วไม่ว่าโหมดไหน — repo (GitHub) หรือวางเนื้อหาไว้แล้ว (dockerfile) */
+const isConnected = computed(() => {
+  const p = project.value;
+  if (!p) return false;
+  if (p.sourceType === "dockerfile") return !!dockerfileSource.value?.dockerfile;
+  return !!p.repoFullName;
+});
 
 async function connectSource(picked: {
   installationId: number;
@@ -129,7 +172,8 @@ async function connectSource(picked: {
     }
     sourceSuccess.value = true;
     showPicker.value = false;
-    await refresh();
+    chosenSourceMode.value = null;
+    await Promise.all([refresh(), refreshDockerfileSource()]);
   } catch {
     sourceError.value = "ติดต่อ API ไม่ได้";
   } finally {
@@ -149,7 +193,8 @@ async function disconnectSource() {
       return;
     }
     showPicker.value = false;
-    await refresh();
+    chosenSourceMode.value = null;
+    await Promise.all([refresh(), refreshDockerfileSource()]);
   } catch {
     sourceError.value = "ติดต่อ API ไม่ได้";
   } finally {
@@ -170,7 +215,11 @@ const setupSteps = computed(() => {
   const p = project.value;
   if (!p) return [];
   return [
-    { label: "เชื่อม GitHub repository", done: !!p.repoFullName, tab: "source" as const },
+    {
+      label: "ตั้งค่า source (GitHub หรือ Dockerfile)",
+      done: isConnected.value,
+      tab: "source" as const,
+    },
     { label: "ระบุ internal port", done: p.internalPort != null, tab: "settings" as const },
   ];
 });
@@ -233,6 +282,10 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
               {{ project.repoFullName }}
               <AppIcon name="external" :size="11" />
             </a>
+            <span v-else-if="project.sourceType === 'dockerfile' && isConnected" class="meta">
+              <AppIcon name="box" :size="13" />
+              Dockerfile (วางเอง)
+            </span>
             <span v-if="project.branch" class="meta">
               <AppIcon name="branch" :size="13" />
               {{ project.branch }}
@@ -296,21 +349,30 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
             <section class="card">
               <h2 class="section-title">Source</h2>
               <dl class="kv">
-                <dt>Repository</dt>
-                <dd>
-                  <a
-                    v-if="project.repoFullName"
-                    :href="`https://github.com/${project.repoFullName}`"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >{{ project.repoFullName }}</a>
-                  <span v-else class="muted">ยังไม่ได้เชื่อม</span>
-                </dd>
-                <dt>Branch</dt>
-                <dd>
-                  <code v-if="project.branch">{{ project.branch }}</code>
-                  <span v-else class="muted">—</span>
-                </dd>
+                <template v-if="project.sourceType === 'dockerfile'">
+                  <dt>ประเภท</dt>
+                  <dd>
+                    <span v-if="isConnected" class="badge tone-ok">Dockerfile (วางเอง)</span>
+                    <span v-else class="muted">ยังไม่ได้ตั้งค่า</span>
+                  </dd>
+                </template>
+                <template v-else>
+                  <dt>Repository</dt>
+                  <dd>
+                    <a
+                      v-if="project.repoFullName"
+                      :href="`https://github.com/${project.repoFullName}`"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >{{ project.repoFullName }}</a>
+                    <span v-else class="muted">ยังไม่ได้เชื่อม</span>
+                  </dd>
+                  <dt>Branch</dt>
+                  <dd>
+                    <code v-if="project.branch">{{ project.branch }}</code>
+                    <span v-else class="muted">—</span>
+                  </dd>
+                </template>
                 <dt>Auto deploy</dt>
                 <dd>
                   <span class="badge" :class="project.autoDeploy ? 'tone-ok' : 'tone-idle'">
@@ -372,123 +434,190 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
         <!-- Source -->
         <template v-else-if="activeTab === 'source'">
           <div class="card stack">
-            <h2 class="section-title">GitHub Repository</h2>
+            <h2 class="section-title">Source</h2>
 
-            <div
-              v-if="isConnected && (installationStatus === 'deleted' || installationStatus === 'suspended')"
-              class="alert alert-warn"
-            >
-              <AppIcon name="alert" :size="16" />
-              <div class="stack-sm">
-                <strong>
-                  GitHub installation
-                  {{ installationStatus === "deleted" ? "ถูกถอนการติดตั้งแล้ว" : "ถูก suspend" }}
-                  — Auto deploy ถูกปิดอัตโนมัติ
-                </strong>
-                <span class="muted">
-                  {{
-                    installationStatus === "deleted"
-                      ? "Reinstall GitHub App แล้วเชื่อมต่อ repository ใหม่"
-                      : "Unsuspend GitHub App ผ่าน GitHub Settings แล้ว refresh"
-                  }}
-                </span>
-              </div>
-            </div>
-
-            <!-- Connected -->
-            <template v-if="isConnected && !showPicker">
-              <div class="inset">
-                <dl class="kv">
-                  <dt>Repository</dt>
-                  <dd>
-                    <a
-                      :href="`https://github.com/${project.repoFullName}`"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="repo-link"
-                    >
-                      {{ project.repoFullName }}
-                      <AppIcon name="external" :size="12" />
-                    </a>
-                  </dd>
-                  <dt>Branch</dt>
-                  <dd><code>{{ project.branch }}</code></dd>
-                  <dt v-if="connectedInstallation">Account</dt>
-                  <dd v-if="connectedInstallation">{{ connectedInstallation.accountLogin }}</dd>
-                </dl>
-              </div>
-
-              <p v-if="sourceSuccess" class="alert alert-ok">
-                <AppIcon name="check" :size="15" />
-                <span>เชื่อมต่อสำเร็จ</span>
-              </p>
-              <p v-if="sourceError" class="alert alert-bad">
-                <AppIcon name="alert" :size="15" />
-                <span>{{ sourceError }}</span>
-              </p>
-
-              <div v-if="!project.archivedAt" class="actions">
+            <!-- ยังไม่เชื่อมอะไรเลยและยังไม่ได้เลือกโหมด — ให้เลือกก่อน -->
+            <template v-if="!effectiveSourceMode">
+              <p class="muted small">เลือกวิธีที่จะใช้ build project นี้</p>
+              <div class="mode-picker">
                 <button
-                  class="secondary"
-                  :disabled="sourceSaving"
-                  @click="showPicker = true; sourceSuccess = false"
+                  class="mode-card"
+                  :disabled="!!project.archivedAt"
+                  @click="chosenSourceMode = 'github'"
                 >
-                  เปลี่ยน repository
+                  <AppIcon name="github" :size="22" />
+                  <strong>GitHub Repository</strong>
+                  <span class="muted small">เชื่อม repo แล้ว deploy อัตโนมัติเมื่อมี push</span>
                 </button>
-                <button class="danger" :disabled="sourceSaving" @click="disconnectSource">
-                  <span v-if="sourceSaving" class="spinner" />
-                  {{ sourceSaving ? "กำลังยกเลิก…" : "ยกเลิกการเชื่อมต่อ" }}
+                <button
+                  class="mode-card"
+                  :disabled="!!project.archivedAt"
+                  @click="switchToDockerfileMode"
+                >
+                  <AppIcon name="box" :size="22" />
+                  <strong>วาง Dockerfile</strong>
+                  <span class="muted small">ไม่ต้องมี repo — วางเนื้อหา Dockerfile แล้ว deploy ได้เลย</span>
                 </button>
               </div>
             </template>
 
-            <!-- Not connected / picker -->
-            <template v-else>
-              <template v-if="statusPending">
-                <p class="muted small">กำลังตรวจ GitHub integration…</p>
-              </template>
-
-              <template v-else-if="!gitHubStatus?.configured">
-                <GitHubConnect />
-              </template>
-
-              <template v-else-if="activeInstallations.length === 0 && !showPicker">
-                <div class="empty">
-                  <span class="empty-icon"><AppIcon name="github" :size="20" /></span>
-                  <span class="empty-title">ยังไม่มี GitHub installation</span>
-                  <p class="small">ติดตั้ง GitHub App บนบัญชีของคุณก่อนเลือก repository</p>
-                </div>
-                <GitHubConnect />
-              </template>
-
+            <!-- Dockerfile-paste mode -->
+            <template v-else-if="effectiveSourceMode === 'dockerfile'">
+              <p v-if="dockerfileSourcePending" class="muted small">กำลังโหลด…</p>
               <template v-else>
-                <template v-if="!showPicker && !isConnected">
-                  <div class="empty">
-                    <span class="empty-icon"><AppIcon name="github" :size="20" /></span>
-                    <span class="empty-title">ยังไม่ได้เชื่อม repository</span>
-                    <p class="small">เลือก repository และ branch ที่จะใช้ deploy project นี้</p>
-                    <button v-if="!project.archivedAt" class="primary" @click="showPicker = true">
-                      เลือก repository
-                    </button>
-                  </div>
+                <DockerfileSource
+                  :project-id="id"
+                  :initial-content="dockerfileSource?.dockerfile ?? null"
+                  :archived="!!project.archivedAt"
+                  @saved="onDockerfileSourceSaved"
+                />
+                <div v-if="!project.archivedAt" class="actions">
+                  <button
+                    v-if="isConnected"
+                    class="secondary small"
+                    :disabled="sourceSaving"
+                    @click="switchToGitHubMode"
+                  >
+                    เปลี่ยนเป็น GitHub repository แทน
+                  </button>
+                  <button
+                    v-else
+                    class="secondary small"
+                    :disabled="sourceSaving"
+                    @click="chosenSourceMode = null"
+                  >
+                    <AppIcon name="arrowLeft" :size="13" />
+                    กลับไปเลือกโหมด
+                  </button>
+                </div>
+              </template>
+            </template>
+
+            <!-- GitHub mode -->
+            <template v-else>
+              <div
+                v-if="isConnected && (installationStatus === 'deleted' || installationStatus === 'suspended')"
+                class="alert alert-warn"
+              >
+                <AppIcon name="alert" :size="16" />
+                <div class="stack-sm">
+                  <strong>
+                    GitHub installation
+                    {{ installationStatus === "deleted" ? "ถูกถอนการติดตั้งแล้ว" : "ถูก suspend" }}
+                    — Auto deploy ถูกปิดอัตโนมัติ
+                  </strong>
+                  <span class="muted">
+                    {{
+                      installationStatus === "deleted"
+                        ? "Reinstall GitHub App แล้วเชื่อมต่อ repository ใหม่"
+                        : "Unsuspend GitHub App ผ่าน GitHub Settings แล้ว refresh"
+                    }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Connected -->
+              <template v-if="isConnected && !showPicker">
+                <div class="inset">
+                  <dl class="kv">
+                    <dt>Repository</dt>
+                    <dd>
+                      <a
+                        :href="`https://github.com/${project.repoFullName}`"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="repo-link"
+                      >
+                        {{ project.repoFullName }}
+                        <AppIcon name="external" :size="12" />
+                      </a>
+                    </dd>
+                    <dt>Branch</dt>
+                    <dd><code>{{ project.branch }}</code></dd>
+                    <dt v-if="connectedInstallation">Account</dt>
+                    <dd v-if="connectedInstallation">{{ connectedInstallation.accountLogin }}</dd>
+                  </dl>
+                </div>
+
+                <p v-if="sourceSuccess" class="alert alert-ok">
+                  <AppIcon name="check" :size="15" />
+                  <span>เชื่อมต่อสำเร็จ</span>
+                </p>
+                <p v-if="sourceError" class="alert alert-bad">
+                  <AppIcon name="alert" :size="15" />
+                  <span>{{ sourceError }}</span>
+                </p>
+
+                <div v-if="!project.archivedAt" class="actions">
+                  <button
+                    class="secondary"
+                    :disabled="sourceSaving"
+                    @click="showPicker = true; sourceSuccess = false"
+                  >
+                    เปลี่ยน repository
+                  </button>
+                  <button class="danger" :disabled="sourceSaving" @click="disconnectSource">
+                    <span v-if="sourceSaving" class="spinner" />
+                    {{ sourceSaving ? "กำลังยกเลิก…" : "ยกเลิกการเชื่อมต่อ" }}
+                  </button>
+                </div>
+              </template>
+
+              <!-- Not connected / picker -->
+              <template v-else>
+                <template v-if="statusPending">
+                  <p class="muted small">กำลังตรวจ GitHub integration…</p>
                 </template>
 
-                <template v-if="showPicker">
-                  <RepositoryPicker :installations="activeInstallations" @pick="connectSource" />
+                <template v-else-if="!gitHubStatus?.configured">
+                  <GitHubConnect />
+                </template>
 
-                  <p v-if="sourceError" class="alert alert-bad">
-                    <AppIcon name="alert" :size="15" />
-                    <span>{{ sourceError }}</span>
-                  </p>
-                  <p v-if="sourceSaving" class="muted small">กำลังบันทึก…</p>
+                <template v-else-if="activeInstallations.length === 0 && !showPicker">
+                  <div class="empty">
+                    <span class="empty-icon"><AppIcon name="github" :size="20" /></span>
+                    <span class="empty-title">ยังไม่มี GitHub installation</span>
+                    <p class="small">ติดตั้ง GitHub App บนบัญชีของคุณก่อนเลือก repository</p>
+                  </div>
+                  <GitHubConnect />
+                </template>
 
-                  <div class="actions">
-                    <button
-                      class="secondary small"
-                      :disabled="sourceSaving"
-                      @click="showPicker = false; sourceError = ''"
-                    >
-                      ยกเลิก
+                <template v-else>
+                  <template v-if="!showPicker && !isConnected">
+                    <div class="empty">
+                      <span class="empty-icon"><AppIcon name="github" :size="20" /></span>
+                      <span class="empty-title">ยังไม่ได้เชื่อม repository</span>
+                      <p class="small">เลือก repository และ branch ที่จะใช้ deploy project นี้</p>
+                      <button v-if="!project.archivedAt" class="primary" @click="showPicker = true">
+                        เลือก repository
+                      </button>
+                    </div>
+                  </template>
+
+                  <template v-if="showPicker">
+                    <RepositoryPicker :installations="activeInstallations" @pick="connectSource" />
+
+                    <p v-if="sourceError" class="alert alert-bad">
+                      <AppIcon name="alert" :size="15" />
+                      <span>{{ sourceError }}</span>
+                    </p>
+                    <p v-if="sourceSaving" class="muted small">กำลังบันทึก…</p>
+
+                    <div class="actions">
+                      <button
+                        class="secondary small"
+                        :disabled="sourceSaving"
+                        @click="showPicker = false; sourceError = ''"
+                      >
+                        ยกเลิก
+                      </button>
+                    </div>
+                  </template>
+
+                  <div v-if="!showPicker && !isConnected && !project.archivedAt" class="actions">
+                    <button class="secondary small" @click="chosenSourceMode = null">
+                      <AppIcon name="arrowLeft" :size="13" />
+                      กลับไปเลือกโหมด
                     </button>
                   </div>
                 </template>
@@ -510,6 +639,7 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
             :archived="!!project.archivedAt"
             :auto-deploy="project.autoDeploy"
             :branch="project.branch"
+            :source-type="project.sourceType"
             @auto-deploy-changed="refresh()"
           />
         </div>
@@ -733,6 +863,34 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
+}
+
+/* ── Source mode picker ── */
+.mode-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--s-3);
+}
+.mode-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-2);
+  padding: var(--s-4);
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r);
+  transition:
+    border-color var(--fast),
+    background var(--fast);
+}
+.mode-card:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--accent-tint-strong);
+}
+.mode-card strong {
+  font-size: var(--t-sm);
 }
 
 @media (max-width: 640px) {

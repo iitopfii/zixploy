@@ -242,6 +242,10 @@ async function create() {
               <AppIcon name="github" :size="13" />
               <span class="truncate">{{ project.repoFullName }}</span>
             </span>
+            <span v-else-if="project.sourceType === 'dockerfile'" class="meta truncate">
+              <AppIcon name="box" :size="13" />
+              Dockerfile (วางเอง)
+            </span>
             <span v-else class="meta unlinked">
               <AppIcon name="alert" :size="13" />
               ยังไม่ได้เชื่อม repository

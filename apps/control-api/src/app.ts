@@ -12,6 +12,7 @@ import { securityHeaders } from "./plugins/security-headers";
 import { auditRoutes } from "./routes/audit";
 import { authRoutes } from "./routes/auth";
 import { deploymentRoutes } from "./routes/deployments";
+import { dockerfileSourceRoutes } from "./routes/dockerfile-source";
 import { domainRoutes } from "./routes/domains";
 import { environmentRoutes } from "./routes/environment";
 import { githubRoutes } from "./routes/github";
@@ -65,6 +66,7 @@ export function buildApp(db: Database, options: AppOptions = {}) {
     .use(authRoutes(db))
     .use(projectRoutes(db))
     .use(githubRoutes(db, registry))
+    .use(dockerfileSourceRoutes(db))
     .use(deploymentRoutes(db, registry))
     .use(webhookRoutes(db, registry))
     .use(environmentRoutes(db, masterKeys))

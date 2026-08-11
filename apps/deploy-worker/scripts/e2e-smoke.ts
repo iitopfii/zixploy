@@ -135,8 +135,7 @@ async function main() {
         commitSha: commitShaV1,
         commitMessage: "v1",
         commitAuthor: "E2E",
-        installationId: 0,
-        repoFullName: "local/fixture",
+        source: { type: "github", installationId: 0, repoFullName: "local/fixture" },
       },
       new AbortController().signal,
     );
@@ -239,8 +238,7 @@ async function main() {
         commitSha: commitShaV2,
         commitMessage: "v2",
         commitAuthor: "E2E",
-        installationId: 0,
-        repoFullName: "local/fixture",
+        source: { type: "github", installationId: 0, repoFullName: "local/fixture" },
       },
       new AbortController().signal,
     );

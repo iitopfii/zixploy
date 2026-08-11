@@ -127,17 +127,34 @@ export async function runBuildOrRollbackPipeline(
       let secretDir: string | null = null;
 
       try {
-        const token = await deps.mintInstallationToken(db, deps.masterKeys, payload.installationId);
-        await deps.cloneCommit({
-          repoFullName: payload.repoFullName,
-          commitSha: payload.commitSha,
-          token: token.token,
-          destDir: workspaceDir,
-          timeoutMs: cloneMs,
-          signal: deployTimeout.signal,
-          onLog: safeLog,
-        });
-        // ตรวจหลัง clone จริงเท่านั้น (ต้องมี buildContextDir อยู่จริงก่อนถึงจะ realpath ได้)
+        if (payload.source.type === "github") {
+          const token = await deps.mintInstallationToken(
+            db,
+            deps.masterKeys,
+            payload.source.installationId,
+          );
+          await deps.cloneCommit({
+            repoFullName: payload.source.repoFullName,
+            commitSha: payload.commitSha,
+            token: token.token,
+            destDir: workspaceDir,
+            timeoutMs: cloneMs,
+            signal: deployTimeout.signal,
+            onLog: safeLog,
+          });
+        } else {
+          // dockerfile-paste source (Phase 13) — ไม่มี git clone เลย เขียนเนื้อหาที่ผู้ใช้วางเอง
+          // ลง buildContextDir ตรง ๆ; dockerfilePath ถูกบังคับเป็น 'Dockerfile' และ buildContext
+          // เป็น '.' ตอนตั้ง source (control-api/routes/dockerfile-source.ts) — ไม่มีไฟล์อื่นอยู่ร่วม
+          mkdirSync(buildContextDir, { recursive: true });
+          writeFileSync(
+            join(buildContextDir, project.dockerfilePath),
+            payload.source.dockerfileContent,
+            { mode: 0o600 },
+          );
+          safeLog("[workspace] ใช้ Dockerfile ที่วางไว้ใน source โดยตรง (ไม่มี git clone)");
+        }
+        // ตรวจหลัง clone/เขียนไฟล์เสร็จเท่านั้น (ต้องมี buildContextDir อยู่จริงก่อนถึงจะ realpath ได้)
         assertDockerfileWithinContext(buildContextDir, project.dockerfilePath);
         // ตรวจขนาด workspace ก่อนเริ่ม build เสมอ (Phase 8 M1 — threat-model.md)
         assertWorkspaceSizeWithinLimit(workspaceDir, BUILD_SANDBOX_LIMITS.workspaceMaxMb);

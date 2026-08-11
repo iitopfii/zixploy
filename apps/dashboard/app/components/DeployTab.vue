@@ -11,7 +11,12 @@ const props = defineProps<{
   archived: boolean;
   autoDeploy: boolean;
   branch: string | null;
+  /** 'dockerfile' = ไม่มี push event ให้ auto deploy ฟังเลย (ไม่ผ่าน GitHub) — ซ่อน toggle ไปเลย */
+  sourceType?: "github" | "dockerfile";
 }>();
+
+/** auto deploy มีความหมายเฉพาะ source ที่มี webhook push จริง (GitHub) เท่านั้น */
+const autoDeploySupported = computed(() => (props.sourceType ?? "github") !== "dockerfile");
 
 const emit = defineEmits<{ "auto-deploy-changed": [] }>();
 
@@ -371,9 +376,9 @@ function fmtDuration(start: number | null, end: number | null) {
       </p>
     </div>
 
-    <!-- ── Auto deploy ──
+    <!-- ── Auto deploy ── (เฉพาะ source แบบ GitHub — dockerfile-paste ไม่มี push event ให้ฟัง)
          อยู่ตรงนี้ไม่ใช่ในแท็บตั้งค่า เพราะเป็นสิ่งที่คนดูเวลาสงสัยว่า "ทำไม push แล้วไม่ deploy" -->
-    <section class="inset auto-deploy">
+    <section v-if="autoDeploySupported" class="inset auto-deploy">
       <div class="ad-main">
         <button
           class="switch"

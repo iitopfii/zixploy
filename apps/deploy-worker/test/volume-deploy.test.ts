@@ -240,8 +240,7 @@ describe("build pipeline — volume integration", () => {
       type: "deploy",
       payload: JSON.stringify({
         kind: "build",
-        installationId: 1,
-        repoFullName: "user/repo",
+        source: { type: "github", installationId: 1, repoFullName: "user/repo" },
         commitSha: "abc1234567890",
         commitMessage: "test",
         commitAuthor: "tester",
@@ -265,8 +264,7 @@ describe("build pipeline — volume integration", () => {
       makeJob(projectId, deploymentId),
       {
         kind: "build",
-        installationId: 1,
-        repoFullName: "user/repo",
+        source: { type: "github", installationId: 1, repoFullName: "user/repo" },
         commitSha: "abc1234567890",
         trigger: "manual",
         commitMessage: null,
@@ -304,8 +302,7 @@ describe("build pipeline — volume integration", () => {
       makeJob(projectId, deploymentId),
       {
         kind: "build",
-        installationId: 1,
-        repoFullName: "user/repo",
+        source: { type: "github", installationId: 1, repoFullName: "user/repo" },
         commitSha: "abc1234567890",
         trigger: "manual",
         commitMessage: null,
@@ -338,8 +335,7 @@ describe("build pipeline — volume integration", () => {
       makeJob(projectId, deploymentId),
       {
         kind: "build",
-        installationId: 1,
-        repoFullName: "user/repo",
+        source: { type: "github", installationId: 1, repoFullName: "user/repo" },
         commitSha: "abc1234567890",
         trigger: "manual",
         commitMessage: null,
@@ -367,8 +363,7 @@ describe("build pipeline — volume integration", () => {
       makeJob(projectId, deploymentId),
       {
         kind: "build",
-        installationId: 1,
-        repoFullName: "user/repo",
+        source: { type: "github", installationId: 1, repoFullName: "user/repo" },
         commitSha: "abc1234567890",
         trigger: "manual",
         commitMessage: null,

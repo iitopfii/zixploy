@@ -14,6 +14,7 @@
  */
 
 import type { Database } from "bun:sqlite";
+import { createHash } from "node:crypto";
 import { API_PREFIX, AppError, type DeploymentStatus, isUlid } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
 import { getClientIp, recordAuditEvent } from "../audit/log";
@@ -21,11 +22,17 @@ import { countDeployments, deleteDeployment, pruneDeploymentHistory } from "../d
 import {
   cancelDeployment,
   type DeployJobPayload,
+  type DeployJobSource,
   enqueueManualJob,
   enqueueOperation,
 } from "../deploys/queue";
 import type { GitHubAppRegistry } from "../github/registry";
 import { authPlugin, requireAuthenticated } from "../plugins/auth";
+
+/** commitSha สังเคราะห์สำหรับ source แบบ dockerfile-paste — ไม่มี commit จริงให้ใช้ (Phase 13) */
+function dockerfileContentHash(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
+}
 
 interface DeploymentRow {
   id: string;
@@ -142,17 +149,20 @@ function loadDeployment(db: Database, id: string): DeploymentRow {
 interface ProjectSourceRow {
   id: string;
   archived_at: number | null;
+  source_type: string;
   installation_id: string | null;
   repo_id: number | null;
   repo_full_name: string | null;
   branch: string | null;
+  dockerfile_content: string | null;
 }
 
 function loadProjectForDeploy(db: Database, id: string): ProjectSourceRow {
   if (!isUlid(id)) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
   const row = db
     .query<ProjectSourceRow, [string]>(
-      "SELECT id, archived_at, installation_id, repo_id, repo_full_name, branch FROM projects WHERE id = ?",
+      `SELECT id, archived_at, source_type, installation_id, repo_id, repo_full_name, branch, dockerfile_content
+       FROM projects WHERE id = ?`,
     )
     .get(id);
   if (!row) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
@@ -162,12 +172,31 @@ function loadProjectForDeploy(db: Database, id: string): ProjectSourceRow {
   return row;
 }
 
-/** ต้องเชื่อมต่อ repository/branch ก่อนถึง deploy ได้ */
-function assertProjectHasSource(project: ProjectSourceRow): asserts project is ProjectSourceRow & {
+type GitHubSourcedProject = ProjectSourceRow & {
+  source_type: "github";
   installation_id: string;
   repo_full_name: string;
   branch: string;
-} {
+};
+type DockerfileSourcedProject = ProjectSourceRow & {
+  source_type: "dockerfile";
+  dockerfile_content: string;
+};
+
+/** ต้องเชื่อมต่อ repository (github) หรือวาง Dockerfile ไว้แล้ว (dockerfile) ก่อนถึง deploy ได้ */
+function assertProjectHasSource(
+  project: ProjectSourceRow,
+): asserts project is GitHubSourcedProject | DockerfileSourcedProject {
+  if (project.source_type === "dockerfile") {
+    if (!project.dockerfile_content) {
+      throw new AppError(
+        "VALIDATION_ERROR",
+        "project นี้ยังไม่ได้วาง Dockerfile — ตั้งค่าที่ Source tab ก่อน",
+        { field: "source" },
+      );
+    }
+    return;
+  }
   if (!project.installation_id || !project.repo_full_name || !project.branch) {
     throw new AppError(
       "VALIDATION_ERROR",
@@ -177,6 +206,35 @@ function assertProjectHasSource(project: ProjectSourceRow): asserts project is P
       },
     );
   }
+}
+
+/** สร้าง DeployJobSource + commitSha ตาม source_type ปัจจุบันของ project — ใช้ทั้งใน /deploy และ /redeploy */
+async function resolveBuildSource(
+  db: Database,
+  registry: GitHubAppRegistry,
+  project: GitHubSourcedProject | DockerfileSourcedProject,
+): Promise<{ commitSha: string; source: DeployJobSource }> {
+  if (project.source_type === "dockerfile") {
+    return {
+      commitSha: dockerfileContentHash(project.dockerfile_content),
+      source: { type: "dockerfile", dockerfileContent: project.dockerfile_content },
+    };
+  }
+
+  const { installationId } = loadInstallationForProject(db, project.installation_id);
+  const service = await registry.getServiceForInstallation(installationId);
+  if (!service) {
+    throw new AppError("GITHUB_UNAVAILABLE", "GitHub App ของ installation นี้ไม่พร้อมใช้งาน");
+  }
+  const branch = await service.validateBranch(
+    installationId,
+    project.repo_full_name,
+    project.branch,
+  );
+  return {
+    commitSha: branch.commitSha,
+    source: { type: "github", installationId, repoFullName: project.repo_full_name },
+  };
 }
 
 interface InstallationLookup {
@@ -239,31 +297,20 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
         const session = requireSession();
         const project = loadProjectForDeploy(db, params.id);
         assertProjectHasSource(project);
-        const { installationId } = loadInstallationForProject(db, project.installation_id);
-
-        const service = await registry.getServiceForInstallation(installationId);
-        if (!service) {
-          throw new AppError("GITHUB_UNAVAILABLE", "GitHub App ของ installation นี้ไม่พร้อมใช้งาน");
-        }
-        const branch = await service.validateBranch(
-          installationId,
-          project.repo_full_name,
-          project.branch,
-        );
+        const { commitSha, source } = await resolveBuildSource(db, registry, project);
 
         const payload: DeployJobPayload = {
           kind: "build",
           trigger: "manual",
-          commitSha: branch.commitSha,
+          commitSha,
           commitMessage: null,
           commitAuthor: null,
-          installationId,
-          repoFullName: project.repo_full_name,
+          source,
         };
         const { deploymentId } = enqueueManualJob(db, {
           projectId: params.id,
           trigger: "manual",
-          commitSha: branch.commitSha,
+          commitSha,
           commitMessage: null,
           commitAuthor: null,
           payload,
@@ -273,7 +320,7 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
           action: "deploy_triggered",
           resourceType: "deployment",
           resourceId: deploymentId,
-          metadata: { projectId: params.id, trigger: "manual", commitSha: branch.commitSha },
+          metadata: { projectId: params.id, trigger: "manual", commitSha },
           ip: getClientIp(request),
         });
 
@@ -289,7 +336,6 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
         const session = requireSession();
         const project = loadProjectForDeploy(db, params.id);
         assertProjectHasSource(project);
-        const { installationId } = loadInstallationForProject(db, project.installation_id);
 
         const last = db
           .query<
@@ -303,19 +349,39 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
           throw new AppError("VALIDATION_ERROR", "ยังไม่เคย deploy project นี้มาก่อน — ใช้ deploy แทน");
         }
 
+        // source แบบ dockerfile-paste ไม่มี "commit เก่า" ให้ reuse เหมือน GitHub — redeploy คือ build
+        // เนื้อหาปัจจุบันของ project ซ้ำ (ปกติเหมือนเดิมเป๊ะ เว้นแต่เพิ่งแก้ไขที่ Source tab)
+        const { commitSha, source } =
+          project.source_type === "dockerfile"
+            ? {
+                commitSha: dockerfileContentHash(project.dockerfile_content),
+                source: {
+                  type: "dockerfile" as const,
+                  dockerfileContent: project.dockerfile_content,
+                },
+              }
+            : {
+                commitSha: last.commit_sha,
+                source: {
+                  type: "github" as const,
+                  installationId: loadInstallationForProject(db, project.installation_id)
+                    .installationId,
+                  repoFullName: project.repo_full_name,
+                },
+              };
+
         const payload: DeployJobPayload = {
           kind: "build",
           trigger: "redeploy",
-          commitSha: last.commit_sha,
+          commitSha,
           commitMessage: last.commit_message,
           commitAuthor: last.commit_author,
-          installationId,
-          repoFullName: project.repo_full_name,
+          source,
         };
         const { deploymentId } = enqueueManualJob(db, {
           projectId: params.id,
           trigger: "redeploy",
-          commitSha: last.commit_sha,
+          commitSha,
           commitMessage: last.commit_message,
           commitAuthor: last.commit_author,
           payload,
@@ -325,7 +391,7 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
           action: "deploy_triggered",
           resourceType: "deployment",
           resourceId: deploymentId,
-          metadata: { projectId: params.id, trigger: "redeploy", commitSha: last.commit_sha },
+          metadata: { projectId: params.id, trigger: "redeploy", commitSha },
           ip: getClientIp(request),
         });
 

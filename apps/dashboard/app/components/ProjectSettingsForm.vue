@@ -108,6 +108,28 @@ function validate(): boolean {
   return Object.keys(errors).length === 0;
 }
 
+// === นำเข้าจาก docker-compose.yml (Phase 13) — เติมฟอร์มเท่านั้น ไม่บันทึกอัตโนมัติ ===
+const showComposeImport = ref(false);
+const composeText = ref("");
+const composeResult = ref<ReturnType<typeof parseComposeForBuildConfig> | null>(null);
+
+function parseCompose() {
+  composeResult.value = composeText.value.trim()
+    ? parseComposeForBuildConfig(composeText.value)
+    : { ok: false, error: "วางเนื้อหา docker-compose.yml ก่อน" };
+}
+
+function applyComposeResult() {
+  if (!composeResult.value?.ok) return;
+  const { dockerfilePath, buildContext, internalPort } = composeResult.value.value;
+  form.dockerfilePath = dockerfilePath;
+  form.buildContext = buildContext;
+  if (internalPort !== null) form.internalPort = String(internalPort);
+  showComposeImport.value = false;
+  composeText.value = "";
+  composeResult.value = null;
+}
+
 async function save() {
   saved.value = false;
   saveError.value = "";
@@ -152,6 +174,67 @@ async function save() {
       <input v-model="form.name" :disabled="disabled" maxlength="100" />
       <em v-if="fieldErrors.name" class="field-error">{{ fieldErrors.name }}</em>
     </label>
+
+    <div class="compose-import">
+      <button
+        type="button"
+        class="ghost small"
+        :disabled="disabled"
+        @click="showComposeImport = !showComposeImport"
+      >
+        <AppIcon :name="showComposeImport ? 'chevronDown' : 'chevronRight'" :size="13" />
+        นำเข้าจาก docker-compose.yml
+      </button>
+
+      <div v-if="showComposeImport" class="compose-import-panel">
+        <p class="muted small">
+          วางเนื้อหา docker-compose.yml — ระบบจะดึง <code>build.dockerfile</code>,
+          <code>build.context</code> และ port แรกใน <code>ports:</code> จาก service แรกที่มี
+          <code>build:</code> มาเติมให้ (ใช้ได้ 1 container ต่อ project เท่านั้น)
+        </p>
+        <textarea
+          v-model="composeText"
+          rows="8"
+          spellcheck="false"
+          class="mono"
+          placeholder="services:&#10;  web:&#10;    build:&#10;      context: .&#10;      dockerfile: Dockerfile&#10;    ports:&#10;      - &quot;8080:80&quot;"
+        />
+        <div class="actions-end">
+          <button type="button" class="secondary small" @click="parseCompose">แยกค่า</button>
+        </div>
+
+        <p v-if="composeResult && !composeResult.ok" class="alert alert-bad">
+          <AppIcon name="alert" :size="15" />
+          <span>{{ composeResult.error }}</span>
+        </p>
+        <template v-else-if="composeResult?.ok">
+          <div class="inset compose-preview">
+            <dl class="kv">
+              <dt>Service</dt>
+              <dd><code>{{ composeResult.value.serviceName }}</code></dd>
+              <dt>Dockerfile path</dt>
+              <dd><code>{{ composeResult.value.dockerfilePath }}</code></dd>
+              <dt>Build context</dt>
+              <dd><code>{{ composeResult.value.buildContext }}</code></dd>
+              <dt>Internal port</dt>
+              <dd>
+                <code v-if="composeResult.value.internalPort">{{ composeResult.value.internalPort }}</code>
+                <span v-else class="muted">ไม่พบ — ต้องระบุเอง</span>
+              </dd>
+            </dl>
+          </div>
+          <p v-for="w in composeResult.value.warnings" :key="w" class="alert alert-warn tiny">
+            <AppIcon name="info" :size="14" />
+            <span>{{ w }}</span>
+          </p>
+          <div class="actions-end">
+            <button type="button" class="primary small" @click="applyComposeResult">
+              ใช้ค่านี้เติมฟอร์ม
+            </button>
+          </div>
+        </template>
+      </div>
+    </div>
 
     <label>
       <span>Dockerfile path</span>
@@ -217,5 +300,29 @@ async function save() {
   margin-top: var(--s-2);
   padding-top: var(--s-4);
   border-top: 1px solid var(--border-subtle);
+}
+
+.compose-import {
+  margin-bottom: var(--s-2);
+}
+.compose-import-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+  padding: var(--s-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r);
+}
+.compose-import-panel textarea {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 140px;
+}
+.compose-preview .kv {
+  margin: 0;
 }
 </style>

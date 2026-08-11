@@ -183,8 +183,7 @@ describe("enqueueManualJob", () => {
         commitSha: "a".repeat(40),
         commitMessage: null,
         commitAuthor: null,
-        installationId: 111,
-        repoFullName: "org/repo",
+        source: { type: "github", installationId: 111, repoFullName: "org/repo" },
       },
     });
 
@@ -229,8 +228,7 @@ describe("enqueueManualJob", () => {
           commitSha: "b".repeat(40),
           commitMessage: null,
           commitAuthor: null,
-          installationId: 111,
-          repoFullName: "org/repo",
+          source: { type: "github", installationId: 111, repoFullName: "org/repo" },
         },
       }),
     ).toThrow(AppError);
@@ -263,8 +261,7 @@ describe("enqueueManualJob", () => {
           commitSha: "a".repeat(40),
           commitMessage: null,
           commitAuthor: null,
-          installationId: 111,
-          repoFullName: "org/repo",
+          source: { type: "github", installationId: 111, repoFullName: "org/repo" },
         },
       });
     } catch (err) {

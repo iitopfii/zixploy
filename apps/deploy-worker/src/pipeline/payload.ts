@@ -4,6 +4,14 @@
  * แก้ shape ที่นี่ต้องแก้ควบคู่กับต้นทางเสมอ
  */
 
+/**
+ * source แยกตาม source_type ของ project (Phase 13) — 'github' ต้อง clone ผ่าน installation token,
+ * 'dockerfile' ใช้เนื้อหาที่ผู้ใช้วางเองตรง ๆ ไม่มี clone/token เลย
+ */
+export type DeployJobSource =
+  | { type: "github"; installationId: number; repoFullName: string }
+  | { type: "dockerfile"; dockerfileContent: string };
+
 export type DeployJobPayload =
   | {
       kind: "build";
@@ -11,8 +19,7 @@ export type DeployJobPayload =
       commitSha: string;
       commitMessage: string | null;
       commitAuthor: string | null;
-      installationId: number;
-      repoFullName: string;
+      source: DeployJobSource;
     }
   | { kind: "rollback"; targetDeploymentId: string; imageTag: string; imageDigest: string }
   | { kind: "restart" }

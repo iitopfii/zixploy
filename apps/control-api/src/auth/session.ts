@@ -21,8 +21,22 @@ export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  */
 export const SESSION_ROTATION_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-/** cookie ต้องตั้ง Secure flag เฉพาะ production (Traefik เป็น HTTPS เสมอ) — dev ใช้ http://localhost ได้ */
-export const secureCookies = process.env.NODE_ENV === "production";
+/**
+ * Secure flag ของ cookie — ตัดสินจาก scheme ของ ZIXPLOY_BASE_URL ไม่ใช่ NODE_ENV
+ *
+ * เดิมผูกกับ `NODE_ENV === "production"` โดยสมมติว่า "production = เข้าผ่าน HTTPS เสมอ" ซึ่งไม่จริง:
+ * การติดตั้งแบบเข้าด้วย IP ตรง ๆ (http://<ip>) เป็น deployment ปกติที่รองรับอยู่ — ตั้ง Secure
+ * บนนั้นเมื่อไหร่ browser ทิ้ง cookie ทันทีเพราะไม่ใช่ HTTPS แล้ว login ไม่ได้ทั้งระบบ
+ *
+ * scheme ของ base URL คือคำตอบตรงตัวของคำถาม "หน้าเว็บนี้เสิร์ฟผ่าน HTTPS ไหม" จึงเป็นเกณฑ์ที่
+ * ถูกต้องกว่า และทำให้ตั้ง NODE_ENV=production ได้ทุกที่โดยไม่ต้องกลัวล็อกตัวเองออกจากระบบ
+ * (NODE_ENV ยังคุมความเข้มของ origin-guard อยู่ — ดู plugins/origin-guard.ts)
+ */
+export function isSecureBaseUrl(baseUrl: string | undefined): boolean {
+  return (baseUrl ?? "").trim().toLowerCase().startsWith("https://");
+}
+
+export const secureCookies = isSecureBaseUrl(process.env.ZIXPLOY_BASE_URL);
 
 export interface SessionRow {
   id: string;

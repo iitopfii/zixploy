@@ -7,6 +7,17 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+### Fixed
+- Secure flag ของ session/CSRF cookie ตัดสินจาก scheme ของ `ZIXPLOY_BASE_URL` แทน `NODE_ENV` —
+  เดิมสมมติว่า "production = HTTPS เสมอ" ซึ่งไม่จริงกับการติดตั้งที่เข้าผ่าน IP ตรง ๆ (`http://<ip>`)
+  ทำให้ตั้ง `NODE_ENV=production` ไม่ได้เลยโดยไม่ล็อกตัวเองออกจากระบบ (browser ทิ้ง Secure cookie
+  ที่ส่งมาทาง HTTP)
+
+### Security
+- ตั้ง `NODE_ENV=production` ให้ control-api ใน `deploy/server/docker-compose.yml` — origin-guard
+  จะตัด `localhost`/`127.0.0.1` ออกจาก allowlist ตามที่ออกแบบไว้ (ก่อนหน้านี้ไม่เคยตั้งที่ไหนเลย
+  การป้องกัน Host header injection จึงไม่มีผลจริงบน production)
+
 ---
 
 ## [0.1.2] — 2026-08-13

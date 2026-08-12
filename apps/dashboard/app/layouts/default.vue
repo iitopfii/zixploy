@@ -21,6 +21,7 @@ const nav = [
   { to: "/databases", label: "Databases", icon: "database" as const, exact: false },
   { to: "/monitoring", label: "Monitoring", icon: "activity" as const, exact: false },
   { to: "/settings/github", label: "GitHub Apps", icon: "github" as const, exact: false },
+  { to: "/settings/system", label: "ตั้งค่าระบบ", icon: "settings" as const, exact: false },
 ];
 
 const loggingOut = ref(false);

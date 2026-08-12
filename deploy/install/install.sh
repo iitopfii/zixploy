@@ -9,7 +9,7 @@
 
 set -eu
 
-REPO_RAW="https://raw.githubusercontent.com/iitopfii/zixploy.com/main/deploy/install"
+REPO_RAW="https://raw.githubusercontent.com/iitopfii/zixploy/main/deploy/install"
 INSTALL_DIR="${ZIXPLOY_INSTALL_DIR:-/opt/zixploy}"
 SECRET_DIR="/etc/zixploy"
 MASTER_KEY="$SECRET_DIR/master.key"

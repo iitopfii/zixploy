@@ -128,6 +128,10 @@ describe("GET/PUT /system/settings", () => {
   });
 });
 
+/**
+ * ใช้ /auth/session เป็น path ทดสอบ ไม่ใช่ /system/health — health ได้รับยกเว้นการตรวจ Host
+ * โดยตั้งใจ (ดู HEALTH_PATH ใน plugins/origin-guard.ts) ใช้ที่นี่จะผ่านตลอดจนเทสต์ไม่มีความหมาย
+ */
 describe("origin-guard + dashboard domain (หัวใจของฟีเจอร์)", () => {
   test("Host ที่ไม่รู้จัก → INVALID_HOST, หลังตั้ง dashboard domain → ผ่านทันทีไม่ต้อง restart", async () => {
     // ตั้ง baseUrl เพื่อเปิด origin guard (allowlist ไม่ว่าง) — non-production ยังอนุโลม localhost
@@ -136,7 +140,7 @@ describe("origin-guard + dashboard domain (หัวใจของฟีเจ�
 
     const attempt = () =>
       ctx.app.handle(
-        new Request("http://dash.example.com/api/v1/system/health", {
+        new Request("http://dash.example.com/api/v1/auth/session", {
           headers: { host: "dash.example.com" },
         }),
       );
@@ -161,7 +165,7 @@ describe("origin-guard + dashboard domain (หัวใจของฟีเจ�
     await putSettings(ctx, null);
 
     const res = await ctx.app.handle(
-      new Request("http://dash.example.com/api/v1/system/health", {
+      new Request("http://dash.example.com/api/v1/auth/session", {
         headers: { host: "dash.example.com" },
       }),
     );
@@ -178,7 +182,7 @@ describe("origin-guard + dashboard domain (หัวใจของฟีเจ�
       baseUrl: "http://10.0.0.1",
     });
     const res = await app2.handle(
-      new Request("http://dash.example.com/api/v1/system/health", {
+      new Request("http://dash.example.com/api/v1/auth/session", {
         headers: { host: "dash.example.com" },
       }),
     );

@@ -85,7 +85,12 @@ services:
     environment:
       # origin-guard ตัด localhost/127.0.0.1 ออกจาก allowlist เฉพาะเมื่อ NODE_ENV=production
       # ไม่ตั้ง = ใครส่ง `Host: localhost` มาก็ผ่านการตรวจ Host header ตลอด (plugins/origin-guard.ts)
-      # ไม่กระทบ Secure flag ของ cookie — อันนั้นดูจาก scheme ของ ZIXPLOY_BASE_URL แทน (auth/session.ts)
+      #
+      # ต้องมีสองอย่างนี้ก่อนถึงตั้งค่านี้ได้โดยไม่ทำระบบล่ม (ทั้งคู่แก้แล้ว — อย่าถอยกลับ):
+      # 1. Secure flag ของ cookie ดูจาก scheme ของ ZIXPLOY_BASE_URL ไม่ใช่ NODE_ENV (auth/session.ts)
+      #    ไม่งั้นการติดตั้งแบบ http://<ip> จะ login ไม่ได้ทั้งระบบ
+      # 2. /system/health ยกเว้นการตรวจ Host (origin-guard.ts) ไม่งั้น Docker healthcheck ที่ยิง
+      #    `Host: 127.0.0.1:3001` ได้ 400 → container unhealthy → Traefik ข้าม → API ตายทั้งระบบ
       NODE_ENV: production
       ZIXPLOY_DB_PATH: /data/control.db
       ZIXPLOY_API_PORT: "3001"

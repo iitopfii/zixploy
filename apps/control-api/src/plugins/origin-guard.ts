@@ -1,4 +1,4 @@
-import { AppError } from "@zixploy/shared";
+import { API_PREFIX, AppError } from "@zixploy/shared";
 import { Elysia } from "elysia";
 import { log } from "../logger";
 
@@ -17,6 +17,20 @@ import { log } from "../logger";
  */
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/**
+ * Health endpoint ได้รับยกเว้นการตรวจ Host — infra ที่ probe มาต่อด้วย loopback/service IP เสมอ
+ * (Docker healthcheck ยิง `Host: 127.0.0.1:3001`, load balancer/uptime monitor ก็คล้ายกัน) ไม่มีทาง
+ * รู้ public hostname ที่ config ไว้
+ *
+ * ปลอดภัยที่จะยกเว้นเพราะ endpoint นี้ไม่ต้อง auth, เป็น GET อย่างเดียว, และคืน JSON คงที่ที่ไม่
+ * สะท้อน Host header กลับไปเลย — สิ่งที่ Host validation ป้องกัน (cache poisoning, ลิงก์ผิดใน
+ * response) จึงไม่มีช่องเกิดตรงนี้
+ *
+ * ถ้าไม่ยกเว้น: NODE_ENV=production จะตัด 127.0.0.1 ออกจาก allowlist → healthcheck ได้ 400 →
+ * container ขึ้น unhealthy → Traefik ข้าม container → API ตายทั้งระบบ (เคยเกิดจริงบน production)
+ */
+const HEALTH_PATH = `${API_PREFIX}/system/health`;
 
 function isProduction(): boolean {
   return process.env.NODE_ENV === "production";
@@ -82,6 +96,10 @@ export function originGuard(
   return new Elysia({ name: "origin-guard" }).onRequest(({ request }) => {
     // ไม่มี allowed host ที่ config ไว้ → ข้าม (ไม่บล็อกทั้งระบบเพราะ config ขาด)
     if (allowedHosts.size === 0) return;
+
+    // health endpoint ข้ามการตรวจ Host เสมอ (ดู HEALTH_PATH) — เทียบ pathname อย่างเดียว
+    // ไม่เอา query string มาเกี่ยว กัน `/other?x=/api/v1/system/health` เล็ดลอด
+    if (new URL(request.url).pathname === HEALTH_PATH) return;
 
     // HTTP/1.1 บังคับให้ client ส่ง Host header เสมอ — ไม่มีค่าได้เฉพาะ request ที่สร้างในหน่วยความจำ
     // ตรง ๆ (เช่นในเทสต์ที่เรียก app.handle() โดยไม่ผ่าน socket จริง) จึงข้ามแทนที่จะ throw

@@ -16,19 +16,23 @@ function makeApp(baseUrl?: string) {
   return buildApp(db, baseUrl ? { baseUrl } : {});
 }
 
+/**
+ * path สำหรับทดสอบการตรวจ Host — ต้อง **ไม่ใช่** /system/health ซึ่งได้รับยกเว้นโดยตั้งใจ
+ * (ดู HEALTH_PATH ใน origin-guard.ts) ใช้ /auth/session เพราะตอบได้โดยไม่ต้อง login
+ */
+const GUARDED_PATH = "http://localhost/api/v1/auth/session";
+
 describe("origin guard — Host header", () => {
   test("ไม่มี Host header เลย (เช่นเทสต์ที่สร้าง Request ตรง ๆ) -> ผ่าน", async () => {
     const app = makeApp("https://zixploy.example.com");
-    const res = await app.handle(new Request("http://localhost/api/v1/system/health"));
+    const res = await app.handle(new Request(GUARDED_PATH));
     expect(res.status).not.toBe(400);
   });
 
   test("Host ตรงกับ ZIXPLOY_BASE_URL -> ผ่าน", async () => {
     const app = makeApp("https://zixploy.example.com");
     const res = await app.handle(
-      new Request("http://localhost/api/v1/system/health", {
-        headers: { host: "zixploy.example.com" },
-      }),
+      new Request(GUARDED_PATH, { headers: { host: "zixploy.example.com" } }),
     );
     expect(res.status).not.toBe(400);
   });
@@ -36,9 +40,7 @@ describe("origin guard — Host header", () => {
   test("Host ปลอม/ไม่ตรง -> 400 INVALID_HOST", async () => {
     const app = makeApp("https://zixploy.example.com");
     const res = await app.handle(
-      new Request("http://localhost/api/v1/system/health", {
-        headers: { host: "evil.example.com" },
-      }),
+      new Request(GUARDED_PATH, { headers: { host: "evil.example.com" } }),
     );
     expect(res.status).toBe(400);
     expect((await json(res)).error.code).toBe("INVALID_HOST");
@@ -46,12 +48,41 @@ describe("origin guard — Host header", () => {
 
   test("localhost ยังผ่านได้เสมอใน dev/test แม้ตั้ง ZIXPLOY_BASE_URL เป็นโดเมนอื่น", async () => {
     const app = makeApp("https://zixploy.example.com");
+    const res = await app.handle(new Request(GUARDED_PATH, { headers: { host: "localhost" } }));
+    expect(res.status).not.toBe(400);
+  });
+});
+
+/**
+ * ยกเว้น health endpoint — เคยทำ production ล่มมาแล้ว:
+ * NODE_ENV=production ตัด 127.0.0.1 ออกจาก allowlist → Docker healthcheck (`Host: 127.0.0.1:3001`)
+ * ได้ 400 → container unhealthy → Traefik ข้าม container → API ตายทั้งระบบ
+ */
+describe("origin guard — health endpoint ต้องเข้าถึงได้เสมอ", () => {
+  const HEALTH = "http://localhost/api/v1/system/health";
+
+  test("Host: 127.0.0.1:3001 (Docker healthcheck) -> ผ่าน แม้ไม่อยู่ใน allowlist", async () => {
+    const app = makeApp("https://zixploy.example.com");
+    const res = await app.handle(new Request(HEALTH, { headers: { host: "127.0.0.1:3001" } }));
+    expect(res.status).toBe(200);
+    expect((await json(res)).status).toBeDefined();
+  });
+
+  test("Host แปลกปลอมสิ้นดี -> ยังผ่าน (endpoint ไม่สะท้อน Host กลับไป จึงไม่มีช่องโจมตี)", async () => {
+    const app = makeApp("https://zixploy.example.com");
+    const res = await app.handle(new Request(HEALTH, { headers: { host: "evil.example.com" } }));
+    expect(res.status).toBe(200);
+  });
+
+  test("การยกเว้นดูที่ pathname เท่านั้น — ปลอม query string ไม่ช่วยให้ path อื่นหลุด", async () => {
+    const app = makeApp("https://zixploy.example.com");
     const res = await app.handle(
-      new Request("http://localhost/api/v1/system/health", {
-        headers: { host: "localhost" },
+      new Request(`${GUARDED_PATH}?next=/api/v1/system/health`, {
+        headers: { host: "evil.example.com" },
       }),
     );
-    expect(res.status).not.toBe(400);
+    expect(res.status).toBe(400);
+    expect((await json(res)).error.code).toBe("INVALID_HOST");
   });
 });
 

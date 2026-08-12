@@ -13,6 +13,11 @@ Versioning: [Semantic Versioning](https://semver.org/)
   ทำให้ตั้ง `NODE_ENV=production` ไม่ได้เลยโดยไม่ล็อกตัวเองออกจากระบบ (browser ทิ้ง Secure cookie
   ที่ส่งมาทาง HTTP)
 
+- `/api/v1/system/health` ได้รับยกเว้นการตรวจ Host header — Docker healthcheck ยิงด้วย
+  `Host: 127.0.0.1:3001` ซึ่งไม่มีทางอยู่ใน allowlist ตอน `NODE_ENV=production` ทำให้ได้ 400 →
+  container unhealthy → Traefik ข้าม container → API ตายทั้งระบบ (endpoint นี้ไม่ต้อง auth,
+  เป็น GET, และไม่สะท้อน Host กลับใน response จึงยกเว้นได้โดยไม่เปิดช่องโจมตี)
+
 ### Security
 - ตั้ง `NODE_ENV=production` ให้ control-api ใน `deploy/server/docker-compose.yml` — origin-guard
   จะตัด `localhost`/`127.0.0.1` ออกจาก allowlist ตามที่ออกแบบไว้ (ก่อนหน้านี้ไม่เคยตั้งที่ไหนเลย

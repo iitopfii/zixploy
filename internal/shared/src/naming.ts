@@ -6,7 +6,9 @@
 import { LABELS, PROXY_NETWORK } from "./constants";
 
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
-const SHA_RE = /^[0-9a-f]{7,40}$/;
+// 7-40 = git SHA-1 (เต็ม/ย่อ); ถึง 64 = sha256 ของเนื้อหา Dockerfile ที่วางเอง (Phase 13 —
+// source แบบ dockerfile ไม่มี commit จริง control-api ใช้ hash เนื้อหาเป็น commitSha สังเคราะห์แทน)
+const SHA_RE = /^[0-9a-f]{7,64}$/;
 
 function assertUlid(value: string, field: string): void {
   if (!ULID_RE.test(value)) throw new Error(`${field} must be a ULID, got: ${value}`);

@@ -9,6 +9,16 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.1.2] — 2026-08-13
+
+### Fixed
+- Deploy จาก source แบบวาง Dockerfile ล้มเหลวทันที (0 วินาที) ด้วย "commitSha must be a hex SHA" —
+  ตัวตรวจรูปแบบใน `imageName()` จำกัด commit SHA ที่ 40 ตัวอักษร (git SHA-1) แต่ source แบบนี้ใช้
+  sha256 ของเนื้อหา (64 ตัว) เป็น commitSha สังเคราะห์ ขยาย validator เป็น 7–64 hex และเพิ่ม
+  regression test ทั้งฝั่ง shared และ worker pipeline (เทสต์เดิมบังเอิญใช้ค่า 40 ตัวพอดีเลยไม่จับ)
+
+---
+
 ## [0.1.1] — 2026-08-12
 
 ### Added

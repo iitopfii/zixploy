@@ -9,6 +9,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -318,13 +319,16 @@ describe("runBuildOrRollbackPipeline — dockerfile-paste source (Phase 13)", ()
     });
 
     const pastedContent = "FROM scratch\nCOPY . /app\n";
+    // commitSha ต้องยาว 64 ตัวเหมือนที่ control-api ส่งจริง (sha256 ของเนื้อหา) — regression:
+    // เคยใช้ค่า 40 ตัวในเทสต์ เลยไม่จับบั๊ก SHA_RE จำกัด 40 ที่ทำให้ deploy จริง fail ทันที
+    const contentSha256 = createHash("sha256").update(pastedContent).digest("hex");
     const result = await runBuildOrRollbackPipeline(
       deps,
       job,
       {
         kind: "build",
         trigger: "manual",
-        commitSha: "deadbeef".repeat(5),
+        commitSha: contentSha256,
         commitMessage: null,
         commitAuthor: null,
         source: { type: "dockerfile", dockerfileContent: pastedContent },

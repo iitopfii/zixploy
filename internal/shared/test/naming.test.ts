@@ -32,6 +32,18 @@ describe("naming", () => {
     expect(() => volumeName(projectId, "data; rm -rf /")).toThrow();
   });
 
+  test("รับ commitSha สังเคราะห์แบบ sha256 (64 hex) ของ dockerfile-paste source", () => {
+    // Phase 13: source แบบวาง Dockerfile ใช้ sha256 ของเนื้อหาแทน git commit — ยาว 64 ตัว
+    // regression: SHA_RE เดิมจำกัด 40 ตัว ทำให้ deploy แบบนี้ fail ทันทีก่อนเริ่ม build
+    const sha256 = "f".repeat(64);
+    expect(imageName(projectId, sha256, deploymentId)).toBe(
+      `zixploy/${projectId.toLowerCase()}:fffffff-${deploymentId.toLowerCase()}`,
+    );
+    // เกิน 64 หรือมีอักขระนอก hex ยังต้องถูกปฏิเสธเหมือนเดิม
+    expect(() => imageName(projectId, "f".repeat(65), deploymentId)).toThrow();
+    expect(() => imageName(projectId, "F".repeat(64), deploymentId)).toThrow();
+  });
+
   test("labels ครบตาม ownership convention", () => {
     expect(deploymentLabels(projectId, deploymentId)).toEqual({
       "platform.managed": "true",

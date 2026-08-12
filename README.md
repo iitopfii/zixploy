@@ -36,12 +36,18 @@ curl -sSL https://raw.githubusercontent.com/iitopfii/zixploy.com/main/deploy/ins
 
 | ตัวแปร | ค่าเริ่มต้น | ใช้ทำอะไร |
 |---|---|---|
+| `ZIXPLOY_DOMAIN` | ไม่ตั้ง (ใช้ IP ตรง ๆ) | เข้าระบบผ่าน domain แทน IP (เช่น อยู่หลัง Cloudflare) — **ต้องตั้งถ้าเข้าผ่าน domain** ไม่งั้น login จะเจอ `INVALID_HOST` เพราะระบบเทียบ Host header กับค่านี้ตรง ๆ |
 | `ZIXPLOY_HTTP_PORT` | `80` | port ฝั่ง host สำหรับ HTTP — เปลี่ยนถ้า port 80 ถูกใช้อยู่แล้ว |
 | `ZIXPLOY_HTTPS_PORT` | `443` | port ฝั่ง host สำหรับ HTTPS |
 | `ZIXPLOY_INSTALL_DIR` | `/opt/zixploy` | ตำแหน่งที่เก็บ `docker-compose.yml`/`.env` บนเครื่อง |
 | `ZIXPLOY_SERVER_IP` | ตรวจจับอัตโนมัติ | บังคับ public IP เอง — ใช้เมื่อเครื่องอยู่หลัง NAT/ตรวจจับอัตโนมัติผิด |
 | `ZIXPLOY_VERSION` | เวอร์ชันล่าสุดบน registry | ปักเวอร์ชันที่ต้องการแทนการติดตั้งล่าสุดเสมอ (เช่น `0.1.0`) |
 | `ZIXPLOY_ACME_EMAIL` | ว่าง | อีเมลรับแจ้งเตือนก่อน TLS certificate หมดอายุจาก Let's Encrypt |
+
+> **เข้าผ่าน domain (เช่นหลัง Cloudflare)?** ตั้ง `ZIXPLOY_DOMAIN=zixploy.example.com` ตอนติดตั้ง — ระบบจะตั้ง
+> `ZIXPLOY_BASE_URL=https://zixploy.example.com` ให้อัตโนมัติ ถ้าไม่ตั้งแล้วเข้าผ่าน domain จะ login
+> ไม่ได้เลย (`INVALID_HOST`) เพราะค่าเริ่มต้นคือ IP ของเครื่อง ไม่ใช่ domain ที่ใช้จริง — ติดตั้งไปแล้วแก้ทีหลัง
+> ได้โดยแก้ `ZIXPLOY_BASE_URL` ใน `.env` เองแล้ว `docker compose up -d control-api`
 
 ตัวอย่างตั้งหลายค่าพร้อมกัน:
 

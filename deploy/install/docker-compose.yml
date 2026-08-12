@@ -60,6 +60,10 @@ services:
     container_name: zixploy-control-api
     restart: unless-stopped
     environment:
+      # secureCookies (auth/session.ts) และ origin-guard เข้มงวดขึ้นเฉพาะตอน NODE_ENV=production
+      # (session/CSRF cookie ได้ Secure flag, allowlist ตัด localhost/127.0.0.1 ออก) — ไม่ตั้งค่านี้
+      # ทั้งสองจุดจะหลวมแบบ dev ตลอดแม้รันจริง ต้องตั้งเสมอในทุก environment ที่รับ traffic จริง
+      NODE_ENV: production
       ZIXPLOY_DB_PATH: /data/control.db
       ZIXPLOY_API_PORT: "3001"
       ZIXPLOY_LOG_LEVEL: info

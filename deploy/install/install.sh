@@ -203,9 +203,20 @@ else
     fi
   fi
 
-  # BASE_URL ต้องมี port ต่อท้ายด้วยถ้าไม่ใช่ 80 — ไม่งั้น webhook/callback URL ที่ระบบ
-  # generate ให้ (เช่น GitHub App manifest) จะชี้ไปที่ port 80 ที่ไม่มีอะไรฟังอยู่จริง
-  if [ "$HTTP_PORT" = "80" ]; then
+  # BASE_URL ต้องตรงกับ host ที่ browser ใช้เข้าจริงเป๊ะ — origin-guard (plugins/origin-guard.ts)
+  # ปฏิเสธ request ที่ Host header ไม่ตรงกับค่านี้ (INVALID_HOST) และ GitHub App manifest/webhook
+  # URL ก็ generate จากค่านี้เหมือนกัน ถ้าเข้าผ่าน domain (เช่นอยู่หลัง Cloudflare) ต้องตั้ง
+  # ZIXPLOY_DOMAIN ไม่งั้นค่า default จะเป็น IP ตรง ๆ ซึ่ง login ผ่าน domain จะโดน INVALID_HOST
+  if [ -n "${ZIXPLOY_DOMAIN:-}" ]; then
+    if [ "$HTTPS_PORT" = "443" ]; then
+      BASE_URL_VALUE="https://$ZIXPLOY_DOMAIN"
+    else
+      BASE_URL_VALUE="https://$ZIXPLOY_DOMAIN:$HTTPS_PORT"
+    fi
+    ok "ใช้ domain: $ZIXPLOY_DOMAIN"
+  elif [ "$HTTP_PORT" = "80" ]; then
+    # ไม่มี port ต่อท้ายด้วยถ้าไม่ใช่ 80 — ไม่งั้น webhook/callback URL ที่ระบบ generate ให้
+    # (เช่น GitHub App manifest) จะชี้ไปที่ port 80 ที่ไม่มีอะไรฟังอยู่จริง
     BASE_URL_VALUE="http://$SERVER_IP"
   else
     BASE_URL_VALUE="http://$SERVER_IP:$HTTP_PORT"
@@ -215,6 +226,8 @@ else
 # สร้างโดย install.sh — แก้ได้ แล้วรัน: cd $INSTALL_DIR && docker compose up -d
 ZIXPLOY_VERSION=$VERSION
 SERVER_IP=$SERVER_IP
+# host ที่ browser ต้องเข้าให้ตรงเป๊ะ — เปลี่ยนทีหลังต้องแก้ทั้งบรรทัดนี้ด้วย ไม่ใช่แค่ DNS
+# (origin-guard เทียบ Host header กับค่านี้ตรง ๆ)
 ZIXPLOY_BASE_URL=$BASE_URL_VALUE
 ZIXPLOY_INSTALL_DIR=$INSTALL_DIR
 # port ฝั่ง host ที่ Traefik รับทราฟฟิก — เปลี่ยนจาก 80/443 ได้ แต่ HTTP_PORT != 80 แปลว่า

@@ -9,6 +9,7 @@ export interface EditableProject {
   dockerfilePath: string;
   buildContext: string;
   internalPort: number | null;
+  exposedPort: number | null;
   healthCheckPath: string | null;
   autoDeploy: boolean;
   archivedAt: number | null;
@@ -24,6 +25,7 @@ const form = reactive({
   dockerfilePath: "",
   buildContext: "",
   internalPort: "" as string,
+  exposedPort: "" as string,
   healthCheckPath: "",
   autoDeploy: false,
 });
@@ -44,6 +46,7 @@ function resetForm(keepStatus = false) {
   form.dockerfilePath = props.project.dockerfilePath;
   form.buildContext = props.project.buildContext;
   form.internalPort = props.project.internalPort === null ? "" : String(props.project.internalPort);
+  form.exposedPort = props.project.exposedPort === null ? "" : String(props.project.exposedPort);
   form.healthCheckPath = props.project.healthCheckPath ?? "";
   form.autoDeploy = props.project.autoDeploy;
   fieldErrors.value = {};
@@ -73,6 +76,8 @@ const dirty = computed(
     form.buildContext !== props.project.buildContext ||
     form.internalPort !==
       (props.project.internalPort === null ? "" : String(props.project.internalPort)) ||
+    form.exposedPort !==
+      (props.project.exposedPort === null ? "" : String(props.project.exposedPort)) ||
     form.healthCheckPath !== (props.project.healthCheckPath ?? "") ||
     form.autoDeploy !== props.project.autoDeploy,
 );
@@ -101,6 +106,15 @@ function validate(): boolean {
     const port = Number(form.internalPort);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       errors.internalPort = "port ต้องเป็นจำนวนเต็มระหว่าง 1–65535";
+    }
+  }
+
+  if (form.exposedPort !== "") {
+    const port = Number(form.exposedPort);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      errors.exposedPort = "port ต้องเป็นจำนวนเต็มระหว่าง 1–65535";
+    } else if (form.internalPort === "") {
+      errors.exposedPort = "ต้องระบุ internal port ก่อนจึงจะ expose port ออก host ได้";
     }
   }
 
@@ -142,6 +156,7 @@ async function save() {
       dockerfilePath: form.dockerfilePath.trim(),
       buildContext: form.buildContext.trim(),
       internalPort: form.internalPort === "" ? null : Number(form.internalPort),
+      exposedPort: form.exposedPort === "" ? null : Number(form.exposedPort),
       healthCheckPath: form.healthCheckPath.trim() === "" ? null : form.healthCheckPath.trim(),
       autoDeploy: form.autoDeploy,
     });
@@ -255,6 +270,16 @@ async function save() {
     </label>
 
     <label>
+      <span>Exposed port — เปิด port บนเครื่อง server ให้เข้าถึง container ตรง ๆ (ว่าง = ผ่าน domain เท่านั้น)</span>
+      <input v-model="form.exposedPort" :disabled="disabled" inputmode="numeric" placeholder="3100" />
+      <em v-if="fieldErrors.exposedPort" class="field-error">{{ fieldErrors.exposedPort }}</em>
+      <em v-if="form.exposedPort !== '' && !fieldErrors.exposedPort" class="field-hint-inline">
+        เข้าถึงได้ที่ <code>&lt;IP เซิร์ฟเวอร์&gt;:{{ form.exposedPort }}</code> → container:{{ form.internalPort || "?" }}
+        — deploy ครั้งถัดไปจะมี downtime สั้น ๆ ระหว่างสลับ container (host port ผูกได้ทีละตัว)
+      </em>
+    </label>
+
+    <label>
       <span>Health check path</span>
       <input v-model="form.healthCheckPath" :disabled="disabled" placeholder="/healthz" />
     </label>
@@ -295,6 +320,13 @@ async function save() {
   font-style: normal;
   font-size: var(--t-xs);
   color: var(--bad);
+}
+.field-hint-inline {
+  display: block;
+  margin-top: var(--s-2);
+  font-style: normal;
+  font-size: var(--t-xs);
+  color: var(--text-muted);
 }
 .form-footer {
   margin-top: var(--s-2);

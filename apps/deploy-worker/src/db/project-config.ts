@@ -11,6 +11,8 @@ export interface ProjectConfig {
   buildContext: string;
   targetStage: string | null;
   internalPort: number | null;
+  /** host port ที่ publish เข้า internalPort ตรง ๆ — null = route ผ่าน Traefik อย่างเดียว (Phase 14) */
+  exposedPort: number | null;
   healthCheckPath: string | null;
   healthCheckIntervalSec: number;
   healthCheckTimeoutSec: number;
@@ -28,6 +30,7 @@ interface ProjectConfigRow {
   build_context: string;
   target_stage: string | null;
   internal_port: number | null;
+  exposed_port: number | null;
   health_check_path: string | null;
   health_check_interval_sec: number;
   health_check_timeout_sec: number;
@@ -39,7 +42,7 @@ interface ProjectConfigRow {
   deploy_timeout_sec: number;
 }
 
-const SELECT_COLUMNS = `id, dockerfile_path, build_context, target_stage, internal_port,
+const SELECT_COLUMNS = `id, dockerfile_path, build_context, target_stage, internal_port, exposed_port,
   health_check_path, health_check_interval_sec, health_check_timeout_sec, health_check_retries,
   start_command, cpu_limit, memory_limit_mb, restart_policy, deploy_timeout_sec`;
 
@@ -55,6 +58,7 @@ export function loadProjectConfig(db: Database, projectId: string): ProjectConfi
     buildContext: row.build_context,
     targetStage: row.target_stage,
     internalPort: row.internal_port,
+    exposedPort: row.exposed_port,
     healthCheckPath: row.health_check_path,
     healthCheckIntervalSec: row.health_check_interval_sec,
     healthCheckTimeoutSec: row.health_check_timeout_sec,

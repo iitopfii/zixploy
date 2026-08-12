@@ -17,6 +17,7 @@ interface ProjectRow {
   dockerfile_path: string;
   build_context: string;
   internal_port: number | null;
+  exposed_port: number | null;
   health_check_path: string | null;
   archived_at: number | null;
   degraded_at: number | null;
@@ -59,6 +60,8 @@ const projectSchema = t.Object({
   dockerfilePath: t.String(),
   buildContext: t.String(),
   internalPort: t.Nullable(t.Number()),
+  /** host port ที่ map เข้า internal port ตรง ๆ (เช่น host 3100 → container 3000) — null = ไม่ expose */
+  exposedPort: t.Nullable(t.Number()),
   healthCheckPath: t.Nullable(t.String()),
   archivedAt: t.Nullable(t.Number()),
   createdAt: t.Number(),
@@ -77,6 +80,7 @@ const updateBody = t.Object({
   dockerfilePath: t.Optional(t.String({ minLength: 1, maxLength: 255 })),
   buildContext: t.Optional(t.String({ minLength: 1, maxLength: 255 })),
   internalPort: t.Optional(t.Nullable(t.Integer({ minimum: 1, maximum: 65535 }))),
+  exposedPort: t.Optional(t.Nullable(t.Integer({ minimum: 1, maximum: 65535 }))),
   healthCheckPath: t.Optional(t.Nullable(t.String({ maxLength: 255 }))),
   autoDeploy: t.Optional(t.Boolean()),
 });
@@ -96,6 +100,7 @@ function toProject(row: ProjectRow) {
     dockerfilePath: row.dockerfile_path,
     buildContext: row.build_context,
     internalPort: row.internal_port,
+    exposedPort: row.exposed_port,
     healthCheckPath: row.health_check_path,
     archivedAt: row.archived_at,
     createdAt: row.created_at,
@@ -113,7 +118,7 @@ function toProject(row: ProjectRow) {
  * ใช้ p. prefix เพราะ query หลักต้อง alias projects เป็น p
  */
 const SELECT_COLUMNS = `p.id, p.name, p.status, p.source_type, p.installation_id, p.repo_id, p.repo_full_name,
-  p.branch, p.auto_deploy, p.dockerfile_path, p.build_context, p.internal_port,
+  p.branch, p.auto_deploy, p.dockerfile_path, p.build_context, p.internal_port, p.exposed_port,
   p.health_check_path, p.archived_at, p.degraded_at, p.created_at, p.updated_at,
   (SELECT d.status FROM deployments d
     WHERE d.project_id = p.id AND d.status NOT IN ('succeeded','failed','cancelled')
@@ -133,6 +138,42 @@ function loadProject(db: Database, id: string): ProjectRow {
     .get(id);
   if (!row) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
   return row;
+}
+
+/**
+ * exposed port ห้ามชนกับ project อื่น (unique index กันอยู่แล้วแต่ error message ห่วย),
+ * managed service (คนละตาราง — constraint ข้ามตารางทำไม่ได้), และ port ที่ระบบใช้เอง
+ */
+const RESERVED_PORTS = new Set([80, 443, 3000, 3001]);
+
+function assertExposedPortAvailable(db: Database, port: number, projectId: string): void {
+  if (RESERVED_PORTS.has(port)) {
+    throw new AppError("VALIDATION_ERROR", `port ${port} ถูกใช้โดยระบบ Zixploy เอง — เลือก port อื่น`, {
+      field: "exposedPort",
+    });
+  }
+  const projectHit = db
+    .query<{ name: string }, [number, string]>(
+      "SELECT name FROM projects WHERE exposed_port = ? AND id != ? AND archived_at IS NULL",
+    )
+    .get(port, projectId);
+  if (projectHit) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      `port ${port} ถูกใช้โดย project "${projectHit.name}" อยู่แล้ว`,
+      { field: "exposedPort" },
+    );
+  }
+  const serviceHit = db
+    .query<{ name: string }, [number]>("SELECT name FROM services WHERE exposed_port = ?")
+    .get(port);
+  if (serviceHit) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      `port ${port} ถูกใช้โดย database "${serviceHit.name}" อยู่แล้ว`,
+      { field: "exposedPort" },
+    );
+  }
 }
 
 /** path ต้องเป็น relative และห้ามออกนอก build context (กัน path traversal ตั้งแต่ชั้น API) */
@@ -199,6 +240,9 @@ export function projectRoutes(db: Database) {
         if (body.buildContext !== undefined) {
           assertSafeRelativePath(body.buildContext, "buildContext");
         }
+        if (body.exposedPort != null) {
+          assertExposedPortAvailable(db, body.exposedPort, params.id);
+        }
 
         const fields: string[] = [];
         const values: (string | number | null)[] = [];
@@ -211,6 +255,7 @@ export function projectRoutes(db: Database) {
         if (body.dockerfilePath !== undefined) set("dockerfile_path", body.dockerfilePath);
         if (body.buildContext !== undefined) set("build_context", body.buildContext);
         if (body.internalPort !== undefined) set("internal_port", body.internalPort);
+        if (body.exposedPort !== undefined) set("exposed_port", body.exposedPort);
         if (body.healthCheckPath !== undefined) set("health_check_path", body.healthCheckPath);
         if (body.autoDeploy !== undefined) set("auto_deploy", body.autoDeploy ? 1 : 0);
 

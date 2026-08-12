@@ -103,6 +103,10 @@ export async function runBuildOrRollbackPipeline(
   // ต้อง cleanup() เสมอไม่ว่าจบแบบไหน กัน timer ค้าง/leak
   const deployTimeout = createDeployTimeout(signal, project.deployTimeoutSec * 1000);
 
+  // exposed port (Phase 14): container เก่าถือ host port อยู่ — candidate จะ start ไม่ขึ้นจนกว่า
+  // จะหยุดของเก่าก่อน จำ id ไว้เพื่อ restart คืนถ้า candidate ล้มเหลว (ลด downtime จาก failure)
+  let stoppedOldForPort: string | null = null;
+
   try {
     let imageTag: string;
     let imageDigest: string;
@@ -262,6 +266,25 @@ export async function runBuildOrRollbackPipeline(
       });
     }
 
+    // exposed port ทำ start-before-stop ไม่ได้ (host port bind ได้ container เดียว) — หยุดของเก่า
+    // ก่อน start candidate ยอมแลก downtime สั้น ๆ เฉพาะ project ที่เปิดฟีเจอร์นี้เอง ผู้ใช้ที่ต้อง
+    // zero-downtime แท้ควร route ผ่าน domain (Traefik) แทนการ expose port ตรง
+    const publishExposedPort = project.exposedPort != null && project.internalPort != null;
+    if (project.exposedPort != null && project.internalPort == null) {
+      safeLog("[port] ⚠️  ตั้ง exposed port ไว้แต่ยังไม่ได้ระบุ internal port — ข้ามการ publish port รอบนี้");
+    }
+    if (publishExposedPort) {
+      const oldId = findActiveContainerId(db, job.projectId);
+      if (oldId) {
+        safeLog(
+          `[port] exposed port ${project.exposedPort} — หยุด container เก่าก่อน start ตัวใหม่ ` +
+            "(host port ผูกได้ container เดียว จึงมี downtime สั้น ๆ ระหว่างสลับ)",
+        );
+        await deps.docker.stopContainer(oldId);
+        stoppedOldForPort = oldId;
+      }
+    }
+
     const { containerId } = await deps.docker.createContainer({
       name: cName,
       image: imageTag,
@@ -273,6 +296,15 @@ export async function runBuildOrRollbackPipeline(
       networkName: PROXY_NETWORK,
       // runtimeEnv เป็น Record<string, string> เสมอ (อาจว่าง) — ไม่ส่ง undefined
       env: envInject.runtimeEnv,
+      // exposed port (Phase 14) — internalPort ยืนยันแล้วว่าไม่ null ผ่าน publishExposedPort
+      ...(publishExposedPort
+        ? {
+            publishPorts: [
+              // biome-ignore lint/style/noNonNullAssertion: publishExposedPort การันตี non-null แล้ว
+              { hostPort: project.exposedPort!, containerPort: project.internalPort! },
+            ],
+          }
+        : {}),
       // Named volume mounts — Docker volumes สร้างแล้วในขั้นตอนก่อนหน้า
       ...(activeVolumes.length > 0
         ? {
@@ -344,6 +376,15 @@ export async function runBuildOrRollbackPipeline(
 
     // ลบ candidate container ถ้าสร้างไปแล้วบางส่วน (health check ไม่ผ่าน ฯลฯ) — ของเก่าไม่ถูกแตะเลย (ADR-0004)
     await deps.docker.removeContainer(cName, { force: true }).catch(() => {});
+
+    // exposed port path หยุดของเก่าไปก่อน start candidate — restart คืนให้บริการต่อ (best-effort)
+    if (stoppedOldForPort) {
+      await deps.docker.startContainer(stoppedOldForPort).catch(() => {
+        deps.onLog(
+          `[port] restart container เก่า (${stoppedOldForPort}) คืนไม่สำเร็จ — service อาจหยุดจนกว่าจะ deploy/restart ใหม่`,
+        );
+      });
+    }
 
     // เช็คว่ายัง non-terminal ก่อน mark failed — กัน race กับ recoverStaleLeases ที่อาจ mark ไปแล้ว
     // (ถ้า mark ซ้ำ assertTransition จะ throw เพราะ 'failed' เป็น terminal state)

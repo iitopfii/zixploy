@@ -10,8 +10,8 @@
 
 Auto Deploy · Zero-downtime · Domain + HTTPS อัตโนมัติ · ฐานข้อมูลสำเร็จรูป · Environment Variables เข้ารหัส · Monitoring · Rollback · อัปเดตในตัว
 
-[![CI](https://github.com/iitopfii/zixploy.com/actions/workflows/ci.yml/badge.svg)](https://github.com/iitopfii/zixploy.com/actions/workflows/ci.yml)
-[![Release](https://github.com/iitopfii/zixploy.com/actions/workflows/release.yml/badge.svg)](https://github.com/iitopfii/zixploy.com/actions/workflows/release.yml)
+[![CI](https://github.com/iitopfii/zixploy/actions/workflows/ci.yml/badge.svg)](https://github.com/iitopfii/zixploy/actions/workflows/ci.yml)
+[![Release](https://github.com/iitopfii/zixploy/actions/workflows/release.yml/badge.svg)](https://github.com/iitopfii/zixploy/actions/workflows/release.yml)
 
 </div>
 
@@ -20,7 +20,7 @@ Auto Deploy · Zero-downtime · Domain + HTTPS อัตโนมัติ · �
 ## ติดตั้ง
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/iitopfii/zixploy.com/main/deploy/install/install.sh | sudo sh
+curl -sSL https://raw.githubusercontent.com/iitopfii/zixploy/main/deploy/install/install.sh | sudo sh
 ```
 
 ตัวติดตั้งจะตรวจความพร้อมของเครื่อง ติดตั้ง Docker ให้ถ้ายังไม่มี สร้าง encryption key
@@ -49,15 +49,16 @@ curl -sSL https://raw.githubusercontent.com/iitopfii/zixploy.com/main/deploy/ins
 > ไม่ได้เลย (`INVALID_HOST`) เพราะค่าเริ่มต้นคือ IP ของเครื่อง ไม่ใช่ domain ที่ใช้จริง — ติดตั้งไปแล้วแก้ทีหลัง
 > ได้โดยแก้ `ZIXPLOY_BASE_URL` ใน `.env` เองแล้ว `docker compose up -d control-api`
 
-ตัวอย่างตั้งหลายค่าพร้อมกัน:
+ตัวอย่างตั้งหลายค่าพร้อมกัน — **ใส่ตัวแปรหลัง `sudo` (หรือหน้า `sh` ถ้าเป็น root อยู่แล้ว)**:
 
 ```bash
-ZIXPLOY_HTTP_PORT=8080 ZIXPLOY_HTTPS_PORT=8443 ZIXPLOY_ACME_EMAIL=ops@example.com \
-  curl -sSL https://raw.githubusercontent.com/iitopfii/zixploy.com/main/deploy/install/install.sh | sudo -E sh
+curl -sSL https://raw.githubusercontent.com/iitopfii/zixploy/main/deploy/install/install.sh \
+  | sudo ZIXPLOY_HTTP_PORT=8080 ZIXPLOY_HTTPS_PORT=8443 ZIXPLOY_ACME_EMAIL=ops@example.com sh
 ```
 
-> `sudo -E` (ตัวใหญ่) จำเป็นเพื่อส่งต่อ environment variable ที่ตั้งไว้ให้สคริปต์ที่รันด้วย root —
-> ถ้าใช้ `sudo` เฉย ๆ ค่าที่ตั้งไว้จะหายและกลับไปใช้ค่าเริ่มต้นทั้งหมด
+> ห้ามใส่ตัวแปรไว้หน้า `curl` (`VAR=x curl ... | sudo sh`) — แบบนั้นตัวแปรไปอยู่กับ process ของ
+> `curl` ฝั่งซ้ายของ pipe เท่านั้น ตัวสคริปต์ที่รันผ่าน `sudo sh` ฝั่งขวาจะไม่เห็นค่าเลย
+> และกลับไปใช้ค่าเริ่มต้นทั้งหมดแบบเงียบ ๆ
 
 ทุกค่าถูกจดไว้ใน `.env` **ตอนติดตั้งครั้งแรกเท่านั้น** — รันตัวติดตั้งซ้ำบนเครื่องที่มีอยู่แล้วจะไม่ถามใหม่
 หรือเขียนทับค่าที่ตั้งไว้ (ปลอดภัยสำหรับรันซ้ำเพื่อซ่อมการติดตั้งที่ค้างกลางทาง) เปลี่ยนค่าทีหลังได้เสมอ

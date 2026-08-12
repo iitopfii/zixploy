@@ -56,12 +56,28 @@ function hostOf(value: string): string | null {
   }
 }
 
-export function originGuard(baseUrl = process.env.ZIXPLOY_BASE_URL) {
+export interface OriginGuardOptions {
+  /**
+   * Host เพิ่มเติมที่อนุญาต — เรียกทุก request (ต้องถูกมาก ห้ามแตะ I/O)
+   * ใช้กับ dashboard domain ที่ตั้งจาก UI (Phase 14, settings/store.ts cache ใน memory)
+   * คืน null = ไม่มีค่าเพิ่ม
+   */
+  extraHost?: () => string | null;
+}
+
+export function originGuard(
+  baseUrl = process.env.ZIXPLOY_BASE_URL,
+  options: OriginGuardOptions = {},
+) {
   const allowedHosts = parseAllowedHosts(baseUrl);
+  const { extraHost } = options;
 
   if (allowedHosts.size === 0) {
     log.warn("origin guard ปิดใช้งาน — ไม่ได้ตั้ง ZIXPLOY_BASE_URL ใน production ตั้งค่าก่อน deploy จริง");
   }
+
+  const isAllowed = (host: string): boolean =>
+    allowedHosts.has(host) || (extraHost?.() ?? null) === host;
 
   return new Elysia({ name: "origin-guard" }).onRequest(({ request }) => {
     // ไม่มี allowed host ที่ config ไว้ → ข้าม (ไม่บล็อกทั้งระบบเพราะ config ขาด)
@@ -72,7 +88,7 @@ export function originGuard(baseUrl = process.env.ZIXPLOY_BASE_URL) {
     const hostHeader = request.headers.get("host");
     if (hostHeader) {
       const requestHost = hostOf(hostHeader);
-      if (!requestHost || !allowedHosts.has(requestHost)) {
+      if (!requestHost || !isAllowed(requestHost)) {
         throw new AppError("INVALID_HOST", "Host header ไม่ถูกต้องหรือไม่ได้รับอนุญาต");
       }
     }
@@ -83,7 +99,7 @@ export function originGuard(baseUrl = process.env.ZIXPLOY_BASE_URL) {
     const origin = request.headers.get("origin");
     if (!origin) return;
     const originHost = hostOf(origin);
-    if (!originHost || !allowedHosts.has(originHost)) {
+    if (!originHost || !isAllowed(originHost)) {
       throw new AppError("INVALID_ORIGIN", "Origin ของ request ไม่ได้รับอนุญาต");
     }
   });

@@ -7,10 +7,31 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+---
+
+## [0.2.0] — 2026-08-12
+
 ### Added
+- **Exposed port ราย project** — เปิด host port ให้เข้าถึง container ตรง ๆ (เช่น host `3100` →
+  container `3000`) ตั้งได้ที่ project → ตั้งค่า ตรวจ conflict กับ project อื่น/managed
+  service/port ของระบบให้อัตโนมัติ
+  - deploy ของ project ที่เปิด exposed port มี downtime สั้น ๆ ระหว่างสลับ container
+    (host port ผูกได้ container เดียว จึงทำ start-before-stop ไม่ได้) — ถ้า deploy ใหม่
+    ล้มเหลว ระบบ start container เก่าคืนให้อัตโนมัติ
+- **Dashboard Domain** — หน้าตั้งค่าระบบใหม่ ตั้ง domain ที่ใช้เข้า dashboard ได้จาก UI
+  มีผลทันทีไม่ต้อง restart (แก้ปัญหา `INVALID_HOST` โดยไม่ต้อง SSH ไปแก้ `.env`)
+  พร้อมแสดง IP ของเครื่อง (A record) ให้คัดลอกไปตั้งค่า DNS
 - Source แบบวาง Dockerfile ตรง ๆ แทนการเชื่อม GitHub repository (dashboard → Source tab)
 - นำเข้า build config จาก docker-compose.yml (dashboard → Settings)
 - ตัวติดตั้ง (`install.sh`) เปลี่ยน HTTP/HTTPS port ได้ผ่าน `ZIXPLOY_HTTP_PORT`/`ZIXPLOY_HTTPS_PORT`
+- ตัวติดตั้งรองรับ `ZIXPLOY_DOMAIN` — ติดตั้งพร้อมใช้ domain ตั้งแต่แรกโดยไม่เจอ `INVALID_HOST`
+
+### Fixed
+- ตัวติดตั้งตั้ง `NODE_ENV=production` ให้ control-api — ก่อนหน้านี้ session/CSRF cookie
+  ไม่มี `Secure` flag และ origin-guard อนุโลม `Host: localhost` ตลอดแม้รันจริง
+- คำสั่งติดตั้งแบบตั้ง environment variable ใน README — รูปแบบเดิม (`VAR=x curl | sudo -E sh`)
+  ตัวแปรไม่ถึงสคริปต์จริง เปลี่ยนเป็น `curl | sudo VAR=x sh`
+- URL repository ใหม่หลังย้ายเป็น `github.com/iitopfii/zixploy`
 
 ---
 

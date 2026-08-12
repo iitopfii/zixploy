@@ -347,6 +347,137 @@ describe("runBuildOrRollbackPipeline — dockerfile-paste source (Phase 13)", ()
   });
 });
 
+describe("runBuildOrRollbackPipeline — exposed port (Phase 14)", () => {
+  const PAYLOAD = {
+    kind: "build" as const,
+    trigger: "manual" as const,
+    commitSha: "a".repeat(40),
+    commitMessage: null,
+    commitAuthor: null,
+    source: { type: "github" as const, installationId: 111, repoFullName: "org/repo" },
+  };
+
+  function insertOldSucceeded(
+    db: ReturnType<typeof makeDb>,
+    projectId: string,
+    containerId: string,
+  ) {
+    const now = Date.now();
+    db.query(
+      `INSERT INTO deployments (id, project_id, status, trigger, commit_sha, container_id, queued_at, finished_at, created_at, updated_at)
+       VALUES (?, ?, 'succeeded', 'push', ?, ?, ?, ?, ?, ?)`,
+    ).run(ulid(), projectId, "b".repeat(40), containerId, now, now, now, now);
+  }
+
+  test("exposedPort ตั้งไว้ → createContainer ได้ publishPorts host:container ถูกต้อง", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    db.query("UPDATE projects SET exposed_port = 3100, internal_port = 3000 WHERE id = ?").run(
+      projectId,
+    );
+    const deploymentId = insertDeployment(db, projectId);
+    const docker = mockDocker();
+
+    const deps = baseDeps({ db, docker: docker as unknown as BuildPipelineDeps["docker"] });
+    const result = await runBuildOrRollbackPipeline(
+      deps,
+      makeJob(projectId, deploymentId),
+      PAYLOAD,
+      new AbortController().signal,
+    );
+
+    expect(result.outcome).toBe("done");
+    const createCall = docker.calls.find((c) => c.method === "createContainer");
+    const params = createCall?.args[0] as {
+      publishPorts?: { hostPort: number; containerPort: number }[];
+    };
+    expect(params.publishPorts).toEqual([{ hostPort: 3100, containerPort: 3000 }]);
+  });
+
+  test("มี container เก่า → หยุดของเก่าก่อน start candidate (host port ผูกได้ตัวเดียว)", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    db.query("UPDATE projects SET exposed_port = 3100, internal_port = 3000 WHERE id = ?").run(
+      projectId,
+    );
+    insertOldSucceeded(db, projectId, "old-holding-port");
+    const deploymentId = insertDeployment(db, projectId);
+    const docker = mockDocker();
+
+    const deps = baseDeps({ db, docker: docker as unknown as BuildPipelineDeps["docker"] });
+    await runBuildOrRollbackPipeline(
+      deps,
+      makeJob(projectId, deploymentId),
+      PAYLOAD,
+      new AbortController().signal,
+    );
+
+    const stopIdx = docker.calls.findIndex(
+      (c) => c.method === "stopContainer" && c.args[0] === "old-holding-port",
+    );
+    const startIdx = docker.calls.findIndex((c) => c.method === "startContainer");
+    expect(stopIdx).toBeGreaterThanOrEqual(0);
+    expect(startIdx).toBeGreaterThan(stopIdx);
+  });
+
+  test("candidate ล้มเหลวหลังหยุดของเก่า → restart ของเก่าคืน (ลด downtime จาก failure)", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    db.query("UPDATE projects SET exposed_port = 3100, internal_port = 3000 WHERE id = ?").run(
+      projectId,
+    );
+    insertOldSucceeded(db, projectId, "old-holding-port");
+    const deploymentId = insertDeployment(db, projectId);
+    const docker = mockDocker();
+
+    const deps = baseDeps({
+      db,
+      docker: docker as unknown as BuildPipelineDeps["docker"],
+      waitForHealthy: async () => {
+        throw new AppError("HEALTH_CHECK_FAILED", "health check ไม่ผ่าน");
+      },
+    });
+    const result = await runBuildOrRollbackPipeline(
+      deps,
+      makeJob(projectId, deploymentId),
+      PAYLOAD,
+      new AbortController().signal,
+    );
+
+    expect(result.outcome).toBe("failed");
+    // ของเก่าถูก start คืนหลัง candidate ล้มเหลว
+    expect(
+      docker.calls.some((c) => c.method === "startContainer" && c.args[0] === "old-holding-port"),
+    ).toBe(true);
+  });
+
+  test("ไม่ตั้ง exposedPort → ไม่มี publishPorts และไม่หยุดของเก่าก่อน start (ADR-0004 เดิม)", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db, { internalPort: 3000 });
+    insertOldSucceeded(db, projectId, "old-container");
+    const deploymentId = insertDeployment(db, projectId);
+    const docker = mockDocker();
+
+    const deps = baseDeps({ db, docker: docker as unknown as BuildPipelineDeps["docker"] });
+    await runBuildOrRollbackPipeline(
+      deps,
+      makeJob(projectId, deploymentId),
+      PAYLOAD,
+      new AbortController().signal,
+    );
+
+    const params = docker.calls.find((c) => c.method === "createContainer")?.args[0] as {
+      publishPorts?: unknown;
+    };
+    expect(params.publishPorts).toBeUndefined();
+
+    // stop ของเก่าเกิดหลัง startContainer เท่านั้น (ใน activate) — ไม่ใช่ก่อน
+    const startIdx = docker.calls.findIndex((c) => c.method === "startContainer");
+    const stopIdx = docker.calls.findIndex((c) => c.method === "stopContainer");
+    if (stopIdx !== -1) expect(stopIdx).toBeGreaterThan(startIdx);
+  });
+});
+
 describe("runBuildOrRollbackPipeline — failure cases (old container untouched)", () => {
   test("clone ล้มเหลว → deployment failed, candidate container ไม่เคยถูกสร้าง, ของเก่าไม่ถูกแตะ", async () => {
     const db = makeDb();

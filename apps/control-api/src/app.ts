@@ -21,9 +21,11 @@ import { monitoringRoutes } from "./routes/monitoring";
 import { projectRoutes } from "./routes/projects";
 import { serviceRoutes } from "./routes/services";
 import { systemRoutes } from "./routes/system";
+import { systemSettingsRoutes } from "./routes/system-settings";
 import { updateRoutes } from "./routes/updates";
 import { volumeRoutes } from "./routes/volumes";
 import { webhookRoutes } from "./routes/webhook";
+import { createSettingsStore } from "./settings/store";
 
 /**
  * ประกอบ Elysia app จาก plugins + route modules
@@ -55,10 +57,13 @@ export function buildApp(db: Database, options: AppOptions = {}) {
       masterKeys,
     });
 
+  // dashboard domain ที่ตั้งจาก UI — origin-guard อ่านผ่าน cache ใน store มีผลทันทีไม่ต้อง restart
+  const settingsStore = createSettingsStore(db);
+
   return new Elysia()
     .use(requestId)
     .use(requestLog)
-    .use(originGuard(baseUrl))
+    .use(originGuard(baseUrl, { extraHost: () => settingsStore.getDashboardDomain() }))
     .use(securityHeaders)
     .use(bodyLimit)
     .use(errorHandler)
@@ -76,6 +81,7 @@ export function buildApp(db: Database, options: AppOptions = {}) {
     .use(serviceRoutes(db, masterKeys))
     .use(monitoringRoutes(db))
     .use(updateRoutes(db))
+    .use(systemSettingsRoutes(db, settingsStore))
     .use(auditRoutes(db));
 }
 

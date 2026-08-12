@@ -9,7 +9,7 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
-## [0.2.0] — 2026-08-12
+## [0.1.1] — 2026-08-12
 
 ### Added
 - **Exposed port ราย project** — เปิด host port ให้เข้าถึง container ตรง ๆ (เช่น host `3100` →

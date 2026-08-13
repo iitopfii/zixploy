@@ -9,6 +9,22 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.1.10] — 2026-08-13
+
+### Added
+- **compose: depends_on แบบ `condition: healthy` ทำงานจริง (Phase 18 · F)** — เดิม UI ให้เลือก
+  'healthy' ได้แต่ orchestrator ปฏิบัติเหมือน 'started' · ตอนนี้ตั้ง Docker-native HEALTHCHECK
+  ต่อ component ได้ (ฟิลด์ `healthCmd` เช่น `pg_isready -U app`, `redis-cli ping`) แล้ว dependent
+  จะรอ dependency ให้ healthy จริงก่อน start (dependency ที่ไม่มี healthcheck → fallback เป็น
+  'started' พร้อม log เตือน ไม่ค้าง deploy)
+- **compose: managed_ref เชื่อม managed database ได้จริง (Phase 18 · F)** — component ที่
+  `depends_on` managed_ref จะได้ env เชื่อมต่อฉีดอัตโนมัติตอน deploy (`<NAME>_URL`, `_HOST`,
+  `_PORT`, `_USERNAME`, `_PASSWORD`, `_DATABASE` — ถอดรหัสผ่าน + ประกอบ connection URI) และถูก
+  ต่อเข้า proxy network อัตโนมัติเพื่อเข้าถึง service container (เดิม managed_ref แค่ verify ว่า
+  service รันอยู่ ต่อ DB จริงไม่ได้)
+
+---
+
 ## [0.1.9] — 2026-08-13
 
 ### Fixed

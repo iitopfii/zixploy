@@ -7,6 +7,10 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+---
+
+## [0.1.3] — 2026-08-13
+
 ### Added
 - Logs ของ managed service (database) — เดิมมีแค่ log ของ project เท่านั้น ตอนนี้กด "Logs" ที่การ์ด
   database ในหน้า Databases ดู live tail ของ container (`postgres`/`mysql`/... init log ฯลฯ)

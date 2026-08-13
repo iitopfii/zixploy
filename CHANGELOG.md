@@ -9,6 +9,25 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.1.5] — 2026-08-13
+
+### Added
+- **Web Terminal เข้า managed database** — เปิด shell เข้า container ของ database โดยตรงจาก
+  หน้าเว็บ (ปุ่ม "Terminal" ที่การ์ดแต่ละ database ในหน้า Databases) ไม่ต้อง SSH เข้าเซิร์ฟเวอร์
+  แล้ว `docker exec` เอง — ใช้ xterm.js เต็มรูปแบบพร้อม live output
+  - สถาปัตยกรรม: control-api ไม่แตะ Docker เลย (ADR-0002) — แค่ relay byte ดิบระหว่าง
+    WebSocket สองเส้น (browser กับ deploy-worker) worker เป็นฝ่าย exec เข้า container จริง
+    แล้วต่อ WebSocket **ออกไปหา control-api เอง** ผ่าน internal Docker network โดยตรง
+    (เพราะ worker ไม่มี server ของตัวเอง ไม่เคยรับ connection จากใครมาก่อน)
+  - auth แยกสองชั้น: browser ใช้ session cookie ปกติเหมือนหน้าอื่น, worker ใช้ internal
+    bearer token ที่สร้างอัตโนมัติตอนติดตั้ง (`/etc/zixploy/internal.token`) — คนละหน้าที่
+    จาก master key โดยสิ้นเชิง (ไม่เข้ารหัสอะไร แค่ยืนยันตัวตนระหว่างสอง service)
+  - v1 ยังไม่ allocate PTY จริง (`docker exec -i` ไม่ใช่ `-it`) — คำสั่งพื้นฐานทำงานได้ปกติ
+    (`psql`, `mysql`, `redis-cli`, `ls`, `cat` ฯลฯ) แต่ arrow-key history/tab completion/
+    full-screen tool (`vim`, `less`, `top`) ยังใช้ไม่ได้ — ปรับปรุงต่อได้ในเวอร์ชันถัดไป
+
+---
+
 ## [0.1.4] — 2026-08-13
 
 ### Added

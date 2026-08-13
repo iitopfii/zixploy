@@ -7,6 +7,15 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+### Added
+- Logs ของ managed service (database) — เดิมมีแค่ log ของ project เท่านั้น ตอนนี้กด "Logs" ที่การ์ด
+  database ในหน้า Databases ดู live tail ของ container (`postgres`/`mysql`/... init log ฯลฯ)
+  ได้เลยโดยไม่ต้อง SSH เข้าเซิร์ฟเวอร์แล้ว `docker logs` เอง — ตาราง `service_logs` ใหม่ (ring
+  buffer แยกจาก `runtime_logs` ของ project) + worker poller คู่ขนาน (`serviceLogLoop`) +
+  `GET /api/v1/services/:id/logs` (paginated) และ `/logs/stream` (SSE live)
+- การ์ด database แสดง **internal host เต็ม** (`zxsvc-<id>:<port>`) พร้อมปุ่ม copy โดยไม่ต้องเปิด
+  modal "ข้อมูลเชื่อมต่อ" ก่อน — ลดขั้นตอนตอนต้องต่อ database จาก project อื่นในเซิร์ฟเวอร์เดียวกัน
+
 ### Fixed
 - Secure flag ของ session/CSRF cookie ตัดสินจาก scheme ของ `ZIXPLOY_BASE_URL` แทน `NODE_ENV` —
   เดิมสมมติว่า "production = HTTPS เสมอ" ซึ่งไม่จริงกับการติดตั้งที่เข้าผ่าน IP ตรง ๆ (`http://<ip>`)

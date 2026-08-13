@@ -19,6 +19,7 @@ import { DockerCliClient } from "./docker/cli-client";
 import { loadMasterKeys } from "./github/master-key";
 import { heartbeatLoop } from "./heartbeat";
 import { runtimeLogLoop } from "./logs/runtime-poller";
+import { serviceLogLoop } from "./logs/service-poller";
 import { maintenanceLoop } from "./maintenance/loop";
 import { metricsLoop } from "./metrics/collector";
 import { createDispatcher } from "./pipeline/dispatch";
@@ -165,6 +166,7 @@ await Promise.all([
   heartbeatLoop(db, workerId, controller.signal),
   jobLoop(controller.signal),
   runtimeLogLoop(db, docker, controller.signal),
+  serviceLogLoop(db, docker, controller.signal),
   volumeReconcileLoop(db, docker, controller.signal),
   stateReconcileLoop(db, docker, controller.signal, (line) => log.warn(line, { workerId })),
   metricsLoop(db, docker, controller.signal, {

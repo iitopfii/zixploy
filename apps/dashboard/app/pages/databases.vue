@@ -155,6 +155,9 @@ async function showCredentials(id: string) {
 // ── logs ──
 const logsFor = ref<{ id: string; name: string } | null>(null);
 
+// ── terminal ──
+const terminalFor = ref<{ id: string; name: string } | null>(null);
+
 // ── backups ──
 const backupsFor = ref<string | null>(null);
 const backupsForService = computed(
@@ -407,6 +410,15 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
             </button>
 
             <button
+              class="secondary small"
+              :disabled="svc.busy"
+              @click="terminalFor = { id: svc.id, name: svc.name }"
+            >
+              <AppIcon name="terminal" :size="13" />
+              Terminal
+            </button>
+
+            <button
               v-if="svc.status === 'running'"
               class="secondary small"
               :disabled="svc.busy || acting === svc.id"
@@ -532,6 +544,13 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
       :service-id="logsFor.id"
       :service-name="logsFor.name"
       @close="logsFor = null"
+    />
+
+    <TerminalDialog
+      v-if="terminalFor"
+      :service-id="terminalFor.id"
+      :service-name="terminalFor.name"
+      @close="terminalFor = null"
     />
 
     <ServiceBackupsDialog

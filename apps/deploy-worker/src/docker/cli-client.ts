@@ -486,6 +486,77 @@ export class DockerCliClient {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Backup / restore primitives (Phase 16)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * รัน `docker <args>` แล้วเขียน stdout ตรงไปไฟล์บนดิสก์ (ไม่บัฟเฟอร์ทั้งก้อนในหน่วยความจำ) —
+   * database dump ขนาดหลาย GB ถ้า buffer เป็น string ก่อนจะกิน RAM มหาศาลและช้าโดยไม่จำเป็น
+   *
+   * ใช้กับทั้ง `docker exec -i <container> <dumpCmd>` (มี dump tool ในตัว image) และ
+   * `docker run --rm -v <volume>:/vol <helper> tar -czf - ...` (file-copy mode) — ผู้เรียก
+   * ประกอบ args เองตามโหมด (ดู services/backup.ts)
+   *
+   * stderr เก็บเป็น text ปกติ (ข้อความ error สั้น ไม่มีปัญหาเรื่องขนาด)
+   */
+  async spawnCaptureToFile(
+    args: string[],
+    destPath: string,
+    timeoutMs: number,
+  ): Promise<{ code: number; stderr: string }> {
+    const env = this.options.dockerHost
+      ? { ...process.env, DOCKER_HOST: this.options.dockerHost }
+      : process.env;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const proc = Bun.spawn(["docker", ...args], {
+        stdout: Bun.file(destPath),
+        stderr: "pipe",
+        env,
+        signal: controller.signal,
+      });
+      const code = await proc.exited;
+      const stderr = await readWithGracePeriod(proc.stderr);
+      return { code, stderr };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * รัน `docker <args>` โดยป้อน stdin จากไฟล์บนดิสก์ — ฝั่งตรงข้ามของ spawnCaptureToFile
+   * ใช้ตอน restore: `docker exec -i <container> <restoreCmd>` อ่าน dump file เป็น stdin
+   */
+  async spawnFromFile(
+    args: string[],
+    srcPath: string,
+    timeoutMs: number,
+  ): Promise<{ code: number; stderr: string }> {
+    const env = this.options.dockerHost
+      ? { ...process.env, DOCKER_HOST: this.options.dockerHost }
+      : process.env;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const proc = Bun.spawn(["docker", ...args], {
+        stdin: Bun.file(srcPath),
+        stdout: "pipe",
+        stderr: "pipe",
+        env,
+        signal: controller.signal,
+      });
+      const code = await proc.exited;
+      const stderr = await readWithGracePeriod(proc.stderr);
+      return { code, stderr };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /** List Docker volumes ที่ตรงกับ labels ที่กำหนด (ใช้ใน orphan reconciler) */
   async listVolumesByLabel(labels: Record<string, string>): Promise<VolumeSummary[]> {
     const args = ["volume", "ls", "--format", "json"];

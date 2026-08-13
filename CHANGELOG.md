@@ -7,6 +7,21 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+### Added
+- **Backup ของ managed database** — สำรองข้อมูลของ database ที่ deploy ผ่าน one-click services
+  ได้ทั้งแบบตั้งเวลาอัตโนมัติและกดสำรองเองทันที เก็บไฟล์บน Docker volume เดิม
+  (`zixploy-backups`) ที่ control-api ใช้ backup ตัวเองอยู่แล้ว:
+  - ตั้งเวลาได้ 4 ความถี่ (ทุก 6/12/24 ชม. หรือทุกสัปดาห์) พร้อมกำหนดจำนวนที่เก็บไว้ล่าสุด
+    (1-30 ชุด) — เกินจำนวนที่ตั้งไว้ backup เก่าสุดถูกลบทิ้งอัตโนมัติหลัง backup ใหม่สำเร็จ
+  - PostgreSQL/MySQL/MariaDB/MongoDB สำรองแบบ live (`pg_dump`/`mysqldump`/`mongodump` ผ่าน
+    `docker exec`) โดยไม่มี downtime; Redis/libSQL สำรองด้วยการหยุด container สั้น ๆ แล้ว
+    tar ทั้ง data volume (ไม่มี dump tool ที่ปลอดภัยพอสำหรับสองตัวนี้)
+  - ดาวน์โหลดไฟล์ backup, ลบ, และ **restore** ย้อนกลับได้จากหน้า Databases (ปุ่ม "Backups" ที่
+    การ์ดแต่ละ database) — restore ต้องพิมพ์ชื่อ database ยืนยันก่อนเพราะเขียนทับข้อมูลปัจจุบัน
+    ทั้งหมดและย้อนกลับไม่ได้
+  - `GET/POST /api/v1/services/:id/backups`, `GET .../backups/:backupId/download`,
+    `DELETE .../backups/:backupId`, `POST .../backups/:backupId/restore`
+
 ---
 
 ## [0.1.3] — 2026-08-13

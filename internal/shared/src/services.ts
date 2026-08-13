@@ -40,6 +40,20 @@ export interface ServiceCredentials {
   database: string;
 }
 
+/**
+ * วิธี dump/restore ข้อมูลของ service หนึ่งตัว (Phase 16 — backups)
+ *
+ * - "exec": มี dump tool ในตัว image (pg_dump/mysqldump/mongodump) รันผ่าน `docker exec -i` ขณะ
+ *   container ยังรันอยู่ปกติ — ไม่มี downtime เขียนผลลง stdout (dump) / อ่านจาก stdin (restore)
+ *   credential ทุกตัวมาจาก shell expansion ของ env ในตัว container เอง ไม่เคยอยู่ใน argv ของเรา
+ * - "file-copy": ไม่มี dump tool ที่ปลอดภัยพอ (redis) หรือไม่มี shell ให้ exec เข้าไปเลย (libsql
+ *   เป็น distroless image) ต้อง**หยุด container ชั่วคราว**แล้ว tar ทั้ง data volume ผ่าน helper
+ *   container ที่ mount volume เดียวกัน — มี downtime สั้น ๆ ระหว่าง backup/restore
+ */
+export type BackupStrategy =
+  | { mode: "exec"; dumpCmd: string[]; restoreCmd: string[]; fileExtension: string }
+  | { mode: "file-copy"; fileExtension: string };
+
 export interface ServiceTemplate {
   type: ServiceType;
   displayName: string;
@@ -67,6 +81,8 @@ export interface ServiceTemplate {
   command?(): string[] | undefined;
   /** Docker HEALTHCHECK — Docker รันเองในคอนเทนเนอร์ ไม่ต้อง poll จาก worker */
   healthCmd(): string[];
+  /** วิธี backup/restore ของ engine นี้ (Phase 16) — ดู BackupStrategy */
+  backupStrategy(): BackupStrategy;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +110,14 @@ const POSTGRES: ServiceTemplate = {
   }),
   // pg_isready อ่านค่าจาก env ใน container เอง — ไม่มี secret ในสตริงคำสั่ง
   healthCmd: () => ["CMD-SHELL", 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1'],
+  // --clean --if-exists ให้ restore ทับของเดิมได้โดยไม่ error ถ้า object ยังไม่มีอยู่
+  // plain SQL (ไม่ใช่ -Fc custom format) เพื่อให้ restore ผ่าน psql ธรรมดา ไม่ต้องพึ่ง pg_restore
+  backupStrategy: () => ({
+    mode: "exec",
+    dumpCmd: ["sh", "-c", 'pg_dump -U "$POSTGRES_USER" --clean --if-exists -d "$POSTGRES_DB"'],
+    restoreCmd: ["sh", "-c", 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'],
+    fileExtension: "sql",
+  }),
 };
 
 const MYSQL: ServiceTemplate = {
@@ -117,6 +141,17 @@ const MYSQL: ServiceTemplate = {
     "CMD-SHELL",
     'mysqladmin ping -h 127.0.0.1 -u root -p"$MYSQL_ROOT_PASSWORD" --silent',
   ],
+  // --databases ทำให้ dump มี CREATE DATABASE/USE ในตัว — restore ไม่ต้องเลือก database ก่อน
+  backupStrategy: () => ({
+    mode: "exec",
+    dumpCmd: [
+      "sh",
+      "-c",
+      'mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --add-drop-database --databases "$MYSQL_DATABASE"',
+    ],
+    restoreCmd: ["sh", "-c", 'mysql -u root -p"$MYSQL_ROOT_PASSWORD"'],
+    fileExtension: "sql",
+  }),
 };
 
 const MARIADB: ServiceTemplate = {
@@ -138,6 +173,18 @@ const MARIADB: ServiceTemplate = {
   }),
   // mariadb image มี healthcheck.sh มาให้ตั้งแต่ 10.6 — ไม่ต้องส่ง credential เลย
   healthCmd: () => ["CMD-SHELL", "healthcheck.sh --connect --innodb_initialized"],
+  // ใช้ mariadb-dump/mariadb ตรง ๆ แทน mysqldump/mysql — image นี้คือ MariaDB โดยเฉพาะ ไม่ต้องพึ่ง
+  // compat symlink ที่บางเวอร์ชันอาจไม่มีให้แล้ว
+  backupStrategy: () => ({
+    mode: "exec",
+    dumpCmd: [
+      "sh",
+      "-c",
+      'mariadb-dump -u root -p"$MARIADB_ROOT_PASSWORD" --add-drop-database --databases "$MARIADB_DATABASE"',
+    ],
+    restoreCmd: ["sh", "-c", 'mariadb -u root -p"$MARIADB_ROOT_PASSWORD"'],
+    fileExtension: "sql",
+  }),
 };
 
 const REDIS: ServiceTemplate = {
@@ -158,6 +205,9 @@ const REDIS: ServiceTemplate = {
   command: () => ["sh", "-c", 'exec redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes'],
   // REDISCLI_AUTH แทน -a เพื่อไม่ให้ redis-cli เตือนเรื่องรหัสผ่านบน command line
   healthCmd: () => ["CMD-SHELL", 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping | grep -q PONG'],
+  // ไม่ใช้ redis-cli --rdb (แม้ทำได้แบบไม่มี downtime) เพื่อให้ backup ทุก engine ใช้เส้นทางเดียวกัน
+  // (หยุด → tar volume → เริ่มใหม่) ลดความซับซ้อนของ worker แลกกับ downtime สั้น ๆ ตอน backup/restore
+  backupStrategy: () => ({ mode: "file-copy", fileExtension: "tar.gz" }),
 };
 
 const MONGODB: ServiceTemplate = {
@@ -181,6 +231,21 @@ const MONGODB: ServiceTemplate = {
     'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" ' +
       '--authenticationDatabase admin --eval "db.adminCommand({ping:1}).ok" | grep -q 1',
   ],
+  // --archive ไม่มี path = เขียน/อ่านผ่าน stdout/stdin โดยตรง ไม่ต้องมีไฟล์กลางในตัว container
+  backupStrategy: () => ({
+    mode: "exec",
+    dumpCmd: [
+      "sh",
+      "-c",
+      'mongodump --archive --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin',
+    ],
+    restoreCmd: [
+      "sh",
+      "-c",
+      'mongorestore --archive --drop --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin',
+    ],
+    fileExtension: "archive",
+  }),
 };
 
 const LIBSQL: ServiceTemplate = {
@@ -207,6 +272,8 @@ const LIBSQL: ServiceTemplate = {
   // image เป็น distroless ไม่มี shell/curl — ใช้ sqld เองตรวจว่า process ยังอยู่ไม่ได้
   // จึงพึ่ง Docker restart policy + reconciler แทน (ดู healthCmd = [] หมายถึงไม่ตั้ง HEALTHCHECK)
   healthCmd: () => [],
+  // distroless — ไม่มี shell ให้ exec เข้าไปเลย ทางเดียวคือ file-copy ทั้ง data volume
+  backupStrategy: () => ({ mode: "file-copy", fileExtension: "tar.gz" }),
 };
 
 export const SERVICE_CATALOG: Readonly<Record<ServiceType, ServiceTemplate>> = Object.freeze({

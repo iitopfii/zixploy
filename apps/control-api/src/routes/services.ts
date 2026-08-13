@@ -9,11 +9,18 @@
  *   DELETE /api/v1/services/:id                 — enqueue destroy
  *   GET    /api/v1/services/:id/credentials     — รหัสผ่าน + connection string
  *   POST   /api/v1/services/:id/start|stop|restart
+ *   GET    /api/v1/services/:id/backups                     — ประวัติ backup
+ *   POST   /api/v1/services/:id/backups                     — สั่ง backup ทันที (enqueue)
+ *   GET    /api/v1/services/:id/backups/:backupId/download  — ดาวน์โหลดไฟล์ dump
+ *   DELETE /api/v1/services/:id/backups/:backupId           — ลบ backup (แถว + ไฟล์)
+ *   POST   /api/v1/services/:id/backups/:backupId/restore   — กู้คืนจาก backup (enqueue)
  *
  * Security:
  * - รหัสผ่านไม่อยู่ใน list/detail — ต้องเรียก /credentials ที่แยกต่างหากโดยตั้งใจ
  * - control-api ไม่แตะ Docker (ADR-0002) — ทุก operation เขียนเป็น job ให้ worker ทำ
  * - image/version มาจาก catalog เท่านั้น ไม่รับ image ref จากผู้ใช้
+ * - dump/restore จริงทำโดย worker (services/backup.ts ฝั่ง deploy-worker) — control-api
+ *   แค่อ่านแถว/สั่ง job และ stream ไฟล์ที่มีอยู่แล้วให้ดาวน์โหลด (services/backups-store.ts)
  */
 
 import type { Database } from "bun:sqlite";
@@ -23,6 +30,7 @@ import {
   connectionUri,
   getTemplate,
   isUlid,
+  SERVICE_BACKUP_SETTINGS,
   SERVICE_CATALOG,
   SERVICE_SETTINGS,
   SERVICE_TYPES,
@@ -31,6 +39,12 @@ import {
 import { Elysia, t } from "elysia";
 import type { MasterKeys } from "../crypto/master-key";
 import { authPlugin, requireAuthenticated } from "../plugins/auth";
+import {
+  deleteBackup,
+  listBackups,
+  requireBackupRow,
+  resolveBackupFilePath,
+} from "../services/backups-store";
 import { enqueueServiceJob, hasPendingJob } from "../services/queue";
 import {
   createService,
@@ -87,8 +101,25 @@ const serviceSchema = t.Object({
   createdAt: t.Number(),
   updatedAt: t.Number(),
   lastStartedAt: t.Nullable(t.Number()),
+  backupEnabled: t.Boolean(),
+  backupIntervalHours: t.Nullable(t.Number()),
+  backupRetentionCount: t.Number(),
+  lastBackupAt: t.Nullable(t.Number()),
   /** มีงานค้างอยู่ไหม — UI ใช้ปิดปุ่มและแสดง spinner */
   busy: t.Boolean(),
+});
+
+const backupSchema = t.Object({
+  id: t.String(),
+  serviceId: t.String(),
+  trigger: t.Union([t.Literal("manual"), t.Literal("scheduled")]),
+  status: t.Union([t.Literal("running"), t.Literal("succeeded"), t.Literal("failed")]),
+  fileName: t.Nullable(t.String()),
+  sizeBytes: t.Nullable(t.Number()),
+  failureMessage: t.Nullable(t.String()),
+  startedAt: t.Number(),
+  finishedAt: t.Nullable(t.Number()),
+  createdAt: t.Number(),
 });
 
 const createBody = t.Object({
@@ -105,6 +136,14 @@ const updateBody = t.Object({
   exposedPort: t.Optional(t.Nullable(t.Integer({ minimum: 1, maximum: 65535 }))),
   memoryLimitMb: t.Optional(t.Nullable(t.Integer({ minimum: 64, maximum: 65536 }))),
   cpuLimit: t.Optional(t.Nullable(t.Number({ minimum: 0.1, maximum: 64 }))),
+  backupEnabled: t.Optional(t.Boolean()),
+  backupIntervalHours: t.Optional(t.Nullable(t.Integer())),
+  backupRetentionCount: t.Optional(
+    t.Integer({
+      minimum: SERVICE_BACKUP_SETTINGS.retentionMin,
+      maximum: SERVICE_BACKUP_SETTINGS.retentionMax,
+    }),
+  ),
 });
 
 const catalogEntrySchema = t.Object({
@@ -299,6 +338,77 @@ export function serviceRoutes(db: Database, masterKeys: MasterKeys | null) {
           requireUlid(params.id);
           requireService(db, params.id);
           enqueueServiceJob(db, params.id, "restart");
+          set.status = 202;
+          return present(db, params.id);
+        },
+        { response: serviceSchema },
+      )
+
+      // ── Backups ─────────────────────────────────────────────────────────
+
+      // GET /services/:id/backups — ประวัติ backup เรียงใหม่สุดก่อน
+      .get(
+        "/services/:id/backups",
+        ({ params }) => {
+          requireUlid(params.id);
+          requireService(db, params.id);
+          return { items: listBackups(db, params.id) };
+        },
+        { response: t.Object({ items: t.Array(backupSchema) }) },
+      )
+
+      // POST /services/:id/backups — สั่ง backup ทันที (ชนกับ operation อื่นที่ค้างอยู่ไม่ได้)
+      .post(
+        "/services/:id/backups",
+        ({ params, set }) => {
+          requireUlid(params.id);
+          requireService(db, params.id);
+          enqueueServiceJob(db, params.id, "backup");
+          set.status = 202;
+          return present(db, params.id);
+        },
+        { response: serviceSchema },
+      )
+
+      // GET /services/:id/backups/:backupId/download — stream ไฟล์ dump ตรง ๆ จากดิสก์
+      .get("/services/:id/backups/:backupId/download", ({ params }) => {
+        requireUlid(params.id);
+        requireService(db, params.id);
+        const row = requireBackupRow(db, params.id, params.backupId);
+        const path = resolveBackupFilePath(params.id, row);
+
+        return new Response(Bun.file(path), {
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "Content-Disposition": `attachment; filename="${row.file_name}"`,
+          },
+        });
+      })
+
+      // DELETE /services/:id/backups/:backupId — ลบทั้งแถวและไฟล์จริง (sync ไม่ผ่าน job)
+      .delete(
+        "/services/:id/backups/:backupId",
+        ({ params, set }) => {
+          requireUlid(params.id);
+          requireService(db, params.id);
+          deleteBackup(db, params.id, params.backupId);
+          set.status = 204;
+          return null;
+        },
+        { response: t.Null() },
+      )
+
+      // POST /services/:id/backups/:backupId/restore — เขียนทับข้อมูลปัจจุบันทั้งหมด (enqueue)
+      .post(
+        "/services/:id/backups/:backupId/restore",
+        ({ params, set }) => {
+          requireUlid(params.id);
+          requireService(db, params.id);
+          const row = requireBackupRow(db, params.id, params.backupId);
+          if (row.status !== "succeeded") {
+            throw new AppError("SERVICE_BACKUP_NOT_READY", "backup นี้ยังไม่พร้อมสำหรับ restore");
+          }
+          enqueueServiceJob(db, params.id, "restore", { backupId: params.backupId });
           set.status = 202;
           return present(db, params.id);
         },

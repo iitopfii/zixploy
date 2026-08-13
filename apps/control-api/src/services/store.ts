@@ -13,6 +13,7 @@ import {
   AppError,
   getTemplate,
   resolveVersion,
+  SERVICE_BACKUP_SETTINGS,
   SERVICE_SETTINGS,
   type ServiceCredentials,
   type ServiceType,
@@ -50,6 +51,10 @@ export interface ServiceRow {
   created_at: number;
   updated_at: number;
   last_started_at: number | null;
+  backup_enabled: number;
+  backup_interval_hours: number | null;
+  backup_retention_count: number;
+  last_backup_at: number | null;
 }
 
 /** DTO ที่ปลอดภัยส่งออก API — ไม่มีรหัสผ่าน */
@@ -72,12 +77,18 @@ export interface ServiceDto {
   createdAt: number;
   updatedAt: number;
   lastStartedAt: number | null;
+  backupEnabled: boolean;
+  /** ชั่วโมง — จำกัดให้เป็นหนึ่งใน SERVICE_BACKUP_SETTINGS.allowedIntervalHours เท่านั้น */
+  backupIntervalHours: number | null;
+  backupRetentionCount: number;
+  lastBackupAt: number | null;
 }
 
 const SELECT_ALL = `
   id, name, type, version, image, status, container_id, volume_name,
   username, database_name, password_enc, internal_port, exposed_port,
-  memory_limit_mb, cpu_limit, failure_message, created_at, updated_at, last_started_at
+  memory_limit_mb, cpu_limit, failure_message, created_at, updated_at, last_started_at,
+  backup_enabled, backup_interval_hours, backup_retention_count, last_backup_at
 `;
 
 export function toDto(row: ServiceRow): ServiceDto {
@@ -99,6 +110,10 @@ export function toDto(row: ServiceRow): ServiceDto {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastStartedAt: row.last_started_at,
+    backupEnabled: row.backup_enabled === 1,
+    backupIntervalHours: row.backup_interval_hours,
+    backupRetentionCount: row.backup_retention_count,
+    lastBackupAt: row.last_backup_at,
   };
 }
 
@@ -317,6 +332,10 @@ export interface UpdateServiceInput {
   exposedPort?: number | null;
   memoryLimitMb?: number | null;
   cpuLimit?: number | null;
+  /** ตั้งค่า backup ทั้งสามตัวนี้แก้ได้ตลอดเวลาไม่ต้อง stop — ไม่แตะ container/volume เลย */
+  backupEnabled?: boolean;
+  backupIntervalHours?: number | null;
+  backupRetentionCount?: number;
 }
 
 /**
@@ -340,6 +359,40 @@ export function updateService(db: Database, id: string, input: UpdateServiceInpu
 
   if (input.exposedPort != null) assertExposedPortUsable(db, input.exposedPort, id);
 
+  // เปิด scheduled backup ต้องมี interval ที่ถูกต้องด้วยเสมอ — เปิดไว้เฉย ๆ ไม่มี interval
+  // แปลว่า scheduler ไม่มีทางรู้ว่าเมื่อไหร่ถึงกำหนด (isDue ใน backup-schedule-loop.ts)
+  const enabledAfterUpdate = input.backupEnabled ?? row.backup_enabled === 1;
+  const intervalAfterUpdate =
+    input.backupIntervalHours !== undefined ? input.backupIntervalHours : row.backup_interval_hours;
+  if (enabledAfterUpdate && intervalAfterUpdate == null) {
+    throw new AppError("VALIDATION_ERROR", "ต้องเลือกความถี่ backup ก่อนเปิดใช้งานตั้งเวลา", {
+      field: "backupIntervalHours",
+    });
+  }
+  if (
+    input.backupIntervalHours != null &&
+    !(SERVICE_BACKUP_SETTINGS.allowedIntervalHours as readonly number[]).includes(
+      input.backupIntervalHours,
+    )
+  ) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      `backupIntervalHours ต้องเป็นหนึ่งใน: ${SERVICE_BACKUP_SETTINGS.allowedIntervalHours.join(", ")}`,
+      { field: "backupIntervalHours" },
+    );
+  }
+  if (
+    input.backupRetentionCount !== undefined &&
+    (input.backupRetentionCount < SERVICE_BACKUP_SETTINGS.retentionMin ||
+      input.backupRetentionCount > SERVICE_BACKUP_SETTINGS.retentionMax)
+  ) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      `backupRetentionCount ต้องอยู่ระหว่าง ${SERVICE_BACKUP_SETTINGS.retentionMin}-${SERVICE_BACKUP_SETTINGS.retentionMax}`,
+      { field: "backupRetentionCount" },
+    );
+  }
+
   const fields: string[] = [];
   const values: (string | number | null)[] = [];
   const set = (col: string, val: string | number | null) => {
@@ -351,6 +404,12 @@ export function updateService(db: Database, id: string, input: UpdateServiceInpu
   if (input.exposedPort !== undefined) set("exposed_port", input.exposedPort);
   if (input.memoryLimitMb !== undefined) set("memory_limit_mb", input.memoryLimitMb);
   if (input.cpuLimit !== undefined) set("cpu_limit", input.cpuLimit);
+  if (input.backupEnabled !== undefined) set("backup_enabled", input.backupEnabled ? 1 : 0);
+  if (input.backupIntervalHours !== undefined)
+    set("backup_interval_hours", input.backupIntervalHours);
+  if (input.backupRetentionCount !== undefined) {
+    set("backup_retention_count", input.backupRetentionCount);
+  }
 
   if (fields.length > 0) {
     set("updated_at", Date.now());

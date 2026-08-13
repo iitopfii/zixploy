@@ -25,8 +25,12 @@ import { metricsLoop } from "./metrics/collector";
 import { createDispatcher } from "./pipeline/dispatch";
 import { claimNextJob, completeJob, failJob, LeaseLostError, withLeaseRenewal } from "./queue";
 import { stateReconcileLoop } from "./reconciler";
+import { backupScheduleLoop } from "./services/backup-schedule-loop";
 import { serviceJobLoop } from "./services/loop";
 import { volumeReconcileLoop } from "./volumes/reconciler";
+
+/** mount point ของ zixploy-backups volume ในนี้ — เดียวกับที่ control-api backup ตัวเอง */
+const backupsDir = process.env.ZIXPLOY_BACKUPS_DIR ?? "/backups";
 
 const workerId = `worker-${ulid()}`;
 const log = createLogger({
@@ -175,9 +179,14 @@ await Promise.all([
   // คิวแยกจาก deploy — database provisioning ใช้เวลานาน ไม่ควรบล็อก deploy ของ app
   serviceJobLoop(db, docker, workerId, controller.signal, {
     masterKeys,
+    backupsDir,
     onLog: (line) => log.info(line, { workerId }),
   }),
   maintenanceLoop(db, workerId, controller.signal, (line) => log.info(line, { workerId })),
+  // scheduled backup — ไม่ผ่าน service_jobs queue เลย (ดู services/backup-schedule-loop.ts)
+  backupScheduleLoop(db, docker, backupsDir, controller.signal, (line) =>
+    log.info(line, { workerId }),
+  ),
 ]);
 
 log.info("deploy-worker stopped", { workerId });

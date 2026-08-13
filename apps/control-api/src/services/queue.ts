@@ -12,7 +12,14 @@
 import type { Database } from "bun:sqlite";
 import { AppError, ulid } from "@zixploy/shared";
 
-export type ServiceJobType = "provision" | "start" | "stop" | "restart" | "destroy";
+export type ServiceJobType =
+  | "provision"
+  | "start"
+  | "stop"
+  | "restart"
+  | "destroy"
+  | "backup"
+  | "restore";
 
 export interface EnqueueResult {
   jobId: string;

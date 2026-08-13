@@ -74,6 +74,9 @@ services:
       ZIXPLOY_BACKUP_DB_DIR: /backups/db
       ZIXPLOY_BACKUP_KEYS_DIR: /backups/keys
       ZIXPLOY_BACKUP_RETENTION: "14"
+      # backup ของ managed service (database) — volume เดียวกับด้านบนแต่คนละ subdirectory
+      # ("services/<id>/") worker เป็นคนเขียนไฟล์จริง ที่นี่แค่อ่าน/ลบ/stream ให้ดาวน์โหลด (Phase 16)
+      ZIXPLOY_BACKUPS_DIR: /backups
       # เวอร์ชันที่รันอยู่ — ตัวตรวจ update เทียบค่านี้กับ tag ล่าสุดบน registry
       ZIXPLOY_VERSION: ${ZIXPLOY_VERSION}
     volumes:
@@ -112,9 +115,12 @@ services:
       ZIXPLOY_VERSION: ${ZIXPLOY_VERSION}
       # updater ต้องรู้ว่า compose file อยู่ที่ไหนบน host เพื่อ mount เข้า container ตัวเอง
       ZIXPLOY_INSTALL_DIR: ${ZIXPLOY_INSTALL_DIR:-/opt/zixploy}
+      # ที่เก็บ dump ของ managed service (database) — volume เดียวกับที่ control-api backup ตัวเอง
+      ZIXPLOY_BACKUPS_DIR: /backups
     volumes:
       - zixploy-data:/data
       - zixploy-workspaces:/workspaces
+      - zixploy-backups:/backups
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/zixploy/master.key:/run/secrets/master_key:ro
     networks:

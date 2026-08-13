@@ -103,6 +103,10 @@ export const ERROR_CODES = {
   MAINTENANCE_BUSY: 409,
   MAINTENANCE_FAILED: 500,
 
+  // interactive terminal (phase 17)
+  TERMINAL_SESSION_NOT_FOUND: 404,
+  TERMINAL_UNAVAILABLE: 503,
+
   // system
   NOT_READY: 503,
 } as const;

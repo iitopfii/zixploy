@@ -19,6 +19,7 @@ import {
   type ServiceType,
   serviceContainerName,
   serviceImage,
+  serviceSupportsTerminal,
   serviceVolumeName,
   ulid,
 } from "@zixploy/shared";
@@ -82,6 +83,8 @@ export interface ServiceDto {
   backupIntervalHours: number | null;
   backupRetentionCount: number;
   lastBackupAt: number | null;
+  /** เปิด web terminal ได้ไหม — false เมื่อ image ไม่มี shell (libsql) UI ใช้ซ่อนปุ่ม Terminal */
+  supportsTerminal: boolean;
 }
 
 const SELECT_ALL = `
@@ -114,6 +117,7 @@ export function toDto(row: ServiceRow): ServiceDto {
     backupIntervalHours: row.backup_interval_hours,
     backupRetentionCount: row.backup_retention_count,
     lastBackupAt: row.last_backup_at,
+    supportsTerminal: serviceSupportsTerminal(row.type as ServiceType),
   };
 }
 

@@ -410,6 +410,7 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
             </button>
 
             <button
+              v-if="svc.supportsTerminal"
               class="secondary small"
               :disabled="svc.busy"
               @click="terminalFor = { id: svc.id, name: svc.name }"

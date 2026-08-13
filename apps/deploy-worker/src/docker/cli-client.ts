@@ -590,29 +590,100 @@ export class DockerCliClient {
    * ไม่รอ process จบแล้วอ่านผลทีเดียว: session มีชีวิตอยู่นาน (จนผู้ใช้ปิดเองหรือ idle timeout)
    * ผู้เรียกต่อ stdin/stdout/stderr เข้ากับ WebSocket เองแบบ stream สด ๆ
    *
-   * ตอนนี้ใช้ `-i` เฉย ๆ (ไม่มี `-t`) — ไม่ allocate PTY จริง แต่เป็นทางเลือกที่ทำงานแน่นอนกับ
-   * Docker CLI ทุกเวอร์ชัน คำสั่งพื้นฐาน (psql, mysql, redis-cli, ls, cat, ...) ทำงานได้ปกติ
-   * แต่ arrow-key history/tab completion/full-screen tool (less, vim, top) จะไม่ทำงานเพราะไม่มี
-   * TTY จริงให้โปรแกรมฝั่ง container ตรวจเจอ
+   * **ต้องมี PTY จริง** ไม่งั้น terminal ใช้ไม่ได้เลย: `docker exec -i` เฉย ๆ (ไม่มี `-t`) ไม่มี
+   * terminal line discipline — Enter จาก xterm.js ส่ง `\r` (CR) แต่ `sh` รอ `\n` (LF) จึงไม่เคย
+   * รันคำสั่ง และไม่มี echo ให้เห็นสิ่งที่พิมพ์ (ผู้ใช้เห็นเป็น "พิมพ์ไม่ได้") — พิสูจน์แล้วบนเครื่องจริง
    *
-   * หมายเหตุ: พยายาม spike `docker exec -it` แล้วระหว่าง implement (Bun.spawn({stdin:"pipe"})
-   * ยังไม่มี Docker daemon ให้ทดสอบจริงในสภาพแวดล้อมที่พัฒนา — Docker Desktop เปิดไม่ขึ้น) จึง
-   * ยังไม่ยืนยันได้ว่า `-it` ทำงานได้ปกติเมื่อ stdin ของ `docker` CLI เองมาจาก pipe ไม่ใช่ TTY จริง
-   * ของเครื่อง worker (บาง Docker CLI เวอร์ชันเก่าจะ error "the input device is not a TTY")
-   * **TODO ผู้ที่มี Docker daemon จริงลองเปลี่ยน args ข้างล่างเป็น `["exec", "-it", ...]` แล้ว
-   * ทดสอบ — ถ้าทำงานได้ค่อยเปลี่ยนมาใช้ถาวร (ต้องคิดเรื่อง resize message แยกอีกที เพราะยังไม่มี
-   * ทาง ioctl ผ่าน piped Bun.Subprocess ได้ง่าย ๆ — ตอนนี้ resize ถูก no-op ทั้งสองกรณี)**
+   * แต่ `docker exec -it` ตรง ๆ ก็ใช้ไม่ได้: docker CLI ปฏิเสธ `-t` ถ้า stdin ของมันไม่ใช่ TTY
+   * ("cannot attach stdin to a TTY-enabled container because stdin is not a terminal") — และ
+   * Bun.spawn({stdin:"pipe"}) ให้แค่ pipe ไม่ใช่ TTY
+   *
+   * ทางออก: ครอบด้วย `script` (util-linux) ซึ่งสร้าง pseudo-TTY ให้ — docker exec -t จึงเห็น
+   * stdin เป็น TTY จริงและยอมทำงาน container ได้ PTY ของตัวเองครบ (echo + CR→LF + prompt +
+   * line editing) เขียน typescript ทิ้งลง /dev/null (ไม่บันทึก) — worker image ต้อง `apk add
+   * util-linux` เพิ่ม (ดู Dockerfile)
+   *
+   * ข้อจำกัด v1: ขนาด PTY ตั้งครั้งเดียวตอนเปิด (ค่า default หรือขนาดที่ผู้เรียกส่งมา) — resize สด ๆ
+   * ระหว่างใช้งานยังไม่ propagate เพราะต้อง ioctl TIOCSWINSZ บน master fd ซึ่ง Bun ไม่เปิดให้ทำง่าย ๆ
    */
-  execInteractive(containerName: string, shell: string): Bun.Subprocess<"pipe", "pipe", "pipe"> {
+  execInteractive(
+    containerName: string,
+    shell: string,
+    opts: { cols?: number; rows?: number; sessionMarker?: string } = {},
+  ): Bun.Subprocess<"pipe", "pipe", "pipe"> {
+    // containerName มาจาก serviceContainerName() (= "zxsvc-" + ULID lowercased) แต่ค่านี้ถูก
+    // interpolate เข้า string ที่ `script -c` เอาไปรันผ่าน sh — assert อีกชั้นกัน command injection
+    // ถ้าอนาคตมีใครส่งค่าอื่นเข้ามา (defense-in-depth เหมือน assertDockerArgsSafe ที่อื่น)
+    // ต้องขึ้นต้นด้วยตัวอักษร: กันชื่อที่ขึ้นต้นด้วย `-` ถูก docker ตีความเป็น flag (เช่น --privileged)
+    if (!/^[a-z][a-z0-9-]*$/.test(containerName)) {
+      throw new AppError(
+        "VALIDATION_ERROR",
+        `ชื่อ container ไม่ปลอดภัยสำหรับ terminal: ${containerName}`,
+      );
+    }
+    if (!/^[a-z0-9/_-]+$/.test(shell)) {
+      throw new AppError("VALIDATION_ERROR", `ชื่อ shell ไม่ปลอดภัยสำหรับ terminal: ${shell}`);
+    }
+    const marker = opts.sessionMarker ?? "";
+    if (marker && !/^[0-9A-Za-z]+$/.test(marker)) {
+      throw new AppError("VALIDATION_ERROR", `session marker ไม่ปลอดภัย: ${marker}`);
+    }
+    const cols = clampDimension(opts.cols, 100);
+    const rows = clampDimension(opts.rows, 30);
+
     const env = this.options.dockerHost
       ? { ...process.env, DOCKER_HOST: this.options.dockerHost }
       : process.env;
 
-    return Bun.spawn(["docker", "exec", "-i", containerName, shell], {
+    // -e ZIXPLOY_TERM_SESSION=<marker>: ประทับ session id ลง environment ของ shell ในคอนเทนเนอร์
+    // เพื่อให้ reapTerminalShell() หา process นี้เจอตอนปิด session — docker exec -it ทิ้ง shell ค้าง
+    // ในคอนเทนเนอร์เมื่อ client ตาย (daemon ไม่ปิด PTY ให้) การฆ่า `script` ฝั่ง worker ไม่พอ
+    // (พิสูจน์แล้วบนเครื่องจริง) ต้อง reap ด้วย marker นี้ ไม่งั้น shell สะสมชน --pids-limit จน DB ล่ม
+    const markerArg = marker ? ` -e ${TERM_SESSION_ENV}=${marker}` : "";
+
+    // ตั้งขนาด PTY ด้วย stty ก่อน exec เข้า shell interactive — script สร้าง PTY แบบไม่มีขนาด
+    // (0x0) ถ้าไม่ตั้ง ทำให้ pager/ตารางของ mysql client จัดหน้าเพี้ยน (2>/dev/null เผื่อ image
+    // ไหนไม่มี stty ก็ยัง exec shell ต่อได้)
+    const inner = `docker exec -it${markerArg} ${containerName} ${shell} -c 'stty rows ${rows} cols ${cols} 2>/dev/null; exec ${shell}'`;
+
+    return Bun.spawn(["script", "-qec", inner, "/dev/null"], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
       env,
     });
   }
+
+  /**
+   * ฆ่า shell ที่ค้างในคอนเทนเนอร์หลังปิด terminal session — best-effort (ไม่ throw)
+   *
+   * docker exec -it ทิ้ง interactive shell ไว้ในคอนเทนเนอร์เมื่อ client ตาย และ shell นั้น ignore
+   * SIGTERM (interactive) ต้อง SIGKILL — สแกน /proc หา process ที่มี ZIXPLOY_TERM_SESSION=<marker>
+   * ใน environ แล้ว kill -9 (ใช้แค่ sh + /proc + grep + kill ซึ่งมีครบทุก image ที่เปิด terminal ได้)
+   * พิสูจน์แล้วบนเครื่องจริงว่าวิธีนี้ reap ได้จริง (SIGTERM reaper ไม่ได้ผล)
+   */
+  async reapTerminalShell(containerName: string, sessionMarker: string): Promise<void> {
+    if (!/^[a-z][a-z0-9-]*$/.test(containerName)) return;
+    if (!/^[0-9A-Za-z]+$/.test(sessionMarker)) return;
+    const reaper =
+      `for d in /proc/[0-9]*; do ` +
+      `if grep -qs "${TERM_SESSION_ENV}=${sessionMarker}" "$d/environ" 2>/dev/null; then ` +
+      `kill -9 "\${d##*/}" 2>/dev/null; fi; done`;
+    try {
+      await this.exec(["exec", containerName, "sh", "-c", reaper]);
+    } catch {
+      // best-effort — คอนเทนเนอร์อาจถูกลบไปแล้ว/ไม่มี sh; ไม่ให้กระทบการปิด session
+    }
+  }
+}
+
+/** ชื่อ env var ที่ประทับลง shell ในคอนเทนเนอร์เพื่อให้ reaper หา process เจอ (Phase 17) */
+const TERM_SESSION_ENV = "ZIXPLOY_TERM_SESSION";
+
+/** จำกัดขนาด PTY ให้เป็นจำนวนเต็มบวกในช่วงที่สมเหตุสมผล — กันค่าเพี้ยนจาก resize message */
+function clampDimension(value: number | undefined, fallback: number): number {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 1000) {
+    return value;
+  }
+  return fallback;
 }

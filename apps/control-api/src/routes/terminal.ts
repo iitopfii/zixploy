@@ -22,7 +22,13 @@
  */
 
 import type { Database } from "bun:sqlite";
-import { API_PREFIX, AppError, TERMINAL_SETTINGS } from "@zixploy/shared";
+import {
+  API_PREFIX,
+  AppError,
+  type ServiceType,
+  serviceSupportsTerminal,
+  TERMINAL_SETTINGS,
+} from "@zixploy/shared";
 import { Elysia } from "elysia";
 import { isValidInternalToken, loadInternalToken } from "../crypto/internal-token";
 import { authPlugin, requireAuthenticated } from "../plugins/auth";
@@ -176,11 +182,18 @@ export function terminalRoutes(db: Database, options: TerminalRouteOptions = {})
         }
 
         // service ไม่มีอยู่จริง — WS เปิดไปแล้ว คืน HTTP 404 body ไม่ได้ ต้องปิดด้วย close code แทน
+        let serviceType: string;
         try {
-          requireService(db, serviceId);
+          serviceType = requireService(db, serviceId).type;
         } catch (err) {
           const message = err instanceof AppError ? err.message : "ไม่พบ service นี้";
           ws.close(4004, message);
+          return;
+        }
+
+        // libsql (distroless) ไม่มี shell — ปฏิเสธก่อนสร้าง pending session ที่ไม่มีทางสำเร็จ
+        if (!serviceSupportsTerminal(serviceType as ServiceType)) {
+          ws.close(4003, `engine "${serviceType}" ไม่มี shell ให้เปิด terminal`);
           return;
         }
 

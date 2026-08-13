@@ -20,6 +20,9 @@ COPY migrations/          ./migrations/
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
 # Worker needs docker CLI — install from Alpine apk
-RUN apk add --no-cache docker-cli docker-cli-buildx git
+# util-linux: ให้คำสั่ง `script` ที่ใช้สร้าง PTY จริงสำหรับ web terminal (Phase 17) —
+# docker exec -t ต้องการ TTY ที่ฝั่ง client, Bun.spawn ให้แค่ pipe จึงต้องมี script มาครอบ
+# (ดู DockerCliClient.execInteractive)
+RUN apk add --no-cache docker-cli docker-cli-buildx git util-linux
 
 CMD ["bun", "run", "apps/deploy-worker/src/index.ts"]

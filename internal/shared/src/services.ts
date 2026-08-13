@@ -83,6 +83,12 @@ export interface ServiceTemplate {
   healthCmd(): string[];
   /** วิธี backup/restore ของ engine นี้ (Phase 16) — ดู BackupStrategy */
   backupStrategy(): BackupStrategy;
+  /**
+   * shell ที่ใช้เปิด web terminal เข้า container (Phase 17) — คืน null ถ้า image ไม่มี shell เลย
+   * (เช่น libsql เป็น distroless) ปล่อยว่าง (undefined) = ใช้ "sh" ตาม default ของทุก image ปกติ
+   * ใช้ terminalShellFor()/serviceSupportsTerminal() แทนการเรียกตรง เพื่อ handle default ให้ถูก
+   */
+  terminalShell?(): string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -274,6 +280,8 @@ const LIBSQL: ServiceTemplate = {
   healthCmd: () => [],
   // distroless — ไม่มี shell ให้ exec เข้าไปเลย ทางเดียวคือ file-copy ทั้ง data volume
   backupStrategy: () => ({ mode: "file-copy", fileExtension: "tar.gz" }),
+  // distroless = ไม่มี shell → web terminal ใช้ไม่ได้ (control-api/worker ปฏิเสธก่อน + UI ซ่อนปุ่ม)
+  terminalShell: () => null,
 };
 
 export const SERVICE_CATALOG: Readonly<Record<ServiceType, ServiceTemplate>> = Object.freeze({
@@ -295,6 +303,20 @@ export function isServiceType(value: string): value is ServiceType {
 
 export function getTemplate(type: ServiceType): ServiceTemplate {
   return SERVICE_CATALOG[type];
+}
+
+/**
+ * shell ที่ใช้เปิด web terminal เข้า container ของ service ชนิดนี้ — คืน null ถ้า image ไม่มี shell
+ * (libsql distroless) template ที่ไม่ระบุ terminalShell ใช้ "sh" ตาม default ของ image ปกติทุกตัว
+ */
+export function terminalShellFor(type: ServiceType): string | null {
+  const template = getTemplate(type);
+  return template.terminalShell ? template.terminalShell() : "sh";
+}
+
+/** เปิด web terminal เข้า service ชนิดนี้ได้ไหม — false เมื่อ image ไม่มี shell (libsql) */
+export function serviceSupportsTerminal(type: ServiceType): boolean {
+  return terminalShellFor(type) !== null;
 }
 
 /**

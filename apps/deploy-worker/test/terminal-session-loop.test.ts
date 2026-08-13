@@ -199,12 +199,20 @@ function makeFakeProc() {
 
 function makeDockerMock() {
   const fakeProcs: ReturnType<typeof makeFakeProc>[] = [];
-  const execInteractive = (_containerName: string, _shell: string) => {
+  const reapCalls: Array<{ containerName: string; marker: string }> = [];
+  const execInteractive = (
+    _containerName: string,
+    _shell: string,
+    _opts?: { cols?: number; rows?: number; sessionMarker?: string },
+  ) => {
     const fp = makeFakeProc();
     fakeProcs.push(fp);
     return fp.proc;
   };
-  return { execInteractive, fakeProcs };
+  const reapTerminalShell = async (containerName: string, marker: string) => {
+    reapCalls.push({ containerName, marker });
+  };
+  return { execInteractive, reapTerminalShell, fakeProcs, reapCalls };
 }
 
 /** รอ microtask/timer สั้น ๆ ให้ async code ในโปรดักชันได้ทำงานต่อ */
@@ -361,7 +369,7 @@ describe("terminalSessionLoop — happy path round trip", () => {
       docker as never,
       CONTROL_API_URL,
       controller.signal,
-      { connect, idleTimeoutMs: 10_000, idleCheckIntervalMs: 5_000 },
+      { connect, idleTimeoutMs: 10_000, idleCheckIntervalMs: 5_000, initialSizeWaitMs: 0 },
     );
 
     await tick();
@@ -424,7 +432,7 @@ describe("terminalSessionLoop — ปิด session", () => {
       docker as never,
       CONTROL_API_URL,
       controller.signal,
-      { connect, idleTimeoutMs: 10_000, idleCheckIntervalMs: 5_000 },
+      { connect, idleTimeoutMs: 10_000, idleCheckIntervalMs: 5_000, initialSizeWaitMs: 0 },
     );
     await tick();
     sockets[0]!.triggerOpen();
@@ -437,6 +445,12 @@ describe("terminalSessionLoop — ปิด session", () => {
     await tick();
 
     expect(fp.isKilled()).toBe(true);
+    // ต้อง reap shell ในคอนเทนเนอร์ด้วย marker = session id — docker exec -it ทิ้ง shell ค้างไว้
+    // เมื่อ client ตาย การ kill `script` ฝั่ง worker ไม่พอ (regression ที่ review จับได้)
+    expect(docker.reapCalls).toContainEqual({
+      containerName: `zxsvc-${serviceId.toLowerCase()}`,
+      marker: sessionId,
+    });
     const row = getSession(db, sessionId);
     expect(row.status).toBe("closed");
     expect(row.closed_at).not.toBeNull();
@@ -459,7 +473,7 @@ describe("terminalSessionLoop — ปิด session", () => {
       docker as never,
       CONTROL_API_URL,
       controller.signal,
-      { connect, idleTimeoutMs: 10_000, idleCheckIntervalMs: 5_000 },
+      { connect, idleTimeoutMs: 10_000, idleCheckIntervalMs: 5_000, initialSizeWaitMs: 0 },
     );
     await tick();
     sockets[0]!.triggerOpen();
@@ -494,7 +508,7 @@ describe("terminalSessionLoop — ปิด session", () => {
       docker as never,
       CONTROL_API_URL,
       controller.signal,
-      { connect, idleTimeoutMs: 40, idleCheckIntervalMs: 10 },
+      { connect, idleTimeoutMs: 40, idleCheckIntervalMs: 10, initialSizeWaitMs: 0 },
     );
     await tick();
     sockets[0]!.triggerOpen();
@@ -529,7 +543,7 @@ describe("terminalSessionLoop — worker shutdown", () => {
       docker as never,
       CONTROL_API_URL,
       controller.signal,
-      { connect, idleTimeoutMs: 10_000, idleCheckIntervalMs: 5_000 },
+      { connect, idleTimeoutMs: 10_000, idleCheckIntervalMs: 5_000, initialSizeWaitMs: 0 },
     );
     await tick();
     sockets[0]!.triggerOpen();

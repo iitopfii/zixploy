@@ -17,7 +17,12 @@
  */
 
 import type { Database } from "bun:sqlite";
-import { serviceContainerName, TERMINAL_SETTINGS } from "@zixploy/shared";
+import {
+  type ServiceType,
+  serviceContainerName,
+  TERMINAL_SETTINGS,
+  terminalShellFor,
+} from "@zixploy/shared";
 import type { DockerCliClient } from "../docker/cli-client";
 import { loadInternalToken } from "../internal-token";
 import { loadService } from "./provision";
@@ -234,6 +239,11 @@ export interface TerminalLoopOptions {
   idleCheckIntervalMs?: number;
   /** override เวลารอ connect สำเร็จ — ปกติใช้ TERMINAL_SETTINGS.browserWaitTimeoutMs */
   connectTimeoutMs?: number;
+  /**
+   * รอ resize message แรกจาก browser นานสุดเท่านี้ก่อน spawn shell เพื่อตั้งขนาด PTY ให้ตรงจอจริง
+   * (browser ส่ง resize ทันทีตอน open) — เทสต์ตั้ง 0 เพื่อข้าม (spawn ทันทีด้วยขนาด default)
+   */
+  initialSizeWaitMs?: number;
 }
 
 interface ResolvedOptions {
@@ -242,6 +252,58 @@ interface ResolvedOptions {
   idleTimeoutMs: number;
   idleCheckIntervalMs: number;
   connectTimeoutMs: number;
+  initialSizeWaitMs: number;
+}
+
+interface TerminalSize {
+  cols: number;
+  rows: number;
+}
+
+/** parse resize control frame จาก browser — คืน null ถ้าไม่ใช่ resize หรือค่าเพี้ยน */
+function parseResize(text: string): TerminalSize | null {
+  try {
+    const msg = JSON.parse(text) as { type?: unknown; cols?: unknown; rows?: unknown };
+    if (
+      msg.type === "resize" &&
+      Number.isInteger(msg.cols) &&
+      Number.isInteger(msg.rows) &&
+      (msg.cols as number) > 0 &&
+      (msg.rows as number) > 0 &&
+      (msg.cols as number) <= 1000 &&
+      (msg.rows as number) <= 1000
+    ) {
+      return { cols: msg.cols as number, rows: msg.rows as number };
+    }
+  } catch {
+    // ไม่ใช่ JSON — เมิน
+  }
+  return null;
+}
+
+/**
+ * รอ resize message แรกจาก browser (ส่งทันทีตอน open) เพื่อเอาขนาดจอจริงไปตั้ง PTY — คืน null
+ * ถ้า timeout หรือ wait=0 (ใช้ขนาด default แทน) keystroke ที่มาช่วงนี้ถูกทิ้ง: ผู้ใช้ยังไม่เห็น
+ * terminal (shell ยังไม่ spawn) จึงยังไม่มีอะไรให้พิมพ์จริง — ยอมทิ้งได้ ไม่ต้อง buffer
+ */
+function waitForFirstResize(ws: WebSocketLike, timeoutMs: number): Promise<TerminalSize | null> {
+  if (timeoutMs <= 0) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (v: TerminalSize | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(v);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    ws.onmessage = (event) => {
+      if (typeof event.data === "string") {
+        const size = parseResize(event.data);
+        if (size) finish(size);
+      }
+    };
+  });
 }
 
 /**
@@ -275,6 +337,14 @@ async function handleSession(
     return;
   }
 
+  // libsql (distroless) ไม่มี shell — ปฏิเสธก่อน exec เพื่อไม่ให้ผู้ใช้เจอ OCI error งง ๆ
+  // (control-api ก็กันชั้นหนึ่งแล้ว แต่กันซ้ำเผื่อ session ถูกสร้างทางอื่น)
+  const shell = terminalShellFor(service.type as ServiceType);
+  if (!shell) {
+    fail(`engine "${service.type}" ไม่มี shell ให้เปิด terminal (image เป็น distroless)`);
+    return;
+  }
+
   const containerName = serviceContainerName(row.service_id);
   const wsUrl = `${toWebSocketUrl(controlApiUrl)}/internal/terminal-relay/${row.id}`;
 
@@ -286,25 +356,47 @@ async function handleSession(
   const ws = connectResult.ws;
   onLog(`terminal session ${row.id} ต่อ control-api สำเร็จ — exec เข้า ${containerName}`);
 
-  const proc = docker.execInteractive(containerName, TERMINAL_SETTINGS.shell);
+  // รอ resize แรกจาก browser เพื่อตั้งขนาด PTY ให้ตรงจอจริง (ถ้าไม่มาใน timeout ใช้ default)
+  const size = await waitForFirstResize(ws, opts.initialSizeWaitMs);
+
+  let proc: ExecProcess;
+  try {
+    proc = docker.execInteractive(containerName, shell, {
+      sessionMarker: row.id,
+      ...(size ? { cols: size.cols, rows: size.rows } : {}),
+    });
+  } catch (err) {
+    // execInteractive throw (validation/spawn) หลัง ws เปิดแล้ว — ปิด ws ไม่ให้รั่ว
+    try {
+      ws.close();
+    } catch {
+      // ws อาจปิดไปแล้ว
+    }
+    fail(err instanceof Error ? err.message : String(err));
+    return;
+  }
 
   let lastActivity = Date.now();
   let closing = false;
 
   await new Promise<void>((resolveSession) => {
     function onAbort() {
-      finish("shutdown");
+      void finish("shutdown");
     }
 
     const idleTimer = setInterval(() => {
-      if (Date.now() - lastActivity >= opts.idleTimeoutMs) finish("idle");
+      if (Date.now() - lastActivity >= opts.idleTimeoutMs) void finish("idle");
     }, opts.idleCheckIntervalMs);
 
-    function finish(reason: string): void {
+    async function finish(reason: string): Promise<void> {
       if (closing) return;
       closing = true;
       clearInterval(idleTimer);
       signal.removeEventListener("abort", onAbort);
+      // reap shell ที่ค้างในคอนเทนเนอร์ก่อน — docker exec -it ทิ้งไว้เมื่อ client ตาย และ interactive
+      // shell ignore SIGTERM (ต้อง kill -9 ตาม marker) ถ้าไม่ทำ shell สะสมชน --pids-limit จน DB ล่ม
+      // await ก่อน resolve เพื่อให้ worker shutdown (Promise.allSettled) รอ reap เสร็จจริง
+      await docker.reapTerminalShell(containerName, row.id);
       try {
         if (!proc.killed) proc.kill();
       } catch {
@@ -322,15 +414,16 @@ async function handleSession(
 
     signal.addEventListener("abort", onAbort, { once: true });
     if (signal.aborted) {
-      finish("shutdown");
+      void finish("shutdown");
       return;
     }
 
     ws.onmessage = (event) => {
       lastActivity = Date.now();
       if (typeof event.data === "string") {
-        // text frame = JSON control message (ปัจจุบันมีแค่ resize) — ไม่มี PTY จริงให้ resize
-        // ตอนนี้ (ดู comment บน DockerCliClient.execInteractive) จึง no-op ทุก control message
+        // text frame = JSON control message (ปัจจุบันมีแค่ resize) — PTY มีจริงแล้ว (ผ่าน script)
+        // แต่ resize สด ๆ ยัง no-op: การเปลี่ยนขนาด PTY ต้อง ioctl TIOCSWINSZ บน master fd ซึ่ง
+        // Bun ไม่เปิดให้ทำง่าย ๆ ขนาดถูกตั้งครั้งเดียวตอนเปิด (ดู DockerCliClient.execInteractive)
         return;
       }
       writeStdin(proc, event.data);
@@ -339,7 +432,7 @@ async function handleSession(
       // onclose จะตามมาเสมอหลัง onerror ตาม WebSocket spec — ปล่อยให้ onclose เป็นคน finish
       onLog(`terminal session ${row.id} เจอ WebSocket error`);
     };
-    ws.onclose = () => finish("ws-closed");
+    ws.onclose = () => void finish("ws-closed");
 
     void pumpOutput(proc.stdout, (chunk) => {
       lastActivity = Date.now();
@@ -350,7 +443,7 @@ async function handleSession(
       if (ws.readyState === WS_OPEN) ws.send(chunk);
     });
 
-    void proc.exited.then(() => finish("process-exit"));
+    void proc.exited.then(() => void finish("process-exit"));
   });
 }
 
@@ -402,6 +495,7 @@ export async function terminalSessionLoop(
     idleTimeoutMs: options.idleTimeoutMs ?? TERMINAL_SETTINGS.idleTimeoutMs,
     idleCheckIntervalMs: options.idleCheckIntervalMs ?? 5_000,
     connectTimeoutMs: options.connectTimeoutMs ?? TERMINAL_SETTINGS.browserWaitTimeoutMs,
+    initialSizeWaitMs: options.initialSizeWaitMs ?? 750,
   };
 
   const active = new Set<Promise<void>>();

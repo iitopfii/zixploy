@@ -9,6 +9,32 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.1.7] — 2026-08-13
+
+### Fixed
+- **Web Terminal พิมพ์ไม่ได้** — เปิด terminal เข้า database แล้วพิมพ์อะไรก็ไม่มีอะไรเกิดขึ้น:
+  worker ใช้ `docker exec -i` (ไม่มี `-t` = ไม่มี PTY) จึงไม่มี terminal line discipline —
+  Enter จาก xterm.js ส่ง `\r` (CR) แต่ `sh` รอ `\n` (LF) คำสั่งเลยไม่เคยรัน และไม่มี echo ให้เห็น
+  สิ่งที่พิมพ์ แก้โดยครอบด้วย `script` (util-linux) ที่สร้าง PTY จริง — `docker exec -it` ยอมทำงาน
+  แม้ stdin ของ worker เป็น pipe และ container ได้ PTY ครบ (echo + CR→LF + prompt + line editing)
+  ตอนนี้ต่อ `psql`/`mysql`/`redis-cli` แล้วใช้งานได้จริง
+
+### Security
+- **แก้ pid-exhaustion DoS ของ terminal (พบจาก adversarial review ก่อน deploy)** — `docker exec -it`
+  ทิ้ง interactive shell ค้างในคอนเทนเนอร์ทุกครั้งที่ปิด session (ปิดแท็บ/idle/worker restart) เพราะ
+  daemon ไม่ปิด PTY ให้ และ interactive shell ignore SIGTERM การฆ่า `script` ฝั่ง worker จึงไม่พอ
+  shell สะสมเรื่อย ๆ จนชน `--pids-limit 512` แล้ว database ล่ม (พิสูจน์บนเครื่องจริง) — แก้โดยประทับ
+  `ZIXPLOY_TERM_SESSION=<id>` ลง shell แล้ว reap ด้วย `kill -9` ตาม marker ใน `/proc` ตอนปิดทุก session
+
+### Changed
+- Terminal ตั้งขนาด PTY ตามขนาดจอจริงของ browser ตอนเปิด (แทน fixed 100x30) — mysql/psql จัดตาราง
+  ได้พอดีตั้งแต่คำสั่งแรก
+- ซ่อนปุ่ม Terminal + ปฏิเสธที่ control-api/worker สำหรับ engine ที่ image ไม่มี shell (libsql
+  distroless) — เดิมกดแล้วเจอ OCI error งง ๆ ตอนนี้ไม่แสดงปุ่มเลย
+- ปิด WebSocket ที่ค้างถ้า spawn terminal ล้มเหลว (กัน connection รั่ว)
+
+---
+
 ## [0.1.6] — 2026-08-13
 
 ### Fixed

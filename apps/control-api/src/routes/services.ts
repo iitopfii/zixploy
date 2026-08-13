@@ -105,6 +105,7 @@ const serviceSchema = t.Object({
   backupIntervalHours: t.Nullable(t.Number()),
   backupRetentionCount: t.Number(),
   lastBackupAt: t.Nullable(t.Number()),
+  supportsTerminal: t.Boolean(),
   /** มีงานค้างอยู่ไหม — UI ใช้ปิดปุ่มและแสดง spinner */
   busy: t.Boolean(),
 });

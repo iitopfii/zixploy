@@ -61,7 +61,7 @@ import {
   previousDeploymentId,
   recordDeploymentContainer,
 } from "./components-loader";
-import type { HealthCheckParams } from "./health-check";
+import type { ContainerHealthParams, HealthCheckParams } from "./health-check";
 import type { DeployJobPayload } from "./payload";
 import { createDeployTimeout } from "./timeout";
 import { topoOrder } from "./topo";
@@ -78,10 +78,15 @@ export interface OrchestrateDeps {
   cloneCommit: (params: CloneParams) => Promise<void>;
   buildImage: (params: BuildImageParams) => Promise<BuildImageResult>;
   waitForHealthy: (params: HealthCheckParams) => Promise<void>;
+  /** รอ Docker-native health ของ dependency ที่ระบุ condition='healthy' (Phase 18 · F) */
+  waitForContainerHealthy: (params: ContainerHealthParams) => Promise<"healthy" | "no-healthcheck">;
   onLog: (line: string) => void;
   /** override drain ก่อนหยุดของเก่า — เทสต์ตั้ง 0 */
   drainMs?: number;
 }
+
+/** grace period ก่อน Docker เริ่มนับ healthcheck ว่า fail (ให้ process ใน container บูตก่อน) */
+const HEALTHCHECK_START_PERIOD_SEC = 5;
 
 type BuildPayload = Extract<DeployJobPayload, { kind: "build" }>;
 
@@ -258,6 +263,18 @@ export async function runComposePipeline(
         memoryLimitMb: c.memoryLimitMb,
         restartPolicy: c.restartPolicy,
         env: envInject.runtimeEnv,
+        // Docker-native HEALTHCHECK (Phase 18 · F) — จำเป็นให้ component อื่นรอแบบ condition='healthy'
+        ...(c.healthCmd
+          ? {
+              healthCheck: {
+                cmd: ["CMD-SHELL", c.healthCmd],
+                intervalSec: c.healthCheckIntervalSec,
+                timeoutSec: c.healthCheckTimeoutSec,
+                retries: c.healthCheckRetries,
+                startPeriodSec: HEALTHCHECK_START_PERIOD_SEC,
+              },
+            }
+          : {}),
       });
       // web ต้องเข้าถึงได้จาก Traefik → join proxy network เพิ่ม (นอกจาก per-deployment net)
       if (c.isWeb) await docker.connectNetwork(PROXY_NETWORK, containerId);
@@ -271,10 +288,43 @@ export async function runComposePipeline(
       ...(webContainerId ? { containerId: webContainerId } : {}),
     });
     const byId = new Map(created.map((c) => [c.component.id, c]));
+    const compById = new Map(allComponents.map((c) => [c.id, c]));
     // topo ต้องเห็น component ทั้งชุด (รวม managed_ref) เพื่อไม่ throw ตอน dependsOn ชี้ไป db
     for (const comp of topoOrder(allComponents)) {
       const entry = byId.get(comp.id);
       if (!entry) continue; // managed_ref / ตัวที่ไม่ได้สร้าง = ข้าม (ถือว่าพร้อมแล้ว)
+
+      // gate: รอ dependency ที่ระบุ condition='healthy' ให้ healthy ก่อน start ตัวนี้ (Phase 18 · F)
+      // topological order การันตีว่า dependency ถูก start ไปแล้ว (มาก่อนใน loop) — รอ Docker health ได้เลย
+      for (const dep of comp.dependsOn) {
+        if (dep.condition !== "healthy") continue;
+        const depComp = compById.get(dep.id);
+        if (!depComp) continue;
+        // managed_ref → รอ health ของ service container; อื่น ๆ → รอ container ที่เพิ่งสร้าง
+        const target =
+          depComp.sourceKind === "managed_ref"
+            ? depComp.managedServiceId
+              ? serviceContainerName(depComp.managedServiceId)
+              : null
+            : (byId.get(depComp.id)?.containerId ?? null);
+        if (!target) continue;
+        safeLog(`[health] "${comp.name}" รอ dependency "${depComp.name}" ให้ healthy ก่อน start`);
+        const outcome = await deps.waitForContainerHealthy({
+          docker,
+          containerId: target,
+          intervalSec: depComp.healthCheckIntervalSec,
+          timeoutSec: depComp.healthCheckTimeoutSec,
+          retries: depComp.healthCheckRetries,
+          signal: deployTimeout.signal,
+        });
+        if (outcome === "no-healthcheck") {
+          safeLog(
+            `[health] ⚠️ dependency "${depComp.name}" ไม่มี healthcheck — ถือว่า started แทน healthy ` +
+              "(ตั้ง healthCmd ที่ component นั้นเพื่อ gate จริง)",
+          );
+        }
+      }
+
       await docker.startContainer(entry.containerId);
       const port = healthPort(comp);
       if (port != null) {

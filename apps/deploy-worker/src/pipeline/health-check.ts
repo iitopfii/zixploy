@@ -129,3 +129,61 @@ export async function waitForHealthy(params: HealthCheckParams): Promise<void> {
 
   throw new AppError("HEALTH_CHECK_FAILED", `health check ไม่ผ่านหลัง ${retries} ครั้ง`);
 }
+
+export interface ContainerHealthParams {
+  docker: DockerCliClient;
+  containerId: string;
+  intervalSec: number;
+  timeoutSec: number;
+  retries: number;
+  signal: AbortSignal;
+}
+
+/**
+ * รอ Docker-native healthcheck ของ container ให้เป็น "healthy" — ใช้ตอน gate dependent ที่ระบุ
+ * depends_on condition='healthy' (Phase 18 · F) โดยอ่าน State.Health.Status ตรง ๆ (Docker รัน
+ * healthcheck เองในคอนเทนเนอร์ จึงไม่ต้องให้ worker เข้าถึง network ของ container นั้น)
+ *
+ * คืนค่า:
+ *  - "healthy"       → dependency พร้อม (start dependent ต่อได้)
+ *  - "no-healthcheck"→ container ไม่มี HEALTHCHECK เลย (State.Health หายทั้ง ๆ ที่ running) — ตัดสิน
+ *                       ไม่ได้ ให้ caller fallback เป็น 'started' พร้อม log เตือน (ไม่ throw กัน deploy ค้าง)
+ * throw:
+ *  - CONTAINER_CRASH_LOOP  ถ้า restart หลายครั้ง
+ *  - HEALTH_CHECK_FAILED   ถ้า unhealthy ยืดเยื้อ/หมด retries/ถูกยกเลิก/container หาย
+ */
+export async function waitForContainerHealthy(
+  params: ContainerHealthParams,
+): Promise<"healthy" | "no-healthcheck"> {
+  const { docker, containerId, intervalSec, timeoutSec, retries, signal } = params;
+  // budget รอบ = retries*(interval+timeout) แต่อย่างน้อยกันไว้ให้พอ container เพิ่ง start
+  const maxAttempts = Math.max(retries, 1) + Math.ceil(timeoutSec / Math.max(intervalSec, 1));
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (signal.aborted) {
+      throw new AppError("HEALTH_CHECK_FAILED", "รอ dependency healthy ถูกยกเลิกระหว่างทำงาน");
+    }
+    const inspect = await docker.inspectContainer(containerId);
+    if (!inspect) {
+      throw new AppError("HEALTH_CHECK_FAILED", "dependency container หายไประหว่างรอ healthy");
+    }
+    if (inspect.RestartCount >= CRASH_LOOP_RESTART_THRESHOLD) {
+      throw new AppError(
+        "CONTAINER_CRASH_LOOP",
+        `dependency container restart ${inspect.RestartCount} ครั้งระหว่างรอ healthy`,
+      );
+    }
+    const status = inspect.State.Health?.Status;
+    if (status === undefined) {
+      // ไม่มี HEALTHCHECK — ตัดสิน healthy ไม่ได้ (แต่ container running อยู่) ให้ caller ตัดสินใจ
+      if (inspect.State.Running) return "no-healthcheck";
+    } else {
+      if (status === "healthy") return "healthy";
+      if (status === "unhealthy" && (inspect.State.Health?.FailingStreak ?? 0) >= 5) {
+        throw new AppError("HEALTH_CHECK_FAILED", "dependency ตอบ healthcheck ไม่ผ่านติดต่อกันหลายครั้ง");
+      }
+    }
+    await sleep(intervalSec * 1000, signal);
+  }
+  throw new AppError("HEALTH_CHECK_FAILED", "dependency ไม่ healthy ภายในเวลาที่กำหนด");
+}

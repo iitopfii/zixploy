@@ -19,7 +19,7 @@ import { makeBuildLogger } from "../logs/writer";
 import type { ClaimedJob, JobOutcome } from "../queue";
 import { activate } from "./activate";
 import { runBuildOrRollbackPipeline } from "./build";
-import { waitForHealthy } from "./health-check";
+import { waitForContainerHealthy, waitForHealthy } from "./health-check";
 import { runComposePipeline } from "./orchestrate";
 import { parseDeployPayload } from "./payload";
 import { runRestart, runStop } from "./restart-stop";
@@ -74,6 +74,7 @@ export function createDispatcher(deps: DispatchDeps): ProcessJobFn {
             cloneCommit,
             buildImage,
             waitForHealthy,
+            waitForContainerHealthy,
             onLog: persistLog,
           },
           job,

@@ -151,6 +151,30 @@ describe("POST /projects/:id/components — create", () => {
     expect(res.status).toBe(201);
   });
 
+  test("healthCmd → 201 และคืนค่ากลับใน DTO (Phase F)", async () => {
+    const { app, cookie, csrf, projectId } = await setup();
+    const res = await post(app, `/api/v1/projects/${projectId}/components`, cookie, csrf, {
+      name: "db",
+      sourceKind: "image",
+      imageRef: "postgres:16-alpine",
+      healthCmd: "pg_isready -U app",
+    });
+    expect(res.status).toBe(201);
+    expect((await json(res)).healthCmd).toBe("pg_isready -U app");
+  });
+
+  test("healthCmd ที่มี control character (newline) → 422", async () => {
+    const { app, cookie, csrf, projectId } = await setup();
+    const res = await post(app, `/api/v1/projects/${projectId}/components`, cookie, csrf, {
+      name: "db",
+      sourceKind: "image",
+      imageRef: "postgres:16-alpine",
+      healthCmd: "pg_isready\nrm -rf /",
+    });
+    expect(res.status).toBe(422);
+    expect((await json(res)).error.code).toBe("COMPONENT_INVALID");
+  });
+
   test("managed_ref ที่ service ไม่มีจริง → 422", async () => {
     const { app, cookie, csrf, projectId } = await setup();
     const res = await post(app, `/api/v1/projects/${projectId}/components`, cookie, csrf, {

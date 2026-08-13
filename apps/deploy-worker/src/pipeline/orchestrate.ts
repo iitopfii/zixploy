@@ -80,6 +80,12 @@ export interface OrchestrateDeps {
   waitForHealthy: (params: HealthCheckParams) => Promise<void>;
   /** รอ Docker-native health ของ dependency ที่ระบุ condition='healthy' (Phase 18 · F) */
   waitForContainerHealthy: (params: ContainerHealthParams) => Promise<"healthy" | "no-healthcheck">;
+  /** สร้าง env เชื่อม managed database ให้ dependent ของ managed_ref (Phase 18 · F) */
+  buildManagedRefEnv: (
+    db: Database,
+    masterKeys: MasterKeys | null,
+    ref: DeployComponent,
+  ) => Promise<Record<string, string>>;
   onLog: (line: string) => void;
   /** override drain ก่อนหยุดของเก่า — เทสต์ตั้ง 0 */
   drainMs?: number;
@@ -239,6 +245,7 @@ export async function runComposePipeline(
     await docker.ensureNetwork(PROXY_NETWORK);
 
     const domainConfigs = loadProjectDomains(db, job.projectId);
+    const compById = new Map(allComponents.map((c) => [c.id, c]));
 
     for (const c of components) {
       const image = imageTags.get(c.id);
@@ -252,6 +259,18 @@ export async function runComposePipeline(
         ...(c.isWeb ? buildTraefikLabels(domainConfigs, job.projectId) : {}),
       };
 
+      // managed_ref dependency → ฉีด connection env (URL/host/port/user/pass/db) + ต้อง join
+      // PROXY_NETWORK เพื่อ resolve ชื่อ container ของ service (service อยู่บน proxy net ไม่ใช่ per-deployment)
+      const refDeps = c.dependsOn
+        .map((d) => compById.get(d.id))
+        .filter((dc): dc is DeployComponent => dc?.sourceKind === "managed_ref");
+      let componentEnv = envInject.runtimeEnv;
+      for (const ref of refDeps) {
+        const refEnv = await deps.buildManagedRefEnv(db, deps.masterKeys, ref);
+        componentEnv = { ...componentEnv, ...refEnv };
+      }
+      const needsProxy = c.isWeb || refDeps.length > 0;
+
       const { containerId } = await docker.createContainer({
         name: cName,
         image,
@@ -262,7 +281,7 @@ export async function runComposePipeline(
         cpuLimit: c.cpuLimit,
         memoryLimitMb: c.memoryLimitMb,
         restartPolicy: c.restartPolicy,
-        env: envInject.runtimeEnv,
+        env: componentEnv,
         // Docker-native HEALTHCHECK (Phase 18 · F) — จำเป็นให้ component อื่นรอแบบ condition='healthy'
         ...(c.healthCmd
           ? {
@@ -276,8 +295,8 @@ export async function runComposePipeline(
             }
           : {}),
       });
-      // web ต้องเข้าถึงได้จาก Traefik → join proxy network เพิ่ม (นอกจาก per-deployment net)
-      if (c.isWeb) await docker.connectNetwork(PROXY_NETWORK, containerId);
+      // join proxy: web (สำหรับ Traefik) หรือ component ที่ต้องต่อ managed database
+      if (needsProxy) await docker.connectNetwork(PROXY_NETWORK, containerId);
       created.push({ component: c, containerId, imageTag: image });
     }
 
@@ -288,7 +307,6 @@ export async function runComposePipeline(
       ...(webContainerId ? { containerId: webContainerId } : {}),
     });
     const byId = new Map(created.map((c) => [c.component.id, c]));
-    const compById = new Map(allComponents.map((c) => [c.id, c]));
     // topo ต้องเห็น component ทั้งชุด (รวม managed_ref) เพื่อไม่ throw ตอน dependsOn ชี้ไป db
     for (const comp of topoOrder(allComponents)) {
       const entry = byId.get(comp.id);

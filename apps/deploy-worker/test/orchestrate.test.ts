@@ -224,6 +224,7 @@ function baseDeps(db: Db, docker: ReturnType<typeof mockDocker>): OrchestrateDep
     buildImage: async () => ({ imageId: "sha256:abc", digest: "sha256:abc" }),
     waitForHealthy: async () => undefined,
     waitForContainerHealthy: async () => "healthy" as const,
+    buildManagedRefEnv: async () => ({}),
     onLog: () => {},
     drainMs: 0,
   };
@@ -579,6 +580,111 @@ describe("runComposePipeline — condition: healthy gating (Phase F)", () => {
     );
 
     expect(result.outcome).toBe("done");
+  });
+});
+
+describe("runComposePipeline — managed_ref connection env (Phase F)", () => {
+  test("component ที่ depends_on managed_ref → ฉีด connection env + join PROXY_NETWORK (แม้ไม่ใช่ web)", async () => {
+    const db = makeDb();
+    const projectId = insertComposeProject(db);
+    const serviceId = insertService(db);
+    const web = insertComponent(db, projectId, {
+      name: "web",
+      sourceKind: "build",
+      isWeb: true,
+      webPort: 3000,
+      position: 0,
+    });
+    const worker = insertComponent(db, projectId, {
+      name: "worker",
+      sourceKind: "build",
+      position: 1,
+    });
+    const dbComp = insertComponent(db, projectId, {
+      name: "db",
+      sourceKind: "managed_ref",
+      managedServiceId: serviceId,
+      position: 2,
+    });
+    insertDep(db, projectId, web, dbComp, "started");
+    insertDep(db, projectId, worker, dbComp, "started");
+    const deploymentId = insertDeployment(db, projectId);
+
+    const docker = mockDocker();
+    const deps = baseDeps(db, docker);
+    // mock: จำลอง connection env ที่ buildManagedRefEnv จะสร้างจาก service (ตั้งชื่อตาม ref.name)
+    deps.buildManagedRefEnv = async (_db, _mk, ref) => ({
+      [`${ref.name.toUpperCase()}_URL`]: `postgresql://app@${serviceContainerName(serviceId)}:5432/app`,
+    });
+
+    const result = await runComposePipeline(
+      deps,
+      makeJob(projectId, deploymentId),
+      GITHUB_PAYLOAD,
+      new AbortController().signal,
+    );
+
+    expect(result.outcome).toBe("done");
+
+    const envOf = (alias: string) => {
+      const call = docker.calls.find(
+        (c) =>
+          c.method === "createContainer" &&
+          (c.args[0] as { networkAliases?: string[] }).networkAliases?.[0] === alias,
+      );
+      return (call?.args[0] as { env?: Record<string, string> } | undefined)?.env ?? {};
+    };
+    // ทั้ง web และ worker ได้ DB_URL ฉีดเข้า env
+    const expectedUrl = `postgresql://app@${serviceContainerName(serviceId)}:5432/app`;
+    expect(envOf("web").DB_URL).toBe(expectedUrl);
+    expect(envOf("worker").DB_URL).toBe(expectedUrl);
+
+    // ทั้งคู่ join PROXY_NETWORK — worker (non-web) พิสูจน์ว่า needsProxy จาก managed_ref dep ทำงาน
+    const proxyJoins = docker.calls
+      .filter((c) => c.method === "connectNetwork" && c.args[0] === "zixploy-proxy")
+      .map((c) => c.args[1]);
+    expect(proxyJoins).toContain("cid-web");
+    expect(proxyJoins).toContain("cid-worker");
+  });
+
+  test("component ที่ไม่พึ่ง managed_ref → ไม่เรียก buildManagedRefEnv, non-web ไม่ join proxy", async () => {
+    const db = makeDb();
+    const projectId = insertComposeProject(db);
+    insertComponent(db, projectId, {
+      name: "web",
+      sourceKind: "build",
+      isWeb: true,
+      webPort: 3000,
+      position: 0,
+    });
+    insertComponent(db, projectId, {
+      name: "worker",
+      sourceKind: "build",
+      position: 1,
+    });
+    const deploymentId = insertDeployment(db, projectId);
+
+    const docker = mockDocker();
+    const deps = baseDeps(db, docker);
+    let refEnvCalls = 0;
+    deps.buildManagedRefEnv = async () => {
+      refEnvCalls++;
+      return {};
+    };
+
+    await runComposePipeline(
+      deps,
+      makeJob(projectId, deploymentId),
+      GITHUB_PAYLOAD,
+      new AbortController().signal,
+    );
+
+    expect(refEnvCalls).toBe(0);
+    const proxyJoins = docker.calls
+      .filter((c) => c.method === "connectNetwork" && c.args[0] === "zixploy-proxy")
+      .map((c) => c.args[1]);
+    expect(proxyJoins).toContain("cid-web"); // web join เสมอ
+    expect(proxyJoins).not.toContain("cid-worker"); // worker ไม่พึ่ง managed_ref → ไม่ join
   });
 });
 

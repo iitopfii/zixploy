@@ -543,6 +543,12 @@ function sourceSummary(c: Component): string {
           <small v-if="services.length === 0" class="muted">
             ยังไม่มี managed database — สร้างที่หน้า Databases ก่อน
           </small>
+          <small v-else class="muted">
+            component ที่ตั้ง depends_on มาที่ตัวนี้จะได้ env เชื่อมต่อฉีดอัตโนมัติ:
+            <code>{{ (form.name || "db").toUpperCase().replace(/-/g, "_") }}_URL</code>,
+            <code>_HOST</code>, <code>_PORT</code>, <code>_USERNAME</code>, <code>_PASSWORD</code>,
+            <code>_DATABASE</code>
+          </small>
         </label>
 
         <!-- runtime fields (build/image only) -->

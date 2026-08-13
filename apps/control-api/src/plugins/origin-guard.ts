@@ -32,6 +32,18 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  */
 const HEALTH_PATH = `${API_PREFIX}/system/health`;
 
+/**
+ * terminal relay ฝั่ง worker (apps/control-api/src/routes/terminal.ts) ยกเว้นการตรวจ Host
+ * เหมือนกัน — ตั้งใจอยู่นอก API_PREFIX เพื่อให้ Traefik (PathPrefix('/api/')) ไม่รู้จัก path นี้
+ * เลย แต่ origin guard ทำงาน**ก่อน**ถึง Traefik เสมอ (มันคือ middleware ข้างใน control-api เอง)
+ * worker ต่อเข้ามาผ่าน container DNS ตรง ๆ (`control-api:<port>`) จึงส่ง Host header เป็นชื่อ
+ * container ซึ่งไม่มีทางอยู่ใน allowlist ของ ZIXPLOY_BASE_URL ได้เลย — ถ้าไม่ยกเว้น worker จะต่อ
+ * ไม่ได้ทุกครั้งบนเครื่องที่ตั้ง ZIXPLOY_BASE_URL ไว้ (คือทุกเครื่อง production ตามที่แนะนำ)
+ * ปลอดภัยที่จะยกเว้นเพราะ path นี้มี defense-in-depth อีกสองชั้นอยู่แล้ว: (1) Traefik ไม่รู้จัก
+ * path นี้เลยจาก public internet และ (2) bearer token (internal-token.ts) ที่ route ต้องเช็คเอง
+ */
+const TERMINAL_RELAY_PATH_PREFIX = "/internal/terminal-relay/";
+
 function isProduction(): boolean {
   return process.env.NODE_ENV === "production";
 }
@@ -99,7 +111,10 @@ export function originGuard(
 
     // health endpoint ข้ามการตรวจ Host เสมอ (ดู HEALTH_PATH) — เทียบ pathname อย่างเดียว
     // ไม่เอา query string มาเกี่ยว กัน `/other?x=/api/v1/system/health` เล็ดลอด
-    if (new URL(request.url).pathname === HEALTH_PATH) return;
+    const pathname = new URL(request.url).pathname;
+    if (pathname === HEALTH_PATH) return;
+    // terminal relay ฝั่ง worker ก็ข้ามเช่นกัน (ดู TERMINAL_RELAY_PATH_PREFIX ด้านบน)
+    if (pathname.startsWith(TERMINAL_RELAY_PATH_PREFIX)) return;
 
     // HTTP/1.1 บังคับให้ client ส่ง Host header เสมอ — ไม่มีค่าได้เฉพาะ request ที่สร้างในหน่วยความจำ
     // ตรง ๆ (เช่นในเทสต์ที่เรียก app.handle() โดยไม่ผ่าน socket จริง) จึงข้ามแทนที่จะ throw

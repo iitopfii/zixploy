@@ -9,6 +9,25 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.1.8] — 2026-08-13
+
+### Added
+- **Multi-container (compose-style) projects — Phase 18** — โปรเจกต์เดียวรันได้หลาย container
+  (เว็บ + worker + database) แบบ docker-compose:
+  - แท็บ **Components** ใหม่ในหน้า project: เพิ่ม/แก้/ลบ component ทีละตัว (build จาก Dockerfile,
+    image สำเร็จรูป, หรืออ้าง managed database), ตั้ง `depends_on` ระหว่าง component พร้อมเงื่อนไข
+    (started/healthy) แล้วกด "เปลี่ยนเป็น compose" เมื่อพร้อม (ต้องมี ≥1 component + ≥1 web)
+  - worker orchestrator ใหม่: build/pull ทุก component → สร้าง per-deployment network ที่ให้แต่ละ
+    container คุยกันด้วย DNS alias (เช่น `redis://cache:6379`) → start ตามลำดับ topological +
+    รอ health check ตามเงื่อนไข → activate ทับ generation เก่าแบบ start-before-stop (ADR-0004)
+  - โปรเจกต์เดิม (mode='single') วิ่ง pipeline เดิม byte-for-byte — ฟีเจอร์นี้ opt-in ล้วน
+
+### Notes
+- managed_ref (อ้าง database ที่มีอยู่) เวอร์ชันนี้ verify ว่า service รันอยู่เท่านั้น — การ inject
+  connection string อัตโนมัติ + component-scoped env/volume จะตามมาใน phase ถัดไป
+
+---
+
 ## [0.1.7] — 2026-08-13
 
 ### Fixed

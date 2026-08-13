@@ -22,6 +22,8 @@ export interface DeployComponent {
   isWeb: boolean;
   webPort: number | null;
   healthCheckPath: string | null;
+  /** คำสั่ง Docker HEALTHCHECK — ตั้งไว้ = orchestrator gate dependent ที่ระบุ condition='healthy' ได้ */
+  healthCmd: string | null;
   healthCheckIntervalSec: number;
   healthCheckTimeoutSec: number;
   healthCheckRetries: number;
@@ -48,6 +50,7 @@ interface ComponentRow {
   is_web: number;
   web_port: number | null;
   health_check_path: string | null;
+  health_cmd: string | null;
   health_check_interval_sec: number;
   health_check_timeout_sec: number;
   health_check_retries: number;
@@ -63,7 +66,7 @@ export function loadDeployComponents(db: Database, projectId: string): DeployCom
     .query<ComponentRow, [string]>(
       `SELECT id, name, role, source_kind, dockerfile_path, build_context, target_stage, image_ref,
               managed_service_id, command, internal_port, is_web, web_port, health_check_path,
-              health_check_interval_sec, health_check_timeout_sec, health_check_retries,
+              health_cmd, health_check_interval_sec, health_check_timeout_sec, health_check_retries,
               cpu_limit, memory_limit_mb, restart_policy, position
          FROM project_components
         WHERE project_id = ? AND enabled = 1
@@ -98,6 +101,7 @@ export function loadDeployComponents(db: Database, projectId: string): DeployCom
     isWeb: r.is_web === 1,
     webPort: r.web_port,
     healthCheckPath: r.health_check_path,
+    healthCmd: r.health_cmd,
     healthCheckIntervalSec: r.health_check_interval_sec,
     healthCheckTimeoutSec: r.health_check_timeout_sec,
     healthCheckRetries: r.health_check_retries,

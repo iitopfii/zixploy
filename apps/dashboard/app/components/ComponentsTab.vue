@@ -38,6 +38,7 @@ interface Component {
   isWeb: boolean;
   webPort: number | null;
   healthCheckPath: string | null;
+  healthCmd: string | null;
   cpuLimit: number | null;
   memoryLimitMb: number | null;
   restartPolicy: string;
@@ -112,6 +113,7 @@ const blankForm = () => ({
   isWeb: false,
   webPort: "",
   healthCheckPath: "",
+  healthCmd: "",
   cpuLimit: "",
   memoryLimitMb: "",
   restartPolicy: "unless-stopped" as string,
@@ -151,6 +153,7 @@ function openEdit(c: Component) {
     imageRef: c.imageRef ?? "",
     managedServiceId: c.managedServiceId ?? "",
     command: c.command ?? "",
+    healthCmd: c.healthCmd ?? "",
     internalPort: c.internalPort != null ? String(c.internalPort) : "",
     isWeb: c.isWeb,
     webPort: c.webPort != null ? String(c.webPort) : "",
@@ -204,6 +207,7 @@ function buildPayload() {
     isWeb: form.isWeb,
     webPort: form.isWeb ? toNum(form.webPort) : null,
     healthCheckPath: form.healthCheckPath.trim() === "" ? null : form.healthCheckPath.trim(),
+    healthCmd: form.healthCmd.trim() === "" ? null : form.healthCmd.trim(),
     cpuLimit: toNum(form.cpuLimit),
     memoryLimitMb: toNum(form.memoryLimitMb),
   };
@@ -539,6 +543,12 @@ function sourceSummary(c: Component): string {
           <small v-if="services.length === 0" class="muted">
             ยังไม่มี managed database — สร้างที่หน้า Databases ก่อน
           </small>
+          <small v-else class="muted">
+            component ที่ตั้ง depends_on มาที่ตัวนี้จะได้ env เชื่อมต่อฉีดอัตโนมัติ:
+            <code>{{ (form.name || "db").toUpperCase().replace(/-/g, "_") }}_URL</code>,
+            <code>_HOST</code>, <code>_PORT</code>, <code>_USERNAME</code>, <code>_PASSWORD</code>,
+            <code>_DATABASE</code>
+          </small>
         </label>
 
         <!-- runtime fields (build/image only) -->
@@ -562,6 +572,15 @@ function sourceSummary(c: Component): string {
               <input v-model="form.healthCheckPath" class="mono" placeholder="/health" />
             </label>
           </div>
+
+          <label>
+            <span>Health command (ไม่บังคับ)</span>
+            <input v-model="form.healthCmd" class="mono" placeholder="redis-cli ping" />
+            <small class="muted">
+              คำสั่งตรวจสุขภาพในคอนเทนเนอร์ (Docker HEALTHCHECK) — จำเป็นถ้ามี component อื่นตั้ง
+              depends_on แบบ "healthy" มาที่ตัวนี้ (เช่น <code>pg_isready -U app</code>, <code>redis-cli ping</code>)
+            </small>
+          </label>
 
           <label>
             <span>Command (ไม่บังคับ)</span>

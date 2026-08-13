@@ -43,6 +43,7 @@ export interface ComponentRow {
   health_check_interval_sec: number;
   health_check_timeout_sec: number;
   health_check_retries: number;
+  health_cmd: string | null;
   cpu_limit: number | null;
   memory_limit_mb: number | null;
   restart_policy: string;
@@ -74,6 +75,8 @@ export interface ComponentDto {
   isWeb: boolean;
   webPort: number | null;
   healthCheckPath: string | null;
+  /** คำสั่ง Docker HEALTHCHECK ในคอนเทนเนอร์ — จำเป็นเมื่อมี component อื่นรอตัวนี้แบบ condition='healthy' */
+  healthCmd: string | null;
   cpuLimit: number | null;
   memoryLimitMb: number | null;
   restartPolicy: string;
@@ -98,6 +101,7 @@ export interface ComponentInput {
   isWeb?: boolean;
   webPort?: number | null;
   healthCheckPath?: string | null;
+  healthCmd?: string | null;
   cpuLimit?: number | null;
   memoryLimitMb?: number | null;
   restartPolicy?: string;
@@ -109,7 +113,7 @@ const SELECT_ALL = `
   id, project_id, name, role, source_kind, dockerfile_path, build_context, target_stage,
   image_ref, managed_service_id, command, internal_port, is_web, web_port, exposed_port,
   health_check_path, health_check_interval_sec, health_check_timeout_sec, health_check_retries,
-  cpu_limit, memory_limit_mb, restart_policy, position, enabled, created_at, updated_at
+  health_cmd, cpu_limit, memory_limit_mb, restart_policy, position, enabled, created_at, updated_at
 `;
 
 // ---------------------------------------------------------------------------
@@ -163,6 +167,7 @@ export function toDto(row: ComponentRow, deps: ComponentDep[]): ComponentDto {
     isWeb: row.is_web === 1,
     webPort: row.web_port,
     healthCheckPath: row.health_check_path,
+    healthCmd: row.health_cmd,
     cpuLimit: row.cpu_limit,
     memoryLimitMb: row.memory_limit_mb,
     restartPolicy: row.restart_policy,
@@ -267,6 +272,22 @@ function validateInput(db: Database, input: ComponentInput): void {
   }
   validatePort(input.webPort, "webPort");
   validatePort(input.internalPort, "internalPort");
+
+  // health_cmd รันใน container ผ่าน CMD-SHELL (argv เดี่ยว) — กันความยาวเกิน + control char/newline
+  // ที่จะทำให้ประกอบ docker args เพี้ยน (managed_ref ใช้ healthcheck ของ service เองจึงไม่ต้องตั้ง)
+  if (input.healthCmd != null && input.healthCmd !== "") {
+    if (input.healthCmd.length > 1024) {
+      throw new AppError("COMPONENT_INVALID", "healthCmd ยาวเกิน 1024 ตัวอักษร", {
+        field: "healthCmd",
+      });
+    }
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: กัน control char ใน argv โดยเจตนา
+    if (/[\x00-\x1f\x7f]/.test(input.healthCmd)) {
+      throw new AppError("COMPONENT_INVALID", "healthCmd ต้องไม่มี control character หรือขึ้นบรรทัดใหม่", {
+        field: "healthCmd",
+      });
+    }
+  }
 
   if (input.cpuLimit != null && input.cpuLimit <= 0) {
     throw new AppError("COMPONENT_INVALID", "cpuLimit ต้องมากกว่า 0", { field: "cpuLimit" });
@@ -388,8 +409,8 @@ export function createComponent(
       `INSERT INTO project_components
          (id, project_id, name, role, source_kind, dockerfile_path, build_context, target_stage,
           image_ref, managed_service_id, command, internal_port, is_web, web_port,
-          health_check_path, cpu_limit, memory_limit_mb, restart_policy, position, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          health_check_path, health_cmd, cpu_limit, memory_limit_mb, restart_policy, position, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       projectId,
@@ -406,6 +427,7 @@ export function createComponent(
       input.isWeb ? 1 : 0,
       input.webPort ?? null,
       input.healthCheckPath ?? null,
+      input.healthCmd ?? null,
       input.cpuLimit ?? null,
       input.memoryLimitMb ?? null,
       input.restartPolicy ?? "unless-stopped",
@@ -438,6 +460,7 @@ export interface ComponentUpdate {
   isWeb?: boolean;
   webPort?: number | null;
   healthCheckPath?: string | null;
+  healthCmd?: string | null;
   cpuLimit?: number | null;
   memoryLimitMb?: number | null;
   restartPolicy?: string;
@@ -472,6 +495,7 @@ export function updateComponent(
     isWeb: update.isWeb ?? row.is_web === 1,
     webPort: update.webPort ?? row.web_port,
     healthCheckPath: update.healthCheckPath ?? row.health_check_path,
+    healthCmd: update.healthCmd ?? row.health_cmd,
     cpuLimit: update.cpuLimit ?? row.cpu_limit,
     memoryLimitMb: update.memoryLimitMb ?? row.memory_limit_mb,
     restartPolicy: update.restartPolicy ?? row.restart_policy,
@@ -491,6 +515,7 @@ export function updateComponent(
   if (update.isWeb !== undefined) set("is_web", update.isWeb ? 1 : 0);
   if (update.webPort !== undefined) set("web_port", update.webPort);
   if (update.healthCheckPath !== undefined) set("health_check_path", update.healthCheckPath);
+  if (update.healthCmd !== undefined) set("health_cmd", update.healthCmd);
   if (update.cpuLimit !== undefined) set("cpu_limit", update.cpuLimit);
   if (update.memoryLimitMb !== undefined) set("memory_limit_mb", update.memoryLimitMb);
   if (update.restartPolicy !== undefined) set("restart_policy", update.restartPolicy);

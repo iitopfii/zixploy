@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadMigrations, migrateUp, migrationsDir, openDatabase } from "@zixploy/db";
-import { AppError, ulid } from "@zixploy/shared";
+import { AppError, serviceContainerName, ulid } from "@zixploy/shared";
 import type { OrchestrateDeps } from "../src/pipeline/orchestrate";
 import { runComposePipeline } from "../src/pipeline/orchestrate";
 import type { ClaimedJob } from "../src/queue";
@@ -62,6 +62,7 @@ interface ComponentInput {
   internalPort?: number | null;
   imageRef?: string | null;
   managedServiceId?: string | null;
+  healthCmd?: string | null;
   position?: number;
 }
 
@@ -71,8 +72,8 @@ function insertComponent(db: Db, projectId: string, c: ComponentInput): string {
   db.query(
     `INSERT INTO project_components
       (id, project_id, name, role, source_kind, dockerfile_path, build_context, image_ref,
-       managed_service_id, internal_port, is_web, web_port, position, enabled, created_at, updated_at)
-     VALUES (?, ?, ?, 'app', ?, ?, '.', ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+       managed_service_id, internal_port, is_web, web_port, health_cmd, position, enabled, created_at, updated_at)
+     VALUES (?, ?, ?, 'app', ?, ?, '.', ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
   ).run(
     id,
     projectId,
@@ -84,6 +85,7 @@ function insertComponent(db: Db, projectId: string, c: ComponentInput): string {
     c.internalPort ?? null,
     c.isWeb ? 1 : 0,
     c.webPort ?? null,
+    c.healthCmd ?? null,
     c.position ?? 0,
     now,
     now,
@@ -221,6 +223,8 @@ function baseDeps(db: Db, docker: ReturnType<typeof mockDocker>): OrchestrateDep
     cloneCommit: fakeCloneCommit,
     buildImage: async () => ({ imageId: "sha256:abc", digest: "sha256:abc" }),
     waitForHealthy: async () => undefined,
+    waitForContainerHealthy: async () => "healthy" as const,
+    buildManagedRefEnv: async () => ({}),
     onLog: () => {},
     drainMs: 0,
   };
@@ -419,6 +423,268 @@ describe("runComposePipeline — topological start + health gating", () => {
 
     // gate เฉพาะ web (port 3000) เท่านั้น — worker (non-web) ถูกข้ามแม้มี internalPort
     expect(probes).toEqual([{ port: 3000, network: "zixploy-proxy" }]);
+  });
+});
+
+describe("runComposePipeline — condition: healthy gating (Phase F)", () => {
+  test("รอ dependency ให้ healthy ก่อน start ตัวที่ขึ้นกับมัน (start dep → wait healthy → start comp)", async () => {
+    const db = makeDb();
+    const projectId = insertComposeProject(db);
+    const web = insertComponent(db, projectId, {
+      name: "web",
+      sourceKind: "build",
+      isWeb: true,
+      webPort: 3000,
+      position: 0,
+    });
+    const cache = insertComponent(db, projectId, {
+      name: "cache",
+      sourceKind: "image",
+      imageRef: "redis:7-alpine",
+      healthCmd: "redis-cli ping",
+      position: 1,
+    });
+    insertDep(db, projectId, web, cache, "healthy");
+    const deploymentId = insertDeployment(db, projectId);
+
+    const events: string[] = [];
+    const docker = mockDocker({
+      startContainer: async (id: unknown) => {
+        events.push(`start:${String(id).replace("cid-", "")}`);
+      },
+    });
+    const deps = baseDeps(db, docker);
+    deps.waitForContainerHealthy = async (p) => {
+      events.push(`wait:${String(p.containerId).replace("cid-", "")}`);
+      return "healthy";
+    };
+
+    const result = await runComposePipeline(
+      deps,
+      makeJob(projectId, deploymentId),
+      GITHUB_PAYLOAD,
+      new AbortController().signal,
+    );
+
+    expect(result.outcome).toBe("done");
+    // cache start ก่อน (topo) → web รอ cache healthy → web start
+    expect(events).toEqual(["start:cache", "wait:cache", "start:web"]);
+  });
+
+  test("dependency แบบ managed_ref (healthy) → รอ health ของ service container", async () => {
+    const db = makeDb();
+    const projectId = insertComposeProject(db);
+    const serviceId = insertService(db);
+    const web = insertComponent(db, projectId, {
+      name: "web",
+      sourceKind: "build",
+      isWeb: true,
+      webPort: 3000,
+      position: 0,
+    });
+    const dbComp = insertComponent(db, projectId, {
+      name: "db",
+      sourceKind: "managed_ref",
+      managedServiceId: serviceId,
+      position: 1,
+    });
+    insertDep(db, projectId, web, dbComp, "healthy");
+    const deploymentId = insertDeployment(db, projectId);
+
+    const docker = mockDocker();
+    const waited: string[] = [];
+    const deps = baseDeps(db, docker);
+    deps.waitForContainerHealthy = async (p) => {
+      waited.push(String(p.containerId));
+      return "healthy";
+    };
+
+    await runComposePipeline(
+      deps,
+      makeJob(projectId, deploymentId),
+      GITHUB_PAYLOAD,
+      new AbortController().signal,
+    );
+
+    // gate รอ health ของ container ของ managed service (ไม่ใช่ container ที่สร้างใหม่)
+    expect(waited).toEqual([serviceContainerName(serviceId)]);
+  });
+
+  test("component ที่ตั้ง healthCmd → createContainer ได้ Docker HEALTHCHECK (CMD-SHELL)", async () => {
+    const db = makeDb();
+    const projectId = insertComposeProject(db);
+    insertComponent(db, projectId, {
+      name: "web",
+      sourceKind: "build",
+      isWeb: true,
+      webPort: 3000,
+      position: 0,
+    });
+    insertComponent(db, projectId, {
+      name: "cache",
+      sourceKind: "image",
+      imageRef: "redis:7-alpine",
+      healthCmd: "redis-cli ping",
+      position: 1,
+    });
+    const deploymentId = insertDeployment(db, projectId);
+    const docker = mockDocker();
+
+    await runComposePipeline(
+      baseDeps(db, docker),
+      makeJob(projectId, deploymentId),
+      GITHUB_PAYLOAD,
+      new AbortController().signal,
+    );
+
+    const cacheCreate = docker.calls.find(
+      (c) =>
+        c.method === "createContainer" &&
+        (c.args[0] as { networkAliases?: string[] }).networkAliases?.[0] === "cache",
+    );
+    const params = cacheCreate?.args[0] as {
+      healthCheck?: { cmd: string[]; intervalSec: number };
+    };
+    expect(params.healthCheck?.cmd).toEqual(["CMD-SHELL", "redis-cli ping"]);
+  });
+
+  test("dependency ไม่มี healthcheck → fallback เป็น started, deploy ยังสำเร็จ (ไม่ค้าง/fail)", async () => {
+    const db = makeDb();
+    const projectId = insertComposeProject(db);
+    const web = insertComponent(db, projectId, {
+      name: "web",
+      sourceKind: "build",
+      isWeb: true,
+      webPort: 3000,
+      position: 0,
+    });
+    // cache ไม่มี healthCmd → waitForContainerHealthy คืน "no-healthcheck"
+    const cache = insertComponent(db, projectId, {
+      name: "cache",
+      sourceKind: "image",
+      imageRef: "redis:7-alpine",
+      position: 1,
+    });
+    insertDep(db, projectId, web, cache, "healthy");
+    const deploymentId = insertDeployment(db, projectId);
+
+    const docker = mockDocker();
+    const deps = baseDeps(db, docker);
+    deps.waitForContainerHealthy = async () => "no-healthcheck";
+
+    const result = await runComposePipeline(
+      deps,
+      makeJob(projectId, deploymentId),
+      GITHUB_PAYLOAD,
+      new AbortController().signal,
+    );
+
+    expect(result.outcome).toBe("done");
+  });
+});
+
+describe("runComposePipeline — managed_ref connection env (Phase F)", () => {
+  test("component ที่ depends_on managed_ref → ฉีด connection env + join PROXY_NETWORK (แม้ไม่ใช่ web)", async () => {
+    const db = makeDb();
+    const projectId = insertComposeProject(db);
+    const serviceId = insertService(db);
+    const web = insertComponent(db, projectId, {
+      name: "web",
+      sourceKind: "build",
+      isWeb: true,
+      webPort: 3000,
+      position: 0,
+    });
+    const worker = insertComponent(db, projectId, {
+      name: "worker",
+      sourceKind: "build",
+      position: 1,
+    });
+    const dbComp = insertComponent(db, projectId, {
+      name: "db",
+      sourceKind: "managed_ref",
+      managedServiceId: serviceId,
+      position: 2,
+    });
+    insertDep(db, projectId, web, dbComp, "started");
+    insertDep(db, projectId, worker, dbComp, "started");
+    const deploymentId = insertDeployment(db, projectId);
+
+    const docker = mockDocker();
+    const deps = baseDeps(db, docker);
+    // mock: จำลอง connection env ที่ buildManagedRefEnv จะสร้างจาก service (ตั้งชื่อตาม ref.name)
+    deps.buildManagedRefEnv = async (_db, _mk, ref) => ({
+      [`${ref.name.toUpperCase()}_URL`]: `postgresql://app@${serviceContainerName(serviceId)}:5432/app`,
+    });
+
+    const result = await runComposePipeline(
+      deps,
+      makeJob(projectId, deploymentId),
+      GITHUB_PAYLOAD,
+      new AbortController().signal,
+    );
+
+    expect(result.outcome).toBe("done");
+
+    const envOf = (alias: string) => {
+      const call = docker.calls.find(
+        (c) =>
+          c.method === "createContainer" &&
+          (c.args[0] as { networkAliases?: string[] }).networkAliases?.[0] === alias,
+      );
+      return (call?.args[0] as { env?: Record<string, string> } | undefined)?.env ?? {};
+    };
+    // ทั้ง web และ worker ได้ DB_URL ฉีดเข้า env
+    const expectedUrl = `postgresql://app@${serviceContainerName(serviceId)}:5432/app`;
+    expect(envOf("web").DB_URL).toBe(expectedUrl);
+    expect(envOf("worker").DB_URL).toBe(expectedUrl);
+
+    // ทั้งคู่ join PROXY_NETWORK — worker (non-web) พิสูจน์ว่า needsProxy จาก managed_ref dep ทำงาน
+    const proxyJoins = docker.calls
+      .filter((c) => c.method === "connectNetwork" && c.args[0] === "zixploy-proxy")
+      .map((c) => c.args[1]);
+    expect(proxyJoins).toContain("cid-web");
+    expect(proxyJoins).toContain("cid-worker");
+  });
+
+  test("component ที่ไม่พึ่ง managed_ref → ไม่เรียก buildManagedRefEnv, non-web ไม่ join proxy", async () => {
+    const db = makeDb();
+    const projectId = insertComposeProject(db);
+    insertComponent(db, projectId, {
+      name: "web",
+      sourceKind: "build",
+      isWeb: true,
+      webPort: 3000,
+      position: 0,
+    });
+    insertComponent(db, projectId, {
+      name: "worker",
+      sourceKind: "build",
+      position: 1,
+    });
+    const deploymentId = insertDeployment(db, projectId);
+
+    const docker = mockDocker();
+    const deps = baseDeps(db, docker);
+    let refEnvCalls = 0;
+    deps.buildManagedRefEnv = async () => {
+      refEnvCalls++;
+      return {};
+    };
+
+    await runComposePipeline(
+      deps,
+      makeJob(projectId, deploymentId),
+      GITHUB_PAYLOAD,
+      new AbortController().signal,
+    );
+
+    expect(refEnvCalls).toBe(0);
+    const proxyJoins = docker.calls
+      .filter((c) => c.method === "connectNetwork" && c.args[0] === "zixploy-proxy")
+      .map((c) => c.args[1]);
+    expect(proxyJoins).toContain("cid-web"); // web join เสมอ
+    expect(proxyJoins).not.toContain("cid-worker"); // worker ไม่พึ่ง managed_ref → ไม่ join
   });
 });
 

@@ -16,7 +16,7 @@
 import { describe, expect, test } from "bun:test";
 import { loadMigrations, migrateUp, migrationsDir, openDatabase } from "@zixploy/db";
 import { ulid } from "@zixploy/shared";
-import { injectEnvVars } from "../src/env/inject";
+import { injectComponentEnv, injectEnvVars } from "../src/env/inject";
 import { encryptEnvelope } from "../src/github/envelope";
 import { createMasterKeys } from "../src/github/master-key";
 
@@ -45,6 +45,16 @@ function insertProject(db: ReturnType<typeof makeDb>): string {
   return projectId;
 }
 
+function insertComponent(db: ReturnType<typeof makeDb>, projectId: string, name: string): string {
+  const id = ulid();
+  const now = Date.now();
+  db.query(
+    `INSERT INTO project_components (id, project_id, name, source_kind, created_at, updated_at)
+     VALUES (?, ?, ?, 'build', ?, ?)`,
+  ).run(id, projectId, name, now, now);
+  return id;
+}
+
 async function insertEnvVar(
   db: ReturnType<typeof makeDb>,
   masterKeys: Awaited<ReturnType<typeof makeKeys>>,
@@ -55,17 +65,36 @@ async function insertEnvVar(
     isSecret?: boolean;
     scope?: "runtime" | "build" | "both";
     enabled?: boolean;
+    componentId?: string | null;
   },
 ) {
-  const { key, value, isSecret = false, scope = "runtime", enabled = true } = opts;
+  const {
+    key,
+    value,
+    isSecret = false,
+    scope = "runtime",
+    enabled = true,
+    componentId = null,
+  } = opts;
   const aad = `env:${projectId}:${key}`;
   const ciphertext = await encryptEnvelope(masterKeys, value, aad);
   const now = Date.now();
   db.query(
     `INSERT INTO environment_variables
-      (id, project_id, key, value_ciphertext, is_secret, scope, enabled, version, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-  ).run(ulid(), projectId, key, ciphertext, isSecret ? 1 : 0, scope, enabled ? 1 : 0, now, now);
+      (id, project_id, key, value_ciphertext, is_secret, scope, enabled, version, created_at, updated_at, component_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+  ).run(
+    ulid(),
+    projectId,
+    key,
+    ciphertext,
+    isSecret ? 1 : 0,
+    scope,
+    enabled ? 1 : 0,
+    now,
+    now,
+    componentId,
+  );
 }
 
 function noLog(_: string) {}
@@ -241,6 +270,43 @@ describe("injectEnvVars — secretValues ครอบคลุมทุก scope
     const result = await injectEnvVars(db, keys, projectId, noLog);
     expect(result.secretValues.sort()).toEqual(["sec-both", "sec-build", "sec-runtime"]);
     expect(result.secretValues).not.toContain("not-secret");
+  });
+});
+
+describe("component-scoped env (Phase F)", () => {
+  test("injectEnvVars (project-wide) ไม่รวม env ของ component", async () => {
+    const db = makeDb();
+    const keys = await makeKeys();
+    const projectId = insertProject(db);
+    const compId = insertComponent(db, projectId, "web");
+    await insertEnvVar(db, keys, projectId, { key: "SHARED", value: "proj" }); // project-wide
+    await insertEnvVar(db, keys, projectId, {
+      key: "ONLY_WEB",
+      value: "web-val",
+      componentId: compId,
+    });
+
+    const result = await injectEnvVars(db, keys, projectId, noLog);
+    // เห็นเฉพาะ project-wide — env ของ component ไม่รั่วเข้า project-wide inject
+    expect(result.runtimeEnv).toEqual({ SHARED: "proj" });
+  });
+
+  test("injectComponentEnv คืนเฉพาะ env ของ component นั้น (ไม่ปน component อื่น/project-wide)", async () => {
+    const db = makeDb();
+    const keys = await makeKeys();
+    const projectId = insertProject(db);
+    const web = insertComponent(db, projectId, "web");
+    const worker = insertComponent(db, projectId, "worker");
+    await insertEnvVar(db, keys, projectId, { key: "SHARED", value: "proj" }); // project-wide
+    await insertEnvVar(db, keys, projectId, { key: "K", value: "web-val", componentId: web });
+    await insertEnvVar(db, keys, projectId, { key: "K", value: "worker-val", componentId: worker });
+
+    const webEnv = await injectComponentEnv(db, keys, projectId, web, noLog);
+    const workerEnv = await injectComponentEnv(db, keys, projectId, worker, noLog);
+
+    // key เดียวกัน "K" อยู่ได้ทั้งสอง component ด้วยค่าต่างกัน (partial unique index ยอมให้)
+    expect(webEnv.runtimeEnv).toEqual({ K: "web-val" });
+    expect(workerEnv.runtimeEnv).toEqual({ K: "worker-val" });
   });
 });
 

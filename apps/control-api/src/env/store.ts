@@ -28,6 +28,7 @@ interface EnvVarRow {
   version: number;
   created_at: number;
   updated_at: number;
+  component_id: string | null;
 }
 
 export interface EnvVarSummary {
@@ -39,6 +40,8 @@ export interface EnvVarSummary {
   scope: "runtime" | "build" | "both";
   enabled: boolean;
   version: number;
+  /** null = project-wide, มีค่า = ผูกกับ component นั้น (Phase 18 · F) */
+  componentId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -64,7 +67,7 @@ export interface DecryptedEnvVar {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const SELECT_COLS = `id, project_id, key, value_ciphertext, is_secret, scope, enabled, version, created_at, updated_at`;
+const SELECT_COLS = `id, project_id, key, value_ciphertext, is_secret, scope, enabled, version, created_at, updated_at, component_id`;
 
 function aad(projectId: string, key: string): string {
   return `env:${projectId}:${key}`;
@@ -79,6 +82,7 @@ function toSummary(row: EnvVarRow): EnvVarSummary {
     scope: row.scope as "runtime" | "build" | "both",
     enabled: row.enabled === 1,
     version: row.version,
+    componentId: row.component_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -107,18 +111,33 @@ function validateKeys(vars: EnvVarInput[]): void {
 // Public API
 // ---------------------------------------------------------------------------
 
-/** list metadata — ไม่ decrypt ไม่คืน plaintext */
-export function listEnvVars(db: Database, projectId: string): EnvVarSummary[] {
-  return db
-    .query<EnvVarRow, [string]>(
-      `SELECT ${SELECT_COLS} FROM environment_variables WHERE project_id = ? ORDER BY key`,
-    )
-    .all(projectId)
-    .map(toSummary);
+/**
+ * list metadata — ไม่ decrypt ไม่คืน plaintext
+ * componentId null (default) = project-wide (component_id IS NULL); มีค่า = env ของ component นั้น
+ */
+export function listEnvVars(
+  db: Database,
+  projectId: string,
+  componentId: string | null = null,
+): EnvVarSummary[] {
+  const rows = componentId
+    ? db
+        .query<EnvVarRow, [string, string]>(
+          `SELECT ${SELECT_COLS} FROM environment_variables WHERE project_id = ? AND component_id = ? ORDER BY key`,
+        )
+        .all(projectId, componentId)
+    : db
+        .query<EnvVarRow, [string]>(
+          `SELECT ${SELECT_COLS} FROM environment_variables WHERE project_id = ? AND component_id IS NULL ORDER BY key`,
+        )
+        .all(projectId);
+  return rows.map(toSummary);
 }
 
 /**
- * Replace ชุด env vars ของ project ทั้งหมดในคราวเดียว (full replace in one transaction)
+ * Replace ชุด env vars ของ scope หนึ่งในคราวเดียว (full replace in one transaction)
+ * componentId null = project-wide (component_id IS NULL); มีค่า = env ของ component นั้น
+ * — replace แยกต่อ scope: PUT project-wide ไม่แตะ env ของ component และกลับกัน
  * masterKeys จำเป็น — throw ENV_ENCRYPTION_NOT_CONFIGURED ถ้า null
  */
 export async function replaceEnvVars(
@@ -126,12 +145,14 @@ export async function replaceEnvVars(
   projectId: string,
   vars: EnvVarInput[],
   masterKeys: MasterKeys,
+  componentId: string | null = null,
 ): Promise<EnvVarSummary[]> {
   validateKeys(vars);
 
   const now = Date.now();
 
   // เข้ารหัสทุกค่าก่อน (async) — ทำนอก transaction เพราะ WebCrypto เป็น async
+  // AAD คงเป็น env:<project>:<key> (ไม่รวม component) เพื่อ backward-compat กับ ciphertext เดิม
   const encrypted = await Promise.all(
     vars.map(async (v) => ({
       id: ulid(),
@@ -143,13 +164,22 @@ export async function replaceEnvVars(
     })),
   );
 
-  // transaction: delete all → insert new — atomic full replace
+  // transaction: delete scope → insert new — atomic full replace เฉพาะ scope นั้น
   db.transaction(() => {
-    db.query("DELETE FROM environment_variables WHERE project_id = ?").run(projectId);
+    if (componentId) {
+      db.query("DELETE FROM environment_variables WHERE project_id = ? AND component_id = ?").run(
+        projectId,
+        componentId,
+      );
+    } else {
+      db.query(
+        "DELETE FROM environment_variables WHERE project_id = ? AND component_id IS NULL",
+      ).run(projectId);
+    }
     const stmt = db.prepare(
       `INSERT INTO environment_variables
-         (id, project_id, key, value_ciphertext, is_secret, scope, enabled, version, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+         (id, project_id, key, value_ciphertext, is_secret, scope, enabled, version, created_at, updated_at, component_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
     );
     for (const v of encrypted) {
       stmt.run(
@@ -162,11 +192,12 @@ export async function replaceEnvVars(
         v.enabled ? 1 : 0,
         now,
         now,
+        componentId,
       );
     }
   })();
 
-  return listEnvVars(db, projectId);
+  return listEnvVars(db, projectId, componentId);
 }
 
 /**

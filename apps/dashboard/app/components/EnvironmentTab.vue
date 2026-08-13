@@ -11,6 +11,29 @@ const props = defineProps<{ projectId: string; archived: boolean }>();
 const api = useApi();
 
 // ---------------------------------------------------------------------------
+// Scope selector (Phase 18 · F) — project-wide หรือ env เจาะจง component (compose)
+// ---------------------------------------------------------------------------
+
+/** "" = project-wide; ไม่งั้นเป็น componentId */
+const scope = ref("");
+const components = ref<Array<{ id: string; name: string }>>([]);
+
+async function fetchComponents() {
+  try {
+    const { data } = await api.api.v1.projects({ id: props.projectId }).components.get();
+    components.value = (data?.items ?? []).map((c) => ({ id: c.id, name: c.name }));
+  } catch {
+    // ไม่ critical — ถ้าโหลดไม่ได้ก็แสดงแค่ project-wide
+  }
+}
+await fetchComponents();
+
+/** query สำหรับ API ตาม scope ที่เลือก (project-wide = ไม่ส่ง componentId) */
+function scopeQuery() {
+  return scope.value ? { query: { componentId: scope.value } } : undefined;
+}
+
+// ---------------------------------------------------------------------------
 // Existing vars (metadata only)
 // ---------------------------------------------------------------------------
 
@@ -30,7 +53,9 @@ const loadError = ref("");
 async function fetchEnv() {
   loadError.value = "";
   try {
-    const { data, error } = await api.api.v1.projects({ id: props.projectId }).environment.get();
+    const { data, error } = await api.api.v1
+      .projects({ id: props.projectId })
+      .environment.get(scopeQuery());
     if (error) {
       loadError.value = "โหลด env vars ไม่ได้";
       return;
@@ -44,6 +69,12 @@ async function fetchEnv() {
 }
 
 await fetchEnv();
+
+// เปลี่ยน scope → โหลด env ของ scope นั้นใหม่ (ทิ้ง edit ที่ยังไม่ save)
+watch(scope, () => {
+  loading.value = true;
+  fetchEnv();
+});
 
 // ---------------------------------------------------------------------------
 // Editor state (rows the user is editing)
@@ -183,7 +214,7 @@ async function save() {
   try {
     const { error } = await api.api.v1
       .projects({ id: props.projectId })
-      .environment.put({ variables });
+      .environment.put({ variables }, scopeQuery());
     if (error) {
       const msg = (error.value as { error?: { message?: string } } | null)?.error?.message;
       saveError.value = msg ?? "บันทึกไม่สำเร็จ";
@@ -209,6 +240,18 @@ async function save() {
         {{ showImport ? "ปิด" : "Import .env" }}
       </button>
     </div>
+
+    <!-- Scope selector — เฉพาะ compose project ที่มี component (Phase 18 · F) -->
+    <label v-if="components.length > 0" class="scope-select">
+      <span>ขอบเขต</span>
+      <select v-model="scope" :disabled="archived">
+        <option value="">ทั้งโปรเจกต์ (project-wide)</option>
+        <option v-for="c in components" :key="c.id" :value="c.id">component: {{ c.name }}</option>
+      </select>
+      <small class="muted">
+        {{ scope ? "env นี้ใช้เฉพาะ component ที่เลือก (override ค่าระดับโปรเจกต์)" : "env นี้ใช้กับทุก component" }}
+      </small>
+    </label>
 
     <!-- Import panel -->
     <div v-if="showImport" class="inset stack">
@@ -362,6 +405,16 @@ async function save() {
 }
 .save-area {
   align-items: center;
+}
+
+.scope-select {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  max-width: 420px;
+}
+.scope-select select {
+  max-width: 320px;
 }
 
 @media (max-width: 720px) {

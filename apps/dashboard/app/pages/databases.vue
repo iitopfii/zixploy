@@ -155,6 +155,12 @@ async function showCredentials(id: string) {
 // ── logs ──
 const logsFor = ref<{ id: string; name: string } | null>(null);
 
+// ── backups ──
+const backupsFor = ref<string | null>(null);
+const backupsForService = computed(
+  () => services.value?.find((s) => s.id === backupsFor.value) ?? null,
+);
+
 const copied = ref("");
 async function copy(text: string, label: string) {
   await navigator.clipboard.writeText(text);
@@ -175,6 +181,14 @@ const CATEGORY_LABEL: Record<string, string> = {
   sql: "SQL",
   nosql: "NoSQL",
   cache: "Cache",
+};
+
+// ต้องตรงกับ SERVICE_BACKUP_SETTINGS.allowedIntervalHours (internal/shared/src/constants.ts)
+const INTERVAL_HOUR_LABEL: Record<number, string> = {
+  6: "6 ชั่วโมง",
+  12: "12 ชั่วโมง",
+  24: "วัน",
+  168: "สัปดาห์",
 };
 </script>
 
@@ -356,6 +370,16 @@ const CATEGORY_LABEL: Record<string, string> = {
               <code v-if="svc.exposedPort" class="tiny">{{ svc.exposedPort }}</code>
               <span v-else class="muted tiny">ปิด (ปลอดภัย)</span>
             </dd>
+            <dt>Backup</dt>
+            <dd>
+              <span v-if="svc.backupEnabled" class="tiny">
+                ทุก {{ INTERVAL_HOUR_LABEL[svc.backupIntervalHours ?? 0] ?? `${svc.backupIntervalHours} ชม.` }}
+              </span>
+              <span v-else class="muted tiny">ไม่ได้ตั้งเวลา</span>
+              <span v-if="svc.lastBackupAt" class="muted tiny">
+                — ล่าสุด {{ timeAgo(svc.lastBackupAt) }}
+              </span>
+            </dd>
           </dl>
 
           <div class="svc-actions">
@@ -375,6 +399,11 @@ const CATEGORY_LABEL: Record<string, string> = {
             >
               <AppIcon name="terminal" :size="13" />
               Logs
+            </button>
+
+            <button class="secondary small" @click="backupsFor = svc.id">
+              <AppIcon name="download" :size="13" />
+              Backups
             </button>
 
             <button
@@ -503,6 +532,17 @@ const CATEGORY_LABEL: Record<string, string> = {
       :service-id="logsFor.id"
       :service-name="logsFor.name"
       @close="logsFor = null"
+    />
+
+    <ServiceBackupsDialog
+      v-if="backupsFor && backupsForService"
+      :service-id="backupsFor"
+      :service-name="backupsForService.name"
+      :backup-enabled="backupsForService.backupEnabled"
+      :backup-interval-hours="backupsForService.backupIntervalHours"
+      :backup-retention-count="backupsForService.backupRetentionCount"
+      @close="backupsFor = null"
+      @updated="refresh"
     />
   </div>
 </template>

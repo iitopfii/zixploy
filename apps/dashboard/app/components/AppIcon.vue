@@ -62,6 +62,7 @@ const PATHS = {
   chevronDown: "M6 9l6 6 6-6",
   arrowLeft: "M19 12H5M12 19l-7-7 7-7",
   menu: "M3 12h18M3 6h18M3 18h18",
+  download: "M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2",
 } as const;
 
 const px = computed(() => (typeof props.size === "number" ? `${props.size}px` : props.size));

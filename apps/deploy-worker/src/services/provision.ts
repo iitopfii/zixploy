@@ -42,6 +42,10 @@ export interface ServiceRow {
   exposed_port: number | null;
   memory_limit_mb: number | null;
   cpu_limit: number | null;
+  backup_enabled: number;
+  backup_interval_hours: number | null;
+  backup_retention_count: number;
+  last_backup_at: number | null;
 }
 
 export function loadService(db: Database, serviceId: string): ServiceRow | null {
@@ -50,11 +54,26 @@ export function loadService(db: Database, serviceId: string): ServiceRow | null 
       .query<ServiceRow, [string]>(
         `SELECT id, name, type, version, image, status, container_id, volume_name,
                 username, database_name, password_enc, internal_port, exposed_port,
-                memory_limit_mb, cpu_limit
+                memory_limit_mb, cpu_limit, backup_enabled, backup_interval_hours,
+                backup_retention_count, last_backup_at
          FROM services WHERE id = ?`,
       )
       .get(serviceId) ?? null
   );
+}
+
+/** service ทุกตัวที่เปิด scheduled backup ไว้ — ใช้ใน backup-schedule-loop.ts */
+export function listServicesWithBackupEnabled(db: Database): ServiceRow[] {
+  return db
+    .query<ServiceRow, []>(
+      `SELECT id, name, type, version, image, status, container_id, volume_name,
+              username, database_name, password_enc, internal_port, exposed_port,
+              memory_limit_mb, cpu_limit, backup_enabled, backup_interval_hours,
+              backup_retention_count, last_backup_at
+       FROM services
+       WHERE backup_enabled = 1 AND backup_interval_hours IS NOT NULL AND status <> 'deleting'`,
+    )
+    .all();
 }
 
 export function setServiceStatus(
@@ -88,7 +107,8 @@ function passwordAad(serviceId: string): string {
   return `service:${serviceId}:password`;
 }
 
-async function readCredentials(
+/** ถอดรหัสผ่าน — export ให้ backup.ts เรียกซ้ำได้ (ใช้ AAD/decrypt เดียวกันเป๊ะ) */
+export async function readCredentials(
   masterKeys: MasterKeys | null,
   row: ServiceRow,
 ): Promise<ServiceCredentials> {

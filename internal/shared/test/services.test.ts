@@ -95,6 +95,49 @@ describe("รหัสผ่านต้องไม่ปรากฏใน com
   });
 });
 
+describe("backupStrategy — dump/restore command ต้องไม่มีรหัสผ่านจริง", () => {
+  test.each([...SERVICE_TYPES])("%s: มี backupStrategy ที่ fileExtension ไม่ว่าง", (type) => {
+    const strategy = getTemplate(type).backupStrategy();
+    expect(strategy.fileExtension.length).toBeGreaterThan(0);
+  });
+
+  test.each([...SERVICE_TYPES])("%s: exec mode ต้องผ่าน sh -c เสมอ (ไม่งั้น $VAR ไม่ขยาย)", (type) => {
+    const strategy = getTemplate(type).backupStrategy();
+    if (strategy.mode !== "exec") return;
+    expect(strategy.dumpCmd[0]).toBe("sh");
+    expect(strategy.dumpCmd[1]).toBe("-c");
+    expect(strategy.restoreCmd[0]).toBe("sh");
+    expect(strategy.restoreCmd[1]).toBe("-c");
+  });
+
+  test.each([...SERVICE_TYPES])("%s: dumpCmd/restoreCmd ไม่มีรหัสผ่านจริงฝังอยู่", (type) => {
+    const strategy = getTemplate(type).backupStrategy();
+    if (strategy.mode !== "exec") return;
+    expect(strategy.dumpCmd.join(" ")).not.toContain(CREDS.password);
+    expect(strategy.restoreCmd.join(" ")).not.toContain(CREDS.password);
+  });
+
+  test("postgres/mysql/mariadb/mongodb ที่เป็น exec mode ต้องอ้าง env ผ่าน $VAR", () => {
+    for (const type of ["postgres", "mysql", "mariadb", "mongodb"] as const) {
+      const strategy = getTemplate(type).backupStrategy();
+      if (strategy.mode !== "exec") continue;
+      expect(strategy.dumpCmd.join(" ")).toContain("$");
+    }
+  });
+
+  test("redis/libsql ใช้ file-copy — ไม่มี dump tool ให้ exec (redis เลือกความสม่ำเสมอ, libsql ไม่มี shell)", () => {
+    expect(getTemplate("redis").backupStrategy().mode).toBe("file-copy");
+    expect(getTemplate("libsql").backupStrategy().mode).toBe("file-copy");
+  });
+
+  test("mariadb ใช้ binary mariadb-dump/mariadb ตรง ๆ ไม่พึ่ง mysqldump compat symlink", () => {
+    const strategy = getTemplate("mariadb").backupStrategy();
+    if (strategy.mode !== "exec") throw new Error("expected exec mode");
+    expect(strategy.dumpCmd.join(" ")).toContain("mariadb-dump");
+    expect(strategy.restoreCmd.join(" ")).toContain("mariadb ");
+  });
+});
+
 describe("env mapping", () => {
   test("รหัสผ่านถูกส่งผ่าน env (ที่เดียวที่ควรมี)", () => {
     const env = getTemplate("postgres").env(CREDS);

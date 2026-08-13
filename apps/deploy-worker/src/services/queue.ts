@@ -10,7 +10,19 @@
 import type { Database } from "bun:sqlite";
 import { DEPLOY_QUEUE } from "@zixploy/shared";
 
-export type ServiceJobType = "provision" | "start" | "stop" | "restart" | "destroy";
+export type ServiceJobType =
+  | "provision"
+  | "start"
+  | "stop"
+  | "restart"
+  | "destroy"
+  | "backup"
+  | "restore";
+
+/** payload เดียวที่ใช้จริงตอนนี้ — 'restore' ต้องรู้ว่าจะกู้จาก backup ไหน (Phase 16) */
+export interface RestoreJobPayload {
+  backupId: string;
+}
 
 export interface ClaimedServiceJob {
   id: string;
@@ -18,12 +30,15 @@ export interface ClaimedServiceJob {
   type: ServiceJobType;
   attempts: number;
   maxAttempts: number;
+  /** JSON ดิบจาก service_jobs.payload — ผู้เรียก parse เองตาม type (ดู RestoreJobPayload) */
+  payload: string;
 }
 
 interface JobRow {
   id: string;
   service_id: string;
   type: string;
+  payload: string;
   attempts: number;
   max_attempts: number;
 }
@@ -65,7 +80,7 @@ export function claimNextServiceJob(
   db.transaction(() => {
     const row = db
       .query<JobRow, []>(
-        `SELECT id, service_id, type, attempts, max_attempts
+        `SELECT id, service_id, type, payload, attempts, max_attempts
            FROM service_jobs
           WHERE status = 'pending'
           ORDER BY created_at
@@ -91,6 +106,7 @@ export function claimNextServiceJob(
       id: row.id,
       serviceId: row.service_id,
       type: row.type as ServiceJobType,
+      payload: row.payload,
       attempts: row.attempts + 1,
       maxAttempts: row.max_attempts,
     };

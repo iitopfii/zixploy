@@ -8,9 +8,11 @@
  */
 
 import type { Database } from "bun:sqlite";
-import { DEPLOY_QUEUE } from "@zixploy/shared";
+import { AppError, DEPLOY_QUEUE } from "@zixploy/shared";
 import type { DockerCliClient } from "../docker/cli-client";
 import type { MasterKeys } from "../github/master-key";
+import type { BackupDeps } from "./backup";
+import { runBackup, runRestore } from "./backup";
 import {
   destroyService,
   type ProvisionDeps,
@@ -25,6 +27,7 @@ import {
   completeServiceJob,
   failServiceJob,
   pruneServiceJobs,
+  type RestoreJobPayload,
   renewServiceLease,
 } from "./queue";
 
@@ -73,7 +76,24 @@ async function withLeaseRenewal<T>(
 
 export interface ServiceLoopOptions {
   masterKeys: MasterKeys | null;
+  /** ตำแหน่ง mount ของ zixploy-backups volume ใน container นี้ — ใช้กับ backup/restore เท่านั้น */
+  backupsDir: string;
   onLog?: (line: string) => void;
+}
+
+/** payload ของ 'restore' ต้องมี backupId ที่เป็นสตริงไม่ว่าง — พังตั้งแต่ parse ดีกว่าไป throw ลึก ๆ */
+function parseRestorePayload(raw: string): RestoreJobPayload {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new AppError("SERVICE_RESTORE_FAILED", "restore job payload ไม่ใช่ JSON ที่ถูกต้อง");
+  }
+  const backupId = (parsed as Partial<RestoreJobPayload> | null)?.backupId;
+  if (typeof backupId !== "string" || backupId.length === 0) {
+    throw new AppError("SERVICE_RESTORE_FAILED", "restore job payload ไม่มี backupId");
+  }
+  return { backupId };
 }
 
 export async function serviceJobLoop(
@@ -85,6 +105,7 @@ export async function serviceJobLoop(
 ): Promise<void> {
   const onLog = options.onLog ?? (() => {});
   const deps: ProvisionDeps = { db, docker, masterKeys: options.masterKeys, onLog };
+  const backupDeps: BackupDeps = { db, docker, backupsDir: options.backupsDir, onLog };
   let lastPruneAt = Date.now();
 
   while (!signal.aborted) {
@@ -124,6 +145,14 @@ export async function serviceJobLoop(
             return restartService(deps, claimed.serviceId, jobSignal);
           case "destroy":
             return destroyService(deps, claimed.serviceId);
+          case "backup":
+            return runBackup(backupDeps, claimed.serviceId, "manual");
+          case "restore":
+            return runRestore(
+              backupDeps,
+              claimed.serviceId,
+              parseRestorePayload(claimed.payload).backupId,
+            );
         }
       });
 

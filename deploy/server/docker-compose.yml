@@ -104,6 +104,9 @@ services:
       ZIXPLOY_BACKUP_DB_DIR: /backups/db
       ZIXPLOY_BACKUP_KEYS_DIR: /backups/keys
       ZIXPLOY_BACKUP_RETENTION: "14"
+      # backup ของ managed service (database) — volume เดียวกับด้านบนแต่คนละ subdirectory
+      # ("services/<id>/") worker เป็นคนเขียนไฟล์จริง ที่นี่แค่อ่าน/ลบ/stream ให้ดาวน์โหลด (Phase 16)
+      ZIXPLOY_BACKUPS_DIR: /backups
       # custom TLS certificate — control-api เขียน, Traefik อ่าน (mount จุดเดียวกันทั้งคู่)
       ZIXPLOY_TLS_DIR: /certs
     volumes:
@@ -145,9 +148,13 @@ services:
       ZIXPLOY_WORKSPACES_DIR: /workspaces
       ZIXPLOY_LOG_LEVEL: info
       ZIXPLOY_MASTER_KEY_FILE: /run/secrets/master_key
+      # ที่เก็บ dump ของ managed service (database) — volume เดียวกับที่ control-api backup ตัวเอง
+      # (Phase 16) subdirectory "services/<id>/" กันชนกับ db/keys/acme ของ control-api
+      ZIXPLOY_BACKUPS_DIR: /backups
     volumes:
       - zixploy-data:/data
       - zixploy-workspaces:/workspaces
+      - zixploy-backups:/backups
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/zixploy/master.key:/run/secrets/master_key:ro
     networks:

@@ -164,3 +164,22 @@ export const SERVICE_SETTINGS = {
   /** รอ container ขึ้นเป็น healthy นานสุดก่อนถือว่า provision ล้มเหลว */
   readyTimeoutMs: 180_000,
 } as const;
+
+/**
+ * Managed service backups (Phase 16)
+ *
+ * เก็บบน Docker volume เดิมที่ control-api ใช้ backup ตัวเอง (zixploy-backups) แยก subdirectory
+ * "services/<serviceId>/" — deploy-worker mount volume เดียวกันเพิ่ม (docker-compose.yml)
+ */
+export const SERVICE_BACKUP_SETTINGS = {
+  /** เก็บ backup ไว้กี่ชุดต่อ service ก่อนลบตัวเก่าสุดทิ้ง (ค่า default ตอนสร้าง service) */
+  defaultRetentionCount: 7,
+  retentionMin: 1,
+  retentionMax: 30,
+  /** ตัวเลือก interval ที่ตั้งได้ผ่าน UI — จำกัดตัวเลือกแทนรับ cron expression ดิบ กันตั้งผิดพลาด */
+  allowedIntervalHours: [6, 12, 24, 168] as readonly number[],
+  /** ทุกกี่วิ scheduler loop เช็คว่ามี service ไหนถึงกำหนด backup แล้วบ้าง */
+  scheduleCheckIntervalMs: 5 * 60 * 1000,
+  /** timeout ของคำสั่ง dump/restore หนึ่งครั้ง — database ใหญ่ใช้เวลานานกว่า docker command ปกติมาก */
+  dumpTimeoutMs: 30 * 60 * 1000,
+} as const;

@@ -12,6 +12,15 @@ export const ZIXPLOY_VERSION: string = process.env.ZIXPLOY_VERSION?.trim() || "d
 
 export const IS_DEV_BUILD = ZIXPLOY_VERSION === "dev";
 
+/**
+ * ปิดการเช็ค/สั่งอัปเดตผ่านหน้าเว็บ แยกจาก IS_DEV_BUILD โดยตั้งใจ — ใช้กับ deployment ที่
+ * build จาก source ตรง ๆ ผ่าน `docker compose build` (docker-compose ใช้ `build:` ไม่ใช่
+ * `image:` ที่มี tag ให้ pull) กรณีนี้ ZIXPLOY_VERSION ตั้งเป็นเลขรุ่นจริงได้ตามปกติเพื่อโชว์
+ * ใน UI (ไม่ใช่ "dev") แต่ self-update flow (docker compose pull) ใช้ไม่ได้จริงเพราะไม่มี
+ * image tag ให้ pull — ผู้ดูแลต้อง redeploy จาก source เอง ไม่ใช่กดปุ่มในหน้าเว็บ
+ */
+export const SELF_UPDATE_DISABLED: boolean = process.env.ZIXPLOY_DISABLE_SELF_UPDATE === "true";
+
 /** GHCR namespace ที่ CI push image ไป — image name = `${REGISTRY_NAMESPACE}-${service}` */
 export const REGISTRY_NAMESPACE = "ghcr.io/iitopfii/zixploy";
 

@@ -109,6 +109,12 @@ services:
       ZIXPLOY_BACKUPS_DIR: /backups
       # custom TLS certificate — control-api เขียน, Traefik อ่าน (mount จุดเดียวกันทั้งคู่)
       ZIXPLOY_TLS_DIR: /certs
+      # เลขรุ่นที่ deploy จริง (ตั้งใน .env ทุกครั้งที่ deploy ใหม่) — โชว์ใน sidebar เฉย ๆ
+      # ห้ามลบ ZIXPLOY_DISABLE_SELF_UPDATE ด้านล่างแม้ตั้งเลขรุ่นแล้ว: compose ไฟล์นี้ใช้ build:
+      # ไม่มี image tag ให้ "docker compose pull" ปุ่มอัปเดตในหน้าเว็บจึงใช้งานจริงไม่ได้เลย
+      # (ตัดสินใจเมื่อ 2026-08-13 — ดู internal/shared/src/version.ts)
+      ZIXPLOY_VERSION: ${ZIXPLOY_VERSION:-dev}
+      ZIXPLOY_DISABLE_SELF_UPDATE: "true"
     volumes:
       - zixploy-data:/data
       - zixploy-backups:/backups

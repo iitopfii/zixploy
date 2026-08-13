@@ -9,7 +9,13 @@
  * ตรวจ update ไม่ได้ไม่ใช่เหตุให้หน้า dashboard พัง
  */
 
-import { hasUpdate, latestStableTag, UPDATE_CHECK, ZIXPLOY_VERSION } from "@zixploy/shared";
+import {
+  hasUpdate,
+  latestStableTag,
+  SELF_UPDATE_DISABLED,
+  UPDATE_CHECK,
+  ZIXPLOY_VERSION,
+} from "@zixploy/shared";
 
 export interface UpdateStatus {
   current: string;
@@ -68,8 +74,9 @@ export async function checkForUpdate(force = false): Promise<UpdateStatus> {
   const now = Date.now();
   if (!force && cache && now - cache.checkedAt < UPDATE_CHECK.cacheTtlMs) return cache;
 
-  // รันจากซอร์ส — ไม่ต้องยิง registry เลย เทียบ semver กับ "dev" ไม่ได้อยู่แล้ว
-  if (ZIXPLOY_VERSION === "dev") {
+  // รันจากซอร์ส (dev) หรือ deployment ที่ปิด self-update ไว้ตรง ๆ (build จาก source โดยไม่มี
+  // image tag ให้ pull) — ทั้งคู่ไม่ต้องยิง registry เลย
+  if (ZIXPLOY_VERSION === "dev" || SELF_UPDATE_DISABLED) {
     cache = {
       current: ZIXPLOY_VERSION,
       latest: null,

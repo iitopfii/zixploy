@@ -8,7 +8,14 @@
  */
 
 import type { Database } from "bun:sqlite";
-import { API_PREFIX, AppError, hasUpdate, ulid, ZIXPLOY_VERSION } from "@zixploy/shared";
+import {
+  API_PREFIX,
+  AppError,
+  hasUpdate,
+  SELF_UPDATE_DISABLED,
+  ulid,
+  ZIXPLOY_VERSION,
+} from "@zixploy/shared";
 import { Elysia, t } from "elysia";
 import { getClientIp, recordAuditEvent } from "../audit/log";
 import { authPlugin, requireAuthenticated } from "../plugins/auth";
@@ -51,7 +58,7 @@ export function updateRoutes(db: Database) {
       async ({ body, set, request, requireSession }) => {
         const session = requireSession();
 
-        if (ZIXPLOY_VERSION === "dev") {
+        if (ZIXPLOY_VERSION === "dev" || SELF_UPDATE_DISABLED) {
           throw new AppError(
             "MAINTENANCE_FAILED",
             "ระบบนี้รันจากซอร์สโดยตรง — อัปเดตผ่านหน้าเว็บไม่ได้ ใช้ git pull แทน",

@@ -11,6 +11,7 @@ import { requestLog } from "./plugins/request-log";
 import { securityHeaders } from "./plugins/security-headers";
 import { auditRoutes } from "./routes/audit";
 import { authRoutes } from "./routes/auth";
+import { componentRoutes } from "./routes/components";
 import { deploymentRoutes } from "./routes/deployments";
 import { dockerfileSourceRoutes } from "./routes/dockerfile-source";
 import { domainRoutes } from "./routes/domains";
@@ -82,6 +83,7 @@ export function buildApp(db: Database, options: AppOptions = {}) {
     .use(logRoutes(db))
     .use(volumeRoutes(db))
     .use(serviceRoutes(db, masterKeys))
+    .use(componentRoutes(db))
     .use(terminalRoutes(db, options.terminal))
     .use(monitoringRoutes(db))
     .use(updateRoutes(db))

@@ -749,17 +749,7 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
 }
 
 /* ── credentials dialog ── */
-.backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgb(4 6 10 / 72%);
-  backdrop-filter: blur(3px);
-  display: grid;
-  place-items: center;
-  padding: var(--s-5);
-  z-index: 100;
-  overflow-y: auto;
-}
+/* .backdrop มาจาก main.css (global) — ห้ามนิยามซ้ำที่นี่ ดู comment ในไฟล์นั้น */
 .dialog {
   width: 100%;
   max-width: 560px;

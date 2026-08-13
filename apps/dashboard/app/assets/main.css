@@ -977,6 +977,33 @@ label > span,
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   Modal backdrop
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/*
+ * ต้องอยู่ที่นี่ (global) ไม่ใช่ scoped style ของแต่ละ component — dialog ทุกตัวใช้
+ * <Teleport to="body"> ย้าย DOM ออกไปนอก component tree ตัวเอง แต่ scoped CSS ผูกกับ
+ * `data-v-<hash>` ของ component ที่**นิยาม** rule นั้น ไม่ใช่ของ component ที่ render
+ * — component ที่เขียน class="backdrop" ไว้เฉย ๆ โดยไม่นิยาม CSS เองจึงไม่ได้ style เลย
+ * กลายเป็น block ธรรมดา (position: static) ไหลไปต่อท้าย <body> ใต้เนื้อหาหน้าเว็บ
+ * ผู้ใช้เห็นเป็น "กดปุ่มแล้วไม่มีอะไรเกิดขึ้น" ทั้งที่ dialog เปิดอยู่จริงนอกจอ
+ *
+ * เคยหลุดไปแล้วสามรอบด้วยเหตุผลเดียวกัน (Logs 0.1.3, Backups 0.1.4, Terminal 0.1.5)
+ * เพราะแต่ละตัว copy โครง template มาโดยไม่ได้ copy CSS ของ .backdrop มาด้วย
+ */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(4 6 10 / 72%);
+  backdrop-filter: blur(3px);
+  display: grid;
+  place-items: center;
+  padding: var(--s-5);
+  z-index: 100;
+  overflow-y: auto;
+}
+
 /* กล่อง log / terminal output */
 .log-box {
   background: #06080c;

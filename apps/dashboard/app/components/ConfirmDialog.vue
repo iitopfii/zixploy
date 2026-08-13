@@ -83,16 +83,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgb(4 6 10 / 72%);
-  backdrop-filter: blur(3px);
-  display: grid;
-  place-items: center;
-  padding: var(--s-5);
-  z-index: 100;
-}
+/* .backdrop มาจาก main.css (global) — ห้ามนิยามซ้ำที่นี่ ดู comment ในไฟล์นั้น */
 
 .dialog {
   width: 100%;

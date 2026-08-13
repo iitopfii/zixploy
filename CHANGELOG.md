@@ -9,6 +9,24 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.1.6] — 2026-08-13
+
+### Fixed
+- **Dialog ของ Logs / Backups / Terminal ไม่แสดงผล** — กดปุ่มแล้วเหมือนไม่มีอะไรเกิดขึ้น ทั้งที่
+  dialog เปิดอยู่จริงและโหลดข้อมูลสำเร็จแล้ว: component ทั้งสามใช้ `<Teleport to="body">` ย้าย DOM
+  ออกไปนอก component tree ตัวเอง แต่เขียน `class="backdrop"` โดยไม่ได้นิยาม CSS ของมันในไฟล์ตัวเอง
+  — scoped style ผูกกับ `data-v-<hash>` ของ component ที่**นิยาม** rule ไม่ใช่ของ component ที่
+  render ตัว backdrop จึงไม่ได้ style เลย กลายเป็น block ธรรมดา (`position: static`) ไหลไปต่อท้าย
+  `<body>` ใต้เนื้อหาหน้าเว็บ มองไม่เห็นจากใน viewport
+  - ย้าย `.backdrop` ไปเป็น global utility ใน `main.css` (พร้อม comment อธิบายกับดักนี้ไว้กันพลาดซ้ำ)
+    แล้วลบ definition ที่ซ้ำซ้อนออกจาก `ConfirmDialog.vue` และ `databases.vue`
+  - เปลี่ยนชื่อ backdrop ของ mobile nav ใน layout เป็น `.nav-backdrop` — คนละหน้าที่/คนละ z-index
+    กับ modal backdrop ไม่ควรใช้ชื่อ class ชนกัน
+  - บั๊กนี้อยู่มาตั้งแต่ 0.1.3 (Logs) และติดมากับ 0.1.4 (Backups) กับ 0.1.5 (Terminal) เพราะแต่ละตัว
+    copy โครง template มาโดยไม่ได้ copy CSS ของ `.backdrop` มาด้วย
+
+---
+
 ## [0.1.5] — 2026-08-13
 
 ### Added

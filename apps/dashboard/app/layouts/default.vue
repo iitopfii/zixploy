@@ -54,8 +54,9 @@ const initial = computed(() => (session.value.username ?? "?").charAt(0).toUpper
       <SystemHealth compact />
     </header>
 
-    <!-- Backdrop เฉพาะ mobile ตอน drawer เปิด -->
-    <div v-if="navOpen" class="backdrop" @click="navOpen = false" />
+    <!-- Backdrop เฉพาะ mobile ตอน drawer เปิด — ชื่อ class ต้องไม่ใช่ ".backdrop" เฉย ๆ
+         เพราะอันนั้นเป็น global utility ของ modal dialog (main.css) คนละ z-index/สีกัน -->
+    <div v-if="navOpen" class="nav-backdrop" @click="navOpen = false" />
 
     <aside class="sidebar" :class="{ open: navOpen }">
       <NuxtLink to="/" class="brand">
@@ -273,7 +274,7 @@ const initial = computed(() => (session.value.username ?? "?").charAt(0).toUpper
 .mobile-bar {
   display: none;
 }
-.backdrop {
+.nav-backdrop {
   display: none;
 }
 
@@ -322,7 +323,7 @@ const initial = computed(() => (session.value.username ?? "?").charAt(0).toUpper
     transform: translateX(0);
   }
 
-  .backdrop {
+  .nav-backdrop {
     display: block;
     position: fixed;
     inset: 0;

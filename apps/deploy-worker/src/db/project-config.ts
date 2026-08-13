@@ -72,6 +72,18 @@ export function loadProjectConfig(db: Database, projectId: string): ProjectConfi
 }
 
 /**
+ * โหมดของ project — 'single' (pipeline เดิม) หรือ 'compose' (multi-container orchestrator, Phase 18)
+ * dispatcher ใช้แยกทางว่า build job จะวิ่ง runBuildOrRollbackPipeline หรือ runComposePipeline
+ * default 'single' ถ้าไม่พบ project (ให้ pipeline เดิมจัดการ error path ต่อเหมือนเดิม)
+ */
+export function loadProjectMode(db: Database, projectId: string): "single" | "compose" {
+  const row = db
+    .query<{ mode: string }, [string]>("SELECT mode FROM projects WHERE id = ?")
+    .get(projectId);
+  return row?.mode === "compose" ? "compose" : "single";
+}
+
+/**
  * อัปเดต project.status — ใช้เฉพาะตอน activate (running) และ stop (stopped)
  * เคลียร์ degraded_at ทุกครั้งที่มี lifecycle event ชัดเจน (Phase 8 M2) — เหตุการณ์ intentional
  * แบบนี้ทำให้ marker "container หายไปเฉย ๆ" ก่อนหน้าไม่มีความหมายแล้วไม่ว่าจะเป็นสถานะไหนก็ตาม

@@ -41,6 +41,21 @@ describe("assertContainerConfigSafe", () => {
       assertContainerConfigSafe(baseParams({ cpuLimit: null, memoryLimitMb: null })),
     ).not.toThrow();
   });
+
+  test("networkAliases เป็น DNS label ปกติ → ผ่าน (Phase 18)", () => {
+    expect(() =>
+      assertContainerConfigSafe(baseParams({ networkAliases: ["web", "cache", "api-2"] })),
+    ).not.toThrow();
+  });
+
+  test("networkAliases ที่ไม่ใช่ DNS label → throw (กัน injection ผ่าน --network-alias)", () => {
+    // ขึ้นต้นด้วย '-' (ถูก docker ตีความเป็น flag), มี metacharacter, ตัวพิมพ์ใหญ่, ยาวเกิน, ว่าง
+    for (const bad of ["-rm", "cache;rm -rf /", "Cache", "a".repeat(32), "", "web_1", "a b"]) {
+      expect(() => assertContainerConfigSafe(baseParams({ networkAliases: [bad] }))).toThrow(
+        AppError,
+      );
+    }
+  });
 });
 
 describe("assertDockerArgsSafe", () => {

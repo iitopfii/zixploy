@@ -81,3 +81,77 @@ export function volumeLabels(projectId: string, volumeId: string): Record<string
     [LABELS.volumeId]: volumeId,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Multi-container (compose-style) projects — Phase 18
+//
+// container/image/volume ของแต่ละ component ผูก componentId (ULID) เพิ่มเข้าไปในชื่อเดิม
+// เพื่อให้หลาย container ในโปรเจกต์เดียวไม่ชนกัน · network เป็น per-deployment (ไม่ใช่ per-project)
+// เพื่อให้ alias ของรุ่นเก่า/ใหม่แยก namespace กันตอน start-before-stop (ดู design doc)
+// ---------------------------------------------------------------------------
+
+/** container ของ component หนึ่งตัวใน deployment หนึ่งงาน */
+export function componentContainerName(
+  projectId: string,
+  deploymentId: string,
+  componentId: string,
+): string {
+  assertUlid(projectId, "projectId");
+  assertUlid(deploymentId, "deploymentId");
+  assertUlid(componentId, "componentId");
+  return `zx-${projectId.toLowerCase()}-${deploymentId.toLowerCase()}-${componentId.toLowerCase()}`;
+}
+
+/** image ที่ build จาก component (source_kind='build') */
+export function componentImageName(
+  projectId: string,
+  componentId: string,
+  commitSha: string,
+  deploymentId: string,
+): string {
+  assertUlid(projectId, "projectId");
+  assertUlid(componentId, "componentId");
+  assertUlid(deploymentId, "deploymentId");
+  if (!SHA_RE.test(commitSha)) throw new Error("commitSha must be a hex SHA");
+  return `zixploy/${projectId.toLowerCase()}-${componentId.toLowerCase()}:${commitSha.slice(0, 7)}-${deploymentId.toLowerCase()}`;
+}
+
+/** network ส่วนตัวต่อ deployment — ทุก component ของ deployment นี้ join แล้วคุยกันด้วย alias */
+export function deploymentNetworkName(projectId: string, deploymentId: string): string {
+  assertUlid(projectId, "projectId");
+  assertUlid(deploymentId, "deploymentId");
+  return `zx-dnet-${projectId.toLowerCase()}-${deploymentId.toLowerCase()}`;
+}
+
+/** named volume ของ component หนึ่งตัว (แยกจาก volumeName เดิมด้วย componentId) */
+export function componentVolumeName(
+  projectId: string,
+  componentId: string,
+  volumeId: string,
+): string {
+  assertUlid(projectId, "projectId");
+  assertUlid(componentId, "componentId");
+  assertUlid(volumeId, "volumeId");
+  return `zxvol-${projectId.toLowerCase()}-${componentId.toLowerCase()}-${volumeId.toLowerCase()}`;
+}
+
+/** Labels สำหรับ container/image ของ component — deploymentLabels + componentId */
+export function componentLabels(
+  projectId: string,
+  deploymentId: string,
+  componentId: string,
+): Record<string, string> {
+  assertUlid(componentId, "componentId");
+  return {
+    ...deploymentLabels(projectId, deploymentId),
+    [LABELS.componentId]: componentId,
+  };
+}
+
+/** Labels สำหรับ per-deployment network — reconciler ใช้กวาด network ที่ไม่มี deployment succeeded */
+export function deploymentNetworkLabels(
+  projectId: string,
+  deploymentId: string,
+): Record<string, string> {
+  return deploymentLabels(projectId, deploymentId);
+}

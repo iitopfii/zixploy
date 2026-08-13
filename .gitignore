@@ -36,3 +36,6 @@ Thumbs.db
 
 # เอกสารออกแบบภายใน — เก็บไว้ในเครื่อง ไม่เผยแพร่
 docs/
+
+# worktree ชั่วคราวของ subagent (Claude Code)
+.claude/worktrees/

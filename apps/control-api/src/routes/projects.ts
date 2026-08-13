@@ -8,6 +8,7 @@ interface ProjectRow {
   id: string;
   name: string;
   status: string;
+  mode: string;
   source_type: string;
   installation_id: string | null;
   repo_id: number | null;
@@ -48,6 +49,8 @@ const projectSchema = t.Object({
     t.Literal("failed"),
     t.Literal("stopped"),
   ]),
+  // Phase 18 — 'single' (pipeline เดิม, 1 container) หรือ 'compose' (multi-container orchestrator)
+  mode: t.Union([t.Literal("single"), t.Literal("compose")]),
   // Phase 8 M2 — active container หายไปจาก Docker ทั้งที่ status ยังเป็น 'running'
   degraded: t.Boolean(),
   // Phase 13 — 'github' (default, เชื่อม repo) หรือ 'dockerfile' (วางเนื้อหาเอง ไม่มี repo)
@@ -90,6 +93,7 @@ function toProject(row: ProjectRow) {
     id: row.id,
     name: row.name,
     status: row.status as "new" | "running" | "deploying" | "failed" | "stopped",
+    mode: row.mode === "compose" ? ("compose" as const) : ("single" as const),
     degraded: row.degraded_at != null,
     sourceType: row.source_type as "github" | "dockerfile",
     installationId: row.installation_id,
@@ -117,7 +121,7 @@ function toProject(row: ProjectRow) {
  * (idx_deployments_in_flight, idx_deployments_project_created) จึงไม่ scan ตาราง
  * ใช้ p. prefix เพราะ query หลักต้อง alias projects เป็น p
  */
-const SELECT_COLUMNS = `p.id, p.name, p.status, p.source_type, p.installation_id, p.repo_id, p.repo_full_name,
+const SELECT_COLUMNS = `p.id, p.name, p.status, p.mode, p.source_type, p.installation_id, p.repo_id, p.repo_full_name,
   p.branch, p.auto_deploy, p.dockerfile_path, p.build_context, p.internal_port, p.exposed_port,
   p.health_check_path, p.archived_at, p.degraded_at, p.created_at, p.updated_at,
   (SELECT d.status FROM deployments d

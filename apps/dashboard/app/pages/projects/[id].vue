@@ -34,6 +34,7 @@ const tabs = [
   { key: "metrics", label: "ทรัพยากร", icon: "activity" as const },
   { key: "environment", label: "Environment", icon: "key" as const },
   { key: "domains", label: "Domains", icon: "globe" as const },
+  { key: "components", label: "Components", icon: "box" as const },
   { key: "logs", label: "Logs", icon: "terminal" as const },
   { key: "volumes", label: "Volumes", icon: "database" as const },
 ] as const;
@@ -657,6 +658,16 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
         <!-- Domains -->
         <div v-else-if="activeTab === 'domains'" class="card">
           <DomainsTab :project-id="id" :archived="!!project.archivedAt" />
+        </div>
+
+        <!-- Components -->
+        <div v-else-if="activeTab === 'components'" class="card">
+          <ComponentsTab
+            :project-id="id"
+            :archived="!!project.archivedAt"
+            :mode="project.mode"
+            @changed="refresh()"
+          />
         </div>
 
         <!-- Logs -->

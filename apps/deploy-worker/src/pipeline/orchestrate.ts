@@ -42,7 +42,7 @@ import { loadProjectConfig, setProjectStatus } from "../db/project-config";
 import type { BuildImageParams, BuildImageResult } from "../docker/buildkit";
 import type { DockerCliClient } from "../docker/cli-client";
 import { loadProjectDomains } from "../domains/loader";
-import { injectEnvVars } from "../env/inject";
+import { injectComponentEnv, injectEnvVars } from "../env/inject";
 import { buildRedactFn } from "../env/redaction";
 import type { CloneParams } from "../git/clone";
 import type { MasterKeys } from "../github/master-key";
@@ -259,16 +259,20 @@ export async function runComposePipeline(
         ...(c.isWeb ? buildTraefikLabels(domainConfigs, job.projectId) : {}),
       };
 
+      // ลำดับ env (ตัวหลัง override ตัวหน้า): project-wide → managed_ref inject → component-scoped
       // managed_ref dependency → ฉีด connection env (URL/host/port/user/pass/db) + ต้อง join
       // PROXY_NETWORK เพื่อ resolve ชื่อ container ของ service (service อยู่บน proxy net ไม่ใช่ per-deployment)
       const refDeps = c.dependsOn
         .map((d) => compById.get(d.id))
         .filter((dc): dc is DeployComponent => dc?.sourceKind === "managed_ref");
-      let componentEnv = envInject.runtimeEnv;
+      let componentEnv = { ...envInject.runtimeEnv };
       for (const ref of refDeps) {
         const refEnv = await deps.buildManagedRefEnv(db, deps.masterKeys, ref);
         componentEnv = { ...componentEnv, ...refEnv };
       }
+      // component-scoped env override ทับสุด (ผู้ใช้ตั้งเองเจาะจง component นี้)
+      const scoped = await injectComponentEnv(db, deps.masterKeys, job.projectId, c.id, onLog);
+      componentEnv = { ...componentEnv, ...scoped.runtimeEnv };
       const needsProxy = c.isWeb || refDeps.length > 0;
 
       const { containerId } = await docker.createContainer({

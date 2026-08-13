@@ -29,9 +29,12 @@ const envVarSummarySchema = t.Object({
   scope: t.Union([t.Literal("runtime"), t.Literal("build"), t.Literal("both")]),
   enabled: t.Boolean(),
   version: t.Number(),
+  componentId: t.Nullable(t.String()),
   createdAt: t.Number(),
   updatedAt: t.Number(),
 });
+
+const scopeQuerySchema = t.Object({ componentId: t.Optional(t.String()) });
 
 const envVarInputSchema = t.Object({
   key: t.String({ minLength: 1, maxLength: 256 }),
@@ -67,6 +70,23 @@ function requireProject(db: Database, projectId: string): void {
   if (!row) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
 }
 
+/** ตรวจ componentId (ถ้ามี) ว่าอยู่ในโปรเจกต์นี้ — คืน null = project-wide scope (Phase 18 · F) */
+function resolveComponentScope(
+  db: Database,
+  projectId: string,
+  componentId: string | undefined,
+): string | null {
+  if (!componentId) return null;
+  if (!isUlid(componentId)) throw new AppError("COMPONENT_NOT_FOUND", "ไม่พบ component นี้");
+  const row = db
+    .query<{ id: string }, [string, string]>(
+      "SELECT id FROM project_components WHERE id = ? AND project_id = ?",
+    )
+    .get(componentId, projectId);
+  if (!row) throw new AppError("COMPONENT_NOT_FOUND", "ไม่พบ component นี้");
+  return componentId;
+}
+
 function requireEncryption(masterKeys: MasterKeys | null): MasterKeys {
   if (!masterKeys) {
     throw new AppError(
@@ -87,28 +107,33 @@ export function environmentRoutes(db: Database, masterKeys: MasterKeys | null) {
       .use(authPlugin(db))
       .guard({ beforeHandle: requireAuthenticated })
 
-      // GET /projects/:id/environment — metadata only, no plaintext
+      // GET /projects/:id/environment[?componentId=X] — metadata only, no plaintext
+      // ไม่มี componentId = project-wide; มี = env เฉพาะ component นั้น (Phase 18 · F)
       .get(
         "/",
-        ({ params }) => {
+        ({ params, query }) => {
           requireProject(db, params.id);
-          return { variables: listEnvVars(db, params.id) };
+          const scope = resolveComponentScope(db, params.id, query.componentId);
+          return { variables: listEnvVars(db, params.id, scope) };
         },
         {
+          query: scopeQuerySchema,
           response: t.Object({ variables: t.Array(envVarSummarySchema) }),
         },
       )
 
-      // PUT /projects/:id/environment — full replace (encrypted server-side)
+      // PUT /projects/:id/environment[?componentId=X] — full replace ของ scope นั้น (encrypted server-side)
       .put(
         "/",
-        async ({ params, body }) => {
+        async ({ params, body, query }) => {
           requireProject(db, params.id);
+          const scope = resolveComponentScope(db, params.id, query.componentId);
           const keys = requireEncryption(masterKeys);
-          const variables = await replaceEnvVars(db, params.id, body.variables, keys);
+          const variables = await replaceEnvVars(db, params.id, body.variables, keys, scope);
           return { variables };
         },
         {
+          query: scopeQuerySchema,
           body: putBodySchema,
           response: t.Object({ variables: t.Array(envVarSummarySchema) }),
         },

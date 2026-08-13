@@ -417,3 +417,84 @@ describe("POST /projects/:id/environment/validate", () => {
     expect(res.status).toBe(200);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Component-scoped env (Phase 18 · F)
+// ---------------------------------------------------------------------------
+
+describe("component-scoped environment (?componentId)", () => {
+  function insertComp(db: ReturnType<typeof openDatabase>, projectId: string, name: string) {
+    const id = ulid();
+    const now = Date.now();
+    db.query(
+      `INSERT INTO project_components (id, project_id, name, source_kind, created_at, updated_at)
+       VALUES (?, ?, ?, 'build', ?, ?)`,
+    ).run(id, projectId, name, now, now);
+    return id;
+  }
+
+  function putScoped(
+    app: ReturnType<typeof buildApp>,
+    projectId: string,
+    cookie: string,
+    csrf: string,
+    variables: unknown[],
+    componentId?: string,
+  ) {
+    const q = componentId ? `?componentId=${componentId}` : "";
+    return app.handle(
+      new Request(`http://localhost/api/v1/projects/${projectId}/environment${q}`, {
+        method: "PUT",
+        headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" },
+        body: JSON.stringify({ variables }),
+      }),
+    );
+  }
+
+  function getScoped(
+    app: ReturnType<typeof buildApp>,
+    projectId: string,
+    cookie: string,
+    componentId?: string,
+  ) {
+    const q = componentId ? `?componentId=${componentId}` : "";
+    return app.handle(
+      new Request(`http://localhost/api/v1/projects/${projectId}/environment${q}`, {
+        headers: { cookie },
+      }),
+    );
+  }
+
+  test("PUT/GET scoped แยกจาก project-wide — ไม่ปนกัน", async () => {
+    const { app, db, projectId, cookie, csrf } = await setup();
+    const web = insertComp(db, projectId, "web");
+
+    await putScoped(app, projectId, cookie, csrf, [{ key: "SHARED", value: "proj" }]); // project-wide
+    await putScoped(app, projectId, cookie, csrf, [{ key: "ONLY_WEB", value: "w" }], web); // scoped
+
+    // GET project-wide → เห็นแค่ SHARED
+    const pw = await json(await getScoped(app, projectId, cookie));
+    expect(pw.variables.map((v: { key: string }) => v.key)).toEqual(["SHARED"]);
+
+    // GET scoped → เห็นแค่ ONLY_WEB + componentId ตรง
+    const sc = await json(await getScoped(app, projectId, cookie, web));
+    expect(sc.variables.map((v: { key: string }) => v.key)).toEqual(["ONLY_WEB"]);
+    expect(sc.variables[0].componentId).toBe(web);
+  });
+
+  test("key เดียวกันอยู่ได้ทั้ง project-wide และ component (ไม่ชน UNIQUE)", async () => {
+    const { app, db, projectId, cookie, csrf } = await setup();
+    const web = insertComp(db, projectId, "web");
+    const r1 = await putScoped(app, projectId, cookie, csrf, [{ key: "PORT", value: "3000" }]);
+    const r2 = await putScoped(app, projectId, cookie, csrf, [{ key: "PORT", value: "4000" }], web);
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+  });
+
+  test("componentId ที่ไม่อยู่ในโปรเจกต์ → 404", async () => {
+    const { app, projectId, cookie, csrf } = await setup();
+    const res = await putScoped(app, projectId, cookie, csrf, [{ key: "X", value: "y" }], ulid());
+    expect(res.status).toBe(404);
+    expect((await json(res)).error.code).toBe("COMPONENT_NOT_FOUND");
+  });
+});

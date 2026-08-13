@@ -61,31 +61,13 @@ const EMPTY_INJECTION: EnvInjection = {
 // Public API
 // ---------------------------------------------------------------------------
 
-/**
- * Load and decrypt all enabled env vars for a project, then split by scope.
- *
- * ออกแบบให้ graceful: masterKeys=null หรือ row ที่ decrypt ไม่ได้ → skip + log แทน throw
- * เพื่อให้ deploy ดำเนินต่อได้แม้ key rotation ยังทำไม่เสร็จ หรือ operator ไม่ได้ตั้ง key
- */
-export async function injectEnvVars(
-  db: Database,
-  masterKeys: MasterKeys | null,
+/** decrypt + split ตาม scope จาก rows ที่โหลดมาแล้ว (graceful: row ที่ decrypt ไม่ได้ → skip + log) */
+async function decryptAndSplit(
+  masterKeys: MasterKeys,
   projectId: string,
+  rows: EnvVarRow[],
   onLog: (line: string) => void,
 ): Promise<EnvInjection> {
-  if (!masterKeys) {
-    // ไม่มี master key — ไม่มี env injection ไม่ throw (ops choice)
-    return EMPTY_INJECTION;
-  }
-
-  const rows = db
-    .query<EnvVarRow, [string]>(
-      "SELECT key, value_ciphertext, is_secret, scope FROM environment_variables WHERE project_id = ? AND enabled = 1",
-    )
-    .all(projectId);
-
-  if (rows.length === 0) return EMPTY_INJECTION;
-
   const runtimeEnv: Record<string, string> = {};
   const buildArgs: Record<string, string> = {};
   const buildSecretValues: Array<{ key: string; value: string }> = [];
@@ -125,4 +107,50 @@ export async function injectEnvVars(
   }
 
   return { runtimeEnv, buildArgs, buildSecretValues, secretValues };
+}
+
+/**
+ * Load + decrypt env vars ระดับ project (component_id IS NULL) แล้ว split ตาม scope
+ *
+ * ใช้โดย single-container pipeline และเป็น "ฐาน" ของ compose (แต่ละ component override ทับด้วย
+ * injectComponentEnv) — กรอง component_id IS NULL สำคัญ: หลังมี component-scoped env แล้ว ถ้าไม่กรอง
+ * env ของ component หนึ่งจะรั่วไปทุก container
+ *
+ * graceful: masterKeys=null หรือ decrypt ไม่ได้ → skip + log แทน throw
+ */
+export async function injectEnvVars(
+  db: Database,
+  masterKeys: MasterKeys | null,
+  projectId: string,
+  onLog: (line: string) => void,
+): Promise<EnvInjection> {
+  if (!masterKeys) return EMPTY_INJECTION;
+  const rows = db
+    .query<EnvVarRow, [string]>(
+      "SELECT key, value_ciphertext, is_secret, scope FROM environment_variables WHERE project_id = ? AND enabled = 1 AND component_id IS NULL",
+    )
+    .all(projectId);
+  if (rows.length === 0) return EMPTY_INJECTION;
+  return decryptAndSplit(masterKeys, projectId, rows, onLog);
+}
+
+/**
+ * Load + decrypt env vars ที่ผูกกับ component หนึ่งตัว (component_id = ?) — Phase 18 · F
+ * orchestrator เอามา merge ทับ project-wide env ของ component นั้น (component override project)
+ */
+export async function injectComponentEnv(
+  db: Database,
+  masterKeys: MasterKeys | null,
+  projectId: string,
+  componentId: string,
+  onLog: (line: string) => void,
+): Promise<EnvInjection> {
+  if (!masterKeys) return EMPTY_INJECTION;
+  const rows = db
+    .query<EnvVarRow, [string, string]>(
+      "SELECT key, value_ciphertext, is_secret, scope FROM environment_variables WHERE project_id = ? AND component_id = ? AND enabled = 1",
+    )
+    .all(projectId, componentId);
+  if (rows.length === 0) return EMPTY_INJECTION;
+  return decryptAndSplit(masterKeys, projectId, rows, onLog);
 }

@@ -115,12 +115,16 @@ services:
       # (ตัดสินใจเมื่อ 2026-08-13 — ดู internal/shared/src/version.ts)
       ZIXPLOY_VERSION: ${ZIXPLOY_VERSION:-dev}
       ZIXPLOY_DISABLE_SELF_UPDATE: "true"
+      # bearer secret ยืนยันว่า worker ที่ต่อ WebSocket เข้ามาที่ /internal/terminal-relay
+      # เป็นตัวจริง — คนละหน้าที่กับ master key (ไม่เข้ารหัสอะไร แค่ auth) (Phase 17)
+      ZIXPLOY_INTERNAL_TOKEN_FILE: /run/secrets/internal_token
     volumes:
       - zixploy-data:/data
       - zixploy-backups:/backups
       # rw: control-api เป็นตัวเดียวที่เขียน cert (Traefik mount :ro)
       - zixploy-certs:/certs
       - /etc/zixploy/master.key:/run/secrets/master_key:ro
+      - /etc/zixploy/internal.token:/run/secrets/internal_token:ro
     expose:
       - "3001"
     networks:
@@ -157,12 +161,17 @@ services:
       # ที่เก็บ dump ของ managed service (database) — volume เดียวกับที่ control-api backup ตัวเอง
       # (Phase 16) subdirectory "services/<id>/" กันชนกับ db/keys/acme ของ control-api
       ZIXPLOY_BACKUPS_DIR: /backups
+      # ต่อ WebSocket ออกไปหา control-api ตรง ๆ ผ่าน zixploy-internal network (ไม่ผ่าน Traefik)
+      # เพื่อ relay terminal session เข้า container — ชื่อ container คือ hostname ในเครือข่ายนี้เอง
+      ZIXPLOY_CONTROL_API_URL: http://control-api:3001
+      ZIXPLOY_INTERNAL_TOKEN_FILE: /run/secrets/internal_token
     volumes:
       - zixploy-data:/data
       - zixploy-workspaces:/workspaces
       - zixploy-backups:/backups
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/zixploy/master.key:/run/secrets/master_key:ro
+      - /etc/zixploy/internal.token:/run/secrets/internal_token:ro
     networks:
       - zixploy-internal
       - zixploy-proxy

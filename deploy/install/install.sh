@@ -13,6 +13,7 @@ REPO_RAW="https://raw.githubusercontent.com/iitopfii/zixploy/main/deploy/install
 INSTALL_DIR="${ZIXPLOY_INSTALL_DIR:-/opt/zixploy}"
 SECRET_DIR="/etc/zixploy"
 MASTER_KEY="$SECRET_DIR/master.key"
+INTERNAL_TOKEN="$SECRET_DIR/internal.token"
 COMPOSE_FILE="$INSTALL_DIR/docker-compose.yml"
 ENV_FILE="$INSTALL_DIR/.env"
 
@@ -149,6 +150,23 @@ else
   chmod 600 "$MASTER_KEY"
   ok "สร้าง master key แล้ว ($MASTER_KEY)"
   warn "สำรองไฟล์นี้ไว้ — หายแล้วข้อมูลที่เข้ารหัสไว้กู้คืนไม่ได้"
+fi
+
+# ---------------------------------------------------------------------------
+# Internal token — bearer secret ระหว่าง control-api กับ worker เท่านั้น (terminal feature)
+# ---------------------------------------------------------------------------
+#
+# คนละหน้าที่กับ master key: ไม่ได้เข้ารหัสอะไรเลย แค่ยืนยันว่า "อีกฝั่งคือ worker จริง"
+# ก่อนต่อ WebSocket relay เข้า container — หายแล้ว regenerate ใหม่ได้เสมอไม่กระทบข้อมูลเดิม
+
+if [ -f "$INTERNAL_TOKEN" ]; then
+  ok "ใช้ internal token เดิมที่มีอยู่แล้ว"
+else
+  step "สร้าง internal token…"
+  head -c 32 /dev/urandom | base64 -w0 2>/dev/null > "$INTERNAL_TOKEN" \
+    || head -c 32 /dev/urandom | base64 | tr -d '\n' > "$INTERNAL_TOKEN"
+  chmod 600 "$INTERNAL_TOKEN"
+  ok "สร้าง internal token แล้ว ($INTERNAL_TOKEN)"
 fi
 
 # ---------------------------------------------------------------------------

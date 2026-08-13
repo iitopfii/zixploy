@@ -27,10 +27,15 @@ import { claimNextJob, completeJob, failJob, LeaseLostError, withLeaseRenewal } 
 import { stateReconcileLoop } from "./reconciler";
 import { backupScheduleLoop } from "./services/backup-schedule-loop";
 import { serviceJobLoop } from "./services/loop";
+import { terminalSessionLoop } from "./services/terminal-session-loop";
 import { volumeReconcileLoop } from "./volumes/reconciler";
 
 /** mount point ของ zixploy-backups volume ในนี้ — เดียวกับที่ control-api backup ตัวเอง */
 const backupsDir = process.env.ZIXPLOY_BACKUPS_DIR ?? "/backups";
+/** base URL ของ control-api บน zixploy-internal network — worker ต่อ WebSocket ออกไปหาตรง ๆ
+ *  สำหรับ terminal relay (Phase 17) ไม่ผ่าน Traefik (ดู services/terminal-session-loop.ts)
+ *  ค่า default ตรงกับ service name "control-api" + ZIXPLOY_API_PORT ใน docker-compose.yml */
+const controlApiUrl = process.env.ZIXPLOY_CONTROL_API_URL ?? "http://control-api:3001";
 
 const workerId = `worker-${ulid()}`;
 const log = createLogger({
@@ -187,6 +192,11 @@ await Promise.all([
   backupScheduleLoop(db, docker, backupsDir, controller.signal, (line) =>
     log.info(line, { workerId }),
   ),
+  // interactive terminal เข้า container ของ managed service — ไม่ผ่าน service_jobs queue เช่นกัน
+  // (ดู services/terminal-session-loop.ts)
+  terminalSessionLoop(db, docker, controlApiUrl, controller.signal, {
+    onLog: (line) => log.info(line, { workerId }),
+  }),
 ]);
 
 log.info("deploy-worker stopped", { workerId });

@@ -143,6 +143,8 @@ export const LABELS = {
   volumeId: "platform.volume_id",
   /** managed service (database) — Phase 10 */
   serviceId: "platform.service_id",
+  /** component ใน project แบบ compose (Phase 18) — reconciler/cleanup กรอง resource ต่อ component */
+  componentId: "platform.component_id",
 } as const;
 
 /**

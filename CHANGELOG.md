@@ -12,7 +12,7 @@ Versioning: [Semantic Versioning](https://semver.org/)
 ## [0.1.11] — 2026-08-13
 
 ### Added
-- **compose: component-scoped environment variables (Phase 18 · F)** — ตั้ง env var แยกต่อ
+- **compose: component-scoped environment variables** — ตั้ง env var แยกต่อ
   component ได้ (เช่น `web` กับ `worker` คนละชุด env) โดย override ค่าระดับโปรเจกต์ · หน้า
   Environment มีตัวเลือก "ขอบเขต" (ทั้งโปรเจกต์ / เจาะจง component) · ลำดับ override ตอน deploy:
   project-wide → managed_ref inject → component-scoped
@@ -28,12 +28,12 @@ Versioning: [Semantic Versioning](https://semver.org/)
 ## [0.1.10] — 2026-08-13
 
 ### Added
-- **compose: depends_on แบบ `condition: healthy` ทำงานจริง (Phase 18 · F)** — เดิม UI ให้เลือก
+- **compose: depends_on แบบ `condition: healthy` ทำงานจริง** — เดิม UI ให้เลือก
   'healthy' ได้แต่ orchestrator ปฏิบัติเหมือน 'started' · ตอนนี้ตั้ง Docker-native HEALTHCHECK
   ต่อ component ได้ (ฟิลด์ `healthCmd` เช่น `pg_isready -U app`, `redis-cli ping`) แล้ว dependent
   จะรอ dependency ให้ healthy จริงก่อน start (dependency ที่ไม่มี healthcheck → fallback เป็น
   'started' พร้อม log เตือน ไม่ค้าง deploy)
-- **compose: managed_ref เชื่อม managed database ได้จริง (Phase 18 · F)** — component ที่
+- **compose: managed_ref เชื่อม managed database ได้จริง** — component ที่
   `depends_on` managed_ref จะได้ env เชื่อมต่อฉีดอัตโนมัติตอน deploy (`<NAME>_URL`, `_HOST`,
   `_PORT`, `_USERNAME`, `_PASSWORD`, `_DATABASE` — ถอดรหัสผ่าน + ประกอบ connection URI) และถูก
   ต่อเข้า proxy network อัตโนมัติเพื่อเข้าถึง service container (เดิม managed_ref แค่ verify ว่า
@@ -55,7 +55,7 @@ Versioning: [Semantic Versioning](https://semver.org/)
 ## [0.1.8] — 2026-08-13
 
 ### Added
-- **Multi-container (compose-style) projects — Phase 18** — โปรเจกต์เดียวรันได้หลาย container
+- **Multi-container (compose-style) projects** — โปรเจกต์เดียวรันได้หลาย container
   (เว็บ + worker + database) แบบ docker-compose:
   - แท็บ **Components** ใหม่ในหน้า project: เพิ่ม/แก้/ลบ component ทีละตัว (build จาก Dockerfile,
     image สำเร็จรูป, หรืออ้าง managed database), ตั้ง `depends_on` ระหว่าง component พร้อมเงื่อนไข
@@ -67,7 +67,7 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ### Notes
 - managed_ref (อ้าง database ที่มีอยู่) เวอร์ชันนี้ verify ว่า service รันอยู่เท่านั้น — การ inject
-  connection string อัตโนมัติ + component-scoped env/volume จะตามมาใน phase ถัดไป
+  connection string อัตโนมัติ + component-scoped env/volume จะตามมาในรุ่นถัดไป
 
 ---
 

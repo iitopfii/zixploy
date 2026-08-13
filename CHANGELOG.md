@@ -9,6 +9,22 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.1.11] — 2026-08-13
+
+### Added
+- **compose: component-scoped environment variables (Phase 18 · F)** — ตั้ง env var แยกต่อ
+  component ได้ (เช่น `web` กับ `worker` คนละชุด env) โดย override ค่าระดับโปรเจกต์ · หน้า
+  Environment มีตัวเลือก "ขอบเขต" (ทั้งโปรเจกต์ / เจาะจง component) · ลำดับ override ตอน deploy:
+  project-wide → managed_ref inject → component-scoped
+
+### Changed
+- rebuild ตาราง `environment_variables` (migration 0025): เปลี่ยน `UNIQUE(project_id,key)` ระดับ
+  ตารางเป็น partial unique index สองอัน (project-scoped + component-scoped) ให้ key เดียวกันอยู่
+  ได้ทั้งระดับโปรเจกต์และแยกต่อ component · `component_id` เพิ่ม `ON DELETE CASCADE` (ลบ component
+  แล้ว env ที่ผูกไว้หายตาม) · env เดิมทั้งหมดถูกย้ายมาครบ (project-wide, component_id NULL)
+
+---
+
 ## [0.1.10] — 2026-08-13
 
 ### Added

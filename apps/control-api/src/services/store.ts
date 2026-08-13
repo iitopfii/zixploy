@@ -16,6 +16,7 @@ import {
   SERVICE_SETTINGS,
   type ServiceCredentials,
   type ServiceType,
+  serviceContainerName,
   serviceImage,
   serviceVolumeName,
   ulid,
@@ -61,6 +62,8 @@ export interface ServiceDto {
   status: ServiceStatus;
   username: string;
   databaseName: string;
+  /** ชื่อ container ใน Docker network — app อื่นในเครื่องต่อผ่านชื่อนี้ (ไม่ใช่ secret) */
+  internalHost: string;
   internalPort: number;
   exposedPort: number | null;
   memoryLimitMb: number | null;
@@ -87,6 +90,7 @@ export function toDto(row: ServiceRow): ServiceDto {
     status: row.status as ServiceStatus,
     username: row.username,
     databaseName: row.database_name,
+    internalHost: serviceContainerName(row.id),
     internalPort: row.internal_port,
     exposedPort: row.exposed_port,
     memoryLimitMb: row.memory_limit_mb,

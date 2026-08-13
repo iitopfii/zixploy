@@ -22,6 +22,7 @@ import { API_PREFIX, AppError, isTerminal, isUlid, LOG_SETTINGS } from "@zixploy
 import { Elysia, t } from "elysia";
 import { listBuildLogs } from "../logs/build-store";
 import { listRuntimeLogs, tailRuntimeLogs } from "../logs/runtime-store";
+import { listServiceLogs, tailServiceLogs } from "../logs/service-store";
 import { authPlugin, requireAuthenticated } from "../plugins/auth";
 
 // ---------------------------------------------------------------------------
@@ -34,6 +35,17 @@ const logEntrySchema = t.Object({
   seq: t.Number(),
   stream: t.Union([t.Literal("stdout"), t.Literal("stderr")]),
   line: t.String(),
+  createdAt: t.Number(),
+});
+
+const serviceLogEntrySchema = t.Object({
+  id: t.String(),
+  serviceId: t.String(),
+  containerId: t.String(),
+  seq: t.Number(),
+  stream: t.Union([t.Literal("stdout"), t.Literal("stderr")]),
+  line: t.String(),
+  loggedAt: t.Number(),
   createdAt: t.Number(),
 });
 
@@ -89,6 +101,12 @@ function requireProject(db: Database, id: string): void {
     .query<{ id: string }, [string]>("SELECT id FROM projects WHERE id = ? AND archived_at IS NULL")
     .get(id);
   if (!row) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+}
+
+function requireService(db: Database, id: string): void {
+  if (!isUlid(id)) throw new AppError("SERVICE_NOT_FOUND", "ไม่พบ service นี้");
+  const row = db.query<{ id: string }, [string]>("SELECT id FROM services WHERE id = ?").get(id);
+  if (!row) throw new AppError("SERVICE_NOT_FOUND", "ไม่พบ service นี้");
 }
 
 /**
@@ -190,8 +208,27 @@ function buildLogSseStream(db: Database, deploymentId: string, initialSeq: numbe
   });
 }
 
-/** SSE stream สำหรับ runtime logs (ring buffer polling) */
-function runtimeLogSseStream(db: Database, projectId: string, initialSeq: number): ReadableStream {
+/** บรรทัด log จาก ring buffer ที่ SSE ส่งออกได้ — รูปร่างร่วมของ runtime log และ service log */
+interface RingLogLine {
+  seq: number;
+  containerId: string;
+  stream: "stdout" | "stderr";
+  line: string;
+  loggedAt: number;
+  createdAt: number;
+}
+
+/**
+ * SSE stream สำหรับ log ที่เก็บเป็น ring buffer (runtime log ของ project และ service log ของ database)
+ *
+ * รับ `listAfter` เข้ามาแทนที่จะผูกกับตารางใดตารางหนึ่ง — ตรรกะ heartbeat/poll/backpressure/cleanup
+ * เหมือนกันทุกประการ ต่างแค่แหล่งข้อมูล การ copy ทั้งก้อนไปอีกชุดแปลว่าบั๊กที่เคยแก้ไปแล้วรอบหนึ่ง
+ * (เช่น timer ค้างตอน client ปิด) ต้องตามไปแก้สองที่เสมอ
+ */
+function ringLogSseStream(
+  initialSeq: number,
+  listAfter: (afterSeq: number) => RingLogLine[],
+): ReadableStream {
   let lastSeq = initialSeq;
   let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -228,7 +265,7 @@ function runtimeLogSseStream(db: Database, projectId: string, initialSeq: number
       async function poll() {
         if (closed) return;
         try {
-          const rows = listRuntimeLogs(db, projectId, { afterSeq: lastSeq });
+          const rows = listAfter(lastSeq);
           for (const row of rows) {
             if (closed) return;
             const data = JSON.stringify({
@@ -358,7 +395,47 @@ export function logRoutes(db: Database) {
         requireProject(db, params.id);
 
         const afterSeq = resolveAfterSeq(headers["last-event-id"], query.afterSeq);
-        const stream = runtimeLogSseStream(db, params.id, afterSeq);
+        const stream = ringLogSseStream(afterSeq, (after) =>
+          listRuntimeLogs(db, params.id, { afterSeq: after }),
+        );
+        return new Response(stream, {
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+            "X-Accel-Buffering": "no",
+          },
+        });
+      })
+
+      // ── Service (database) logs ────────────────────────────────────────────
+
+      // GET /api/v1/services/:id/logs — paginated
+      .get(
+        `${API_PREFIX}/services/:id/logs`,
+        ({ params, query }) => {
+          requireService(db, params.id);
+          // ไม่ส่ง cursor = เปิดหน้าครั้งแรก → เอาบรรทัดล่าสุด ไม่ใช่เก่าสุดของ ring buffer
+          const logs =
+            query.afterSeq !== undefined
+              ? listServiceLogs(db, params.id, { afterSeq: query.afterSeq })
+              : tailServiceLogs(db, params.id);
+          return { logs };
+        },
+        {
+          query: t.Object({ afterSeq: t.Optional(t.Number({ minimum: 0 })) }),
+          response: t.Object({ logs: t.Array(serviceLogEntrySchema) }),
+        },
+      )
+
+      // GET /api/v1/services/:id/logs/stream — SSE
+      .get(`${API_PREFIX}/services/:id/logs/stream`, ({ params, headers, query }) => {
+        requireService(db, params.id);
+
+        const afterSeq = resolveAfterSeq(headers["last-event-id"], query.afterSeq);
+        const stream = ringLogSseStream(afterSeq, (after) =>
+          listServiceLogs(db, params.id, { afterSeq: after }),
+        );
         return new Response(stream, {
           headers: {
             "Content-Type": "text/event-stream",

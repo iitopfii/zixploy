@@ -78,6 +78,7 @@ const serviceSchema = t.Object({
   status: statusSchema,
   username: t.String(),
   databaseName: t.String(),
+  internalHost: t.String(),
   internalPort: t.Number(),
   exposedPort: t.Nullable(t.Number()),
   memoryLimitMb: t.Nullable(t.Number()),

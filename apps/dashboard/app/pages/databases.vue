@@ -152,6 +152,9 @@ async function showCredentials(id: string) {
   }
 }
 
+// ── logs ──
+const logsFor = ref<{ id: string; name: string } | null>(null);
+
 const copied = ref("");
 async function copy(text: string, label: string) {
   await navigator.clipboard.writeText(text);
@@ -337,7 +340,17 @@ const CATEGORY_LABEL: Record<string, string> = {
 
           <dl class="kv compact">
             <dt>ต่อภายใน</dt>
-            <dd><code class="tiny">zxsvc-…:{{ svc.internalPort }}</code></dd>
+            <dd>
+              <code class="tiny">{{ svc.internalHost }}:{{ svc.internalPort }}</code>
+              <button
+                class="ghost tiny copy-btn"
+                aria-label="คัดลอก host"
+                title="คัดลอก"
+                @click="copy(`${svc.internalHost}:${svc.internalPort}`, `host-${svc.id}`)"
+              >
+                <AppIcon :name="copied === `host-${svc.id}` ? 'check' : 'copy'" :size="12" />
+              </button>
+            </dd>
             <dt>Port ภายนอก</dt>
             <dd>
               <code v-if="svc.exposedPort" class="tiny">{{ svc.exposedPort }}</code>
@@ -353,6 +366,15 @@ const CATEGORY_LABEL: Record<string, string> = {
             >
               <AppIcon name="key" :size="13" />
               ข้อมูลเชื่อมต่อ
+            </button>
+
+            <button
+              class="secondary small"
+              :disabled="svc.busy"
+              @click="logsFor = { id: svc.id, name: svc.name }"
+            >
+              <AppIcon name="terminal" :size="13" />
+              Logs
             </button>
 
             <button
@@ -474,6 +496,13 @@ const CATEGORY_LABEL: Record<string, string> = {
       :busy="deleting"
       @cancel="confirmDelete = null"
       @confirm="doDelete"
+    />
+
+    <ServiceLogsDialog
+      v-if="logsFor"
+      :service-id="logsFor.id"
+      :service-name="logsFor.name"
+      @close="logsFor = null"
     />
   </div>
 </template>
@@ -629,6 +658,15 @@ const CATEGORY_LABEL: Record<string, string> = {
   grid-template-columns: minmax(90px, max-content) 1fr;
   gap: var(--s-2) var(--s-4);
   font-size: var(--t-sm);
+}
+.copy-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin-left: 0.35rem;
+  display: inline-grid;
+  place-items: center;
+  vertical-align: middle;
 }
 .svc-actions {
   display: flex;

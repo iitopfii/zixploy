@@ -7,6 +7,10 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+---
+
+## [0.1.4] — 2026-08-13
+
 ### Added
 - **Backup ของ managed database** — สำรองข้อมูลของ database ที่ deploy ผ่าน one-click services
   ได้ทั้งแบบตั้งเวลาอัตโนมัติและกดสำรองเองทันที เก็บไฟล์บน Docker volume เดิม

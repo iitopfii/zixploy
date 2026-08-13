@@ -91,9 +91,14 @@ interface CreatedContainer {
   imageTag: string;
 }
 
-/** health port ของ component — web ใช้ webPort, ที่เหลือใช้ internalPort (null = ไม่ health-gate) */
+/**
+ * HTTP health-gate port ของ component — เฉพาะ web (ที่ join PROXY_NETWORK) เท่านั้นที่ worker
+ * เข้าถึงได้ผ่าน HTTP probe · non-web อยู่บน per-deployment network ล้วน worker ไม่ได้ต่ออยู่จึง
+ * probe ไม่ถึง (การ health-gate non-web ต้องใช้ Docker-native healthcheck = Phase F) — คืน null
+ * ให้ข้าม HTTP gate แล้ว start ต่อได้เลย (topological order ยังการันตีลำดับ dependency อยู่)
+ */
 function healthPort(c: DeployComponent): number | null {
-  return c.isWeb ? c.webPort : c.internalPort;
+  return c.isWeb ? c.webPort : null;
 }
 
 export async function runComposePipeline(
@@ -277,7 +282,9 @@ export async function runComposePipeline(
         await deps.waitForHealthy({
           docker,
           containerId: entry.containerId,
-          networkName,
+          // web probe ผ่าน PROXY_NETWORK — worker ต่ออยู่บน net นี้ (ไม่ใช่ per-deployment net)
+          // จึง fetch IP ของ web container ได้ (เหมือน single-container pipeline)
+          networkName: PROXY_NETWORK,
           internalPort: port,
           healthCheckPath: comp.healthCheckPath,
           intervalSec: comp.healthCheckIntervalSec,

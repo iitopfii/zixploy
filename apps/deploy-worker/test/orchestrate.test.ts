@@ -393,19 +393,21 @@ describe("runComposePipeline — topological start + health gating", () => {
       webPort: 3000,
       position: 0,
     });
+    // worker มี internalPort ตั้งไว้ แต่ non-web → worker เข้าไม่ถึง (อยู่ per-deployment net ล้วน)
+    // จึงต้อง "ไม่" ถูก HTTP health-gate (กัน regression: เดิม gate ด้วย per-deployment net = fetch ไม่ถึง)
     insertComponent(db, projectId, {
       name: "worker",
       sourceKind: "build",
-      internalPort: null,
+      internalPort: 9000,
       position: 1,
     });
     const deploymentId = insertDeployment(db, projectId);
     const docker = mockDocker();
 
-    const healthChecked: Array<number | null> = [];
+    const probes: Array<{ port: number | null; network: string }> = [];
     const deps = baseDeps(db, docker);
     deps.waitForHealthy = async (p) => {
-      healthChecked.push(p.internalPort);
+      probes.push({ port: p.internalPort, network: p.networkName });
     };
 
     await runComposePipeline(
@@ -415,8 +417,8 @@ describe("runComposePipeline — topological start + health gating", () => {
       new AbortController().signal,
     );
 
-    // gate เฉพาะ web (port 3000) — worker ไม่มี port จึงไม่ถูก health-check
-    expect(healthChecked).toEqual([3000]);
+    // gate เฉพาะ web (port 3000) เท่านั้น — worker (non-web) ถูกข้ามแม้มี internalPort
+    expect(probes).toEqual([{ port: 3000, network: "zixploy-proxy" }]);
   });
 });
 

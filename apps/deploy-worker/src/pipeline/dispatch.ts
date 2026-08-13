@@ -8,6 +8,7 @@
 
 import type { Database } from "bun:sqlite";
 import { AppError } from "@zixploy/shared";
+import { loadProjectMode } from "../db/project-config";
 import { buildImage } from "../docker/buildkit";
 import type { DockerCliClient } from "../docker/cli-client";
 import { cloneCommit } from "../git/clone";
@@ -19,6 +20,7 @@ import type { ClaimedJob, JobOutcome } from "../queue";
 import { activate } from "./activate";
 import { runBuildOrRollbackPipeline } from "./build";
 import { waitForHealthy } from "./health-check";
+import { runComposePipeline } from "./orchestrate";
 import { parseDeployPayload } from "./payload";
 import { runRestart, runStop } from "./restart-stop";
 
@@ -57,6 +59,27 @@ export function createDispatcher(deps: DispatchDeps): ProcessJobFn {
           buildLogger.log(line, "stdout");
           deps.onLog(line);
         };
+      }
+
+      // compose projects (mode='compose') → multi-container orchestrator (Phase 18)
+      // build เท่านั้น: rollback ของ compose = Phase D (ยังไม่มีตัวสร้าง rollback job ให้ compose)
+      // single mode วิ่ง pipeline เดิม byte-for-byte — ไม่มี project ไหนเป็น compose จนกว่าจะมี UI (C3)
+      if (payload.kind === "build" && loadProjectMode(deps.db, job.projectId) === "compose") {
+        return runComposePipeline(
+          {
+            db: deps.db,
+            docker: deps.docker,
+            masterKeys: deps.masterKeys,
+            mintInstallationToken,
+            cloneCommit,
+            buildImage,
+            waitForHealthy,
+            onLog: persistLog,
+          },
+          job,
+          payload,
+          signal,
+        );
       }
 
       return runBuildOrRollbackPipeline(

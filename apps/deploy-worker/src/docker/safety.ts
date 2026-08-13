@@ -15,9 +15,20 @@ import type { ContainerCreateParams } from "./types";
 
 const FORBIDDEN_MOUNT_TARGETS = ["/var/run/docker.sock", "/proc", "/sys", "/dev"];
 
+// DNS label สำหรับ --network-alias (Phase 18) — เป็น string เดียวจาก user (component name) ที่ถึง argv
+// ขึ้นต้นด้วยตัวอักษร กัน alias ที่ขึ้นด้วย `-` ถูก docker ตีความเป็น flag; ยาวได้ถึง 31 ตัว
+const NETWORK_ALIAS_RE = /^[a-z][a-z0-9-]{0,30}$/;
+
 export function assertContainerConfigSafe(params: ContainerCreateParams): void {
   if (params.networkName === "host") {
     throw new AppError("VALIDATION_ERROR", "ห้ามใช้ host network mode", { field: "networkName" });
+  }
+  for (const alias of params.networkAliases ?? []) {
+    if (!NETWORK_ALIAS_RE.test(alias)) {
+      throw new AppError("VALIDATION_ERROR", `network alias ไม่ถูกต้อง (ต้องเป็น DNS label): ${alias}`, {
+        field: "networkAliases",
+      });
+    }
   }
   if (params.cpuLimit != null && params.cpuLimit <= 0) {
     throw new AppError("VALIDATION_ERROR", "cpuLimit ต้องมากกว่า 0", { field: "cpuLimit" });

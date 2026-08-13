@@ -16,6 +16,12 @@ export interface ContainerCreateParams {
   pidsLimit?: number;
   restartPolicy: "no" | "on-failure" | "always" | "unless-stopped";
   networkName: string;
+  /**
+   * DNS alias บน network หลัก (Phase 18 — multi-container) — component อื่นใน deployment
+   * เดียวกัน resolve ชื่อนี้ไปหา container นี้ได้ (เช่น `redis://cache:6379`) แบบ compose
+   * ค่าต้องผ่าน DNS-label regex ใน assertContainerConfigSafe (string เดียวจาก user ที่ถึง argv)
+   */
+  networkAliases?: string[];
   /** Named volumes ที่ต้องการ mount (Phase 7) — ต้องสร้าง volume ใน Docker ก่อนเรียก createContainer */
   volumes?: VolumeMount[];
   /**

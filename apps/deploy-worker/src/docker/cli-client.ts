@@ -98,12 +98,19 @@ export class DockerCliClient {
     }
   }
 
-  async ensureNetwork(name: string): Promise<{ networkId: string }> {
+  async ensureNetwork(
+    name: string,
+    labels?: Record<string, string>,
+  ): Promise<{ networkId: string }> {
     const inspect = await this.exec(["network", "inspect", name, "--format", "{{.Id}}"]);
     if (inspect.code === 0) {
       return { networkId: inspect.stdout.trim() };
     }
-    const create = await this.exec(["network", "create", name]);
+    // label ให้ network (Phase 18) — reconciler ใช้กวาด per-deployment network ที่ค้าง
+    const args = ["network", "create"];
+    for (const [k, v] of Object.entries(labels ?? {})) args.push("--label", `${k}=${v}`);
+    args.push(name);
+    const create = await this.exec(args);
     if (create.code !== 0) {
       throw new AppError(
         "DOCKER_UNAVAILABLE",
@@ -111,6 +118,39 @@ export class DockerCliClient {
       );
     }
     return { networkId: create.stdout.trim() };
+  }
+
+  /** ลบ network — idempotent ("no such network" ไม่ถือเป็น error) สำหรับ teardown per-deployment net */
+  async removeNetwork(name: string): Promise<void> {
+    const result = await this.exec(["network", "rm", name]);
+    if (result.code !== 0 && !isNotFoundError(result.stderr)) {
+      throw new AppError(
+        "DOCKER_UNAVAILABLE",
+        `docker network rm ล้มเหลว: ${truncate(result.stderr)}`,
+      );
+    }
+  }
+
+  /** ชื่อ network ทั้งหมดที่มี label ตรง — reconciler ใช้หา orphan network (Phase 18) */
+  async listNetworksByLabel(label: string): Promise<string[]> {
+    const result = await this.exec([
+      "network",
+      "ls",
+      "--filter",
+      `label=${label}`,
+      "--format",
+      "{{.Name}}",
+    ]);
+    if (result.code !== 0) {
+      throw new AppError(
+        "DOCKER_UNAVAILABLE",
+        `docker network ls ล้มเหลว: ${truncate(result.stderr)}`,
+      );
+    }
+    return result.stdout
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
   }
 
   async createContainer(params: ContainerCreateParams): Promise<{ containerId: string }> {
@@ -127,6 +167,8 @@ export class DockerCliClient {
       "--pids-limit",
       String(params.pidsLimit ?? 512),
     ];
+    // DNS alias บน network หลัก (Phase 18) — ใส่หลัง --network เพื่ออ่านง่าย ค่าถูก validate แล้ว
+    for (const alias of params.networkAliases ?? []) args.push("--network-alias", alias);
     for (const [k, v] of Object.entries(params.labels)) args.push("--label", `${k}=${v}`);
     if (params.env) {
       for (const [k, v] of Object.entries(params.env)) args.push("-e", `${k}=${v}`);

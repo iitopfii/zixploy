@@ -579,4 +579,40 @@ export class DockerCliClient {
         }
       });
   }
+
+  // ---------------------------------------------------------------------------
+  // Interactive exec (Phase 17 — terminal)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * เปิด `docker exec` แบบ interactive เข้า container สำหรับ web terminal relay
+   * (ดู services/terminal-session-loop.ts) — ต่างจาก exec()/spawnCaptureToFile() ปกติตรงที่
+   * ไม่รอ process จบแล้วอ่านผลทีเดียว: session มีชีวิตอยู่นาน (จนผู้ใช้ปิดเองหรือ idle timeout)
+   * ผู้เรียกต่อ stdin/stdout/stderr เข้ากับ WebSocket เองแบบ stream สด ๆ
+   *
+   * ตอนนี้ใช้ `-i` เฉย ๆ (ไม่มี `-t`) — ไม่ allocate PTY จริง แต่เป็นทางเลือกที่ทำงานแน่นอนกับ
+   * Docker CLI ทุกเวอร์ชัน คำสั่งพื้นฐาน (psql, mysql, redis-cli, ls, cat, ...) ทำงานได้ปกติ
+   * แต่ arrow-key history/tab completion/full-screen tool (less, vim, top) จะไม่ทำงานเพราะไม่มี
+   * TTY จริงให้โปรแกรมฝั่ง container ตรวจเจอ
+   *
+   * หมายเหตุ: พยายาม spike `docker exec -it` แล้วระหว่าง implement (Bun.spawn({stdin:"pipe"})
+   * ยังไม่มี Docker daemon ให้ทดสอบจริงในสภาพแวดล้อมที่พัฒนา — Docker Desktop เปิดไม่ขึ้น) จึง
+   * ยังไม่ยืนยันได้ว่า `-it` ทำงานได้ปกติเมื่อ stdin ของ `docker` CLI เองมาจาก pipe ไม่ใช่ TTY จริง
+   * ของเครื่อง worker (บาง Docker CLI เวอร์ชันเก่าจะ error "the input device is not a TTY")
+   * **TODO ผู้ที่มี Docker daemon จริงลองเปลี่ยน args ข้างล่างเป็น `["exec", "-it", ...]` แล้ว
+   * ทดสอบ — ถ้าทำงานได้ค่อยเปลี่ยนมาใช้ถาวร (ต้องคิดเรื่อง resize message แยกอีกที เพราะยังไม่มี
+   * ทาง ioctl ผ่าน piped Bun.Subprocess ได้ง่าย ๆ — ตอนนี้ resize ถูก no-op ทั้งสองกรณี)**
+   */
+  execInteractive(containerName: string, shell: string): Bun.Subprocess<"pipe", "pipe", "pipe"> {
+    const env = this.options.dockerHost
+      ? { ...process.env, DOCKER_HOST: this.options.dockerHost }
+      : process.env;
+
+    return Bun.spawn(["docker", "exec", "-i", containerName, shell], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env,
+    });
+  }
 }

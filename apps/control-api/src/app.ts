@@ -22,6 +22,7 @@ import { projectRoutes } from "./routes/projects";
 import { serviceRoutes } from "./routes/services";
 import { systemRoutes } from "./routes/system";
 import { systemSettingsRoutes } from "./routes/system-settings";
+import { type TerminalRouteOptions, terminalRoutes } from "./routes/terminal";
 import { updateRoutes } from "./routes/updates";
 import { volumeRoutes } from "./routes/volumes";
 import { webhookRoutes } from "./routes/webhook";
@@ -44,6 +45,8 @@ export interface AppOptions {
   baseUrl?: string;
   /** Master keys สำหรับ encrypt/decrypt environment variables (Phase 4) */
   masterKeys?: MasterKeys | null;
+  /** override timeout ของ terminal relay (Phase 17) — ใช้ในเทสต์เท่านั้น ปกติไม่ต้องระบุ */
+  terminal?: TerminalRouteOptions;
 }
 
 export function buildApp(db: Database, options: AppOptions = {}) {
@@ -79,6 +82,7 @@ export function buildApp(db: Database, options: AppOptions = {}) {
     .use(logRoutes(db))
     .use(volumeRoutes(db))
     .use(serviceRoutes(db, masterKeys))
+    .use(terminalRoutes(db, options.terminal))
     .use(monitoringRoutes(db))
     .use(updateRoutes(db))
     .use(systemSettingsRoutes(db, settingsStore))

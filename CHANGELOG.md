@@ -9,6 +9,17 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.1.9] — 2026-08-13
+
+### Fixed
+- **compose deploy: web health check ล้มเหลวบน production** (พบตอนทดสอบ E2E บน 103) — worker
+  ต่ออยู่บน `zixploy-proxy`/`zixploy-internal` เท่านั้น ไม่ได้ต่อ per-deployment network ที่
+  orchestrator สร้าง จึง HTTP-probe web container ผ่าน IP บน net นั้นไม่ถึง → deploy ล้มทุกครั้ง
+  แก้ให้ probe web ผ่าน `zixploy-proxy` (web join ไว้แล้วสำหรับ Traefik เหมือน single-container)
+  · non-web ที่ worker เข้าไม่ถึงจะข้าม HTTP gate (topological order ยังคุมลำดับ dependency อยู่)
+
+---
+
 ## [0.1.8] — 2026-08-13
 
 ### Added

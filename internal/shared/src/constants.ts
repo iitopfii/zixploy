@@ -183,3 +183,34 @@ export const SERVICE_BACKUP_SETTINGS = {
   /** timeout ของคำสั่ง dump/restore หนึ่งครั้ง — database ใหญ่ใช้เวลานานกว่า docker command ปกติมาก */
   dumpTimeoutMs: 30 * 60 * 1000,
 } as const;
+
+/**
+ * Interactive terminal เข้า container ของ managed service (Phase 17)
+ *
+ * worker ไม่มี server ของตัวเอง (ADR-0002) — เปิด terminal ทำผ่านตาราง terminal_sessions
+ * เป็น "กระดานงาน": control-api สร้างแถว pending แล้วรอ, worker poll เจอแล้วต่อ WebSocket
+ * กลับมาหา control-api เอง (ผ่าน zixploy-internal network ตรง ๆ ไม่ผ่าน Traefik) จากนั้น
+ * control-api แค่ relay byte ระหว่าง browser WS กับ worker WS สอง socket ที่มันถืออยู่
+ * ไม่ต้องเข้าใจความหมายของข้อมูลเลย (ดู apps/control-api/src/routes/terminal.ts)
+ *
+ * Message framing บน WebSocket ทั้งสอง hop เดียวกัน — control-api relay แบบ raw ไม่แปลง:
+ * - binary frame  = terminal I/O byte ดิบ ทั้งสองทิศทาง (keystroke ↔ stdout/stderr)
+ * - text frame    = JSON control message ทิศทาง browser → worker เท่านั้น เช่น
+ *                   {"type":"resize","cols":80,"rows":24}
+ */
+export const TERMINAL_SETTINGS = {
+  /** worker poll หา session pending ถี่แค่ไหน — ต้องไวเพราะผู้ใช้รอเปิด terminal อยู่สด ๆ
+   *  (ต่างจาก backupScheduleLoop ที่ poll เป็นนาทีได้เพราะไม่มีใครรอสด ๆ) */
+  pollIntervalMs: 1_000,
+  /** worker รอให้มี session pending ให้ claim ได้นานสุดกี่ครั้ง poll ก่อน timeout ฝั่ง browser
+   *  (ดู browserWaitTimeoutMs) — ใช้คำนวณ retry ฝั่ง worker log เท่านั้น ไม่ใช่ hard limit */
+  claimPollAttempts: 30,
+  /** browser รอ worker มา claim+connect นานสุดกี่ ms ก่อน control-api ปิด connection เอง
+   *  (เผื่อ worker ตาย/ไม่มี worker อยู่เลย — ไม่ปล่อยให้ browser ค้างเงียบตลอดไป) */
+  browserWaitTimeoutMs: 15_000,
+  /** ปิด session อัตโนมัติถ้าไม่มี input/output ไหลผ่านเลยนานเท่านี้ — กัน `docker exec` ค้าง
+   *  ตลอดไปถ้า browser หลุดกะทันหันแบบไม่ส่ง close frame (เช่น ปิด tab หรือเน็ตหลุด) */
+  idleTimeoutMs: 30 * 60 * 1000,
+  /** shell ที่ exec เข้าไป — "sh" มีในทุก base image ที่ catalog ใช้ (แม้แต่ alpine-based) */
+  shell: "sh",
+} as const;

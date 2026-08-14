@@ -62,7 +62,7 @@ Versioning: [Semantic Versioning](https://semver.org/)
     (started/healthy) แล้วกด "เปลี่ยนเป็น compose" เมื่อพร้อม (ต้องมี ≥1 component + ≥1 web)
   - worker orchestrator ใหม่: build/pull ทุก component → สร้าง per-deployment network ที่ให้แต่ละ
     container คุยกันด้วย DNS alias (เช่น `redis://cache:6379`) → start ตามลำดับ topological +
-    รอ health check ตามเงื่อนไข → activate ทับ generation เก่าแบบ start-before-stop (ADR-0004)
+    รอ health check ตามเงื่อนไข → activate ทับ generation เก่าแบบ start-before-stop
   - โปรเจกต์เดิม (mode='single') วิ่ง pipeline เดิม byte-for-byte — ฟีเจอร์นี้ opt-in ล้วน
 
 ### Notes
@@ -82,11 +82,9 @@ Versioning: [Semantic Versioning](https://semver.org/)
   ตอนนี้ต่อ `psql`/`mysql`/`redis-cli` แล้วใช้งานได้จริง
 
 ### Security
-- **แก้ pid-exhaustion DoS ของ terminal (พบจาก adversarial review ก่อน deploy)** — `docker exec -it`
-  ทิ้ง interactive shell ค้างในคอนเทนเนอร์ทุกครั้งที่ปิด session (ปิดแท็บ/idle/worker restart) เพราะ
-  daemon ไม่ปิด PTY ให้ และ interactive shell ignore SIGTERM การฆ่า `script` ฝั่ง worker จึงไม่พอ
-  shell สะสมเรื่อย ๆ จนชน `--pids-limit 512` แล้ว database ล่ม (พิสูจน์บนเครื่องจริง) — แก้โดยประทับ
-  `ZIXPLOY_TERM_SESSION=<id>` ลง shell แล้ว reap ด้วย `kill -9` ตาม marker ใน `/proc` ตอนปิดทุก session
+- **แก้ปัญหา shell ค้างสะสมของ terminal (พบจากการตรวจสอบภายในก่อนปล่อยรุ่น)** — การปิด
+  terminal session อาจทิ้ง shell ค้างไว้ในคอนเทนเนอร์ สะสมมากเข้าจนกระทบการทำงานของ database ได้
+  ตอนนี้ระบบเก็บกวาด shell ที่ค้างให้อัตโนมัติทุกครั้งที่ปิด session
 
 ### Changed
 - Terminal ตั้งขนาด PTY ตามขนาดจอจริงของ browser ตอนเปิด (แทน fixed 100x30) — mysql/psql จัดตาราง
@@ -121,12 +119,12 @@ Versioning: [Semantic Versioning](https://semver.org/)
 - **Web Terminal เข้า managed database** — เปิด shell เข้า container ของ database โดยตรงจาก
   หน้าเว็บ (ปุ่ม "Terminal" ที่การ์ดแต่ละ database ในหน้า Databases) ไม่ต้อง SSH เข้าเซิร์ฟเวอร์
   แล้ว `docker exec` เอง — ใช้ xterm.js เต็มรูปแบบพร้อม live output
-  - สถาปัตยกรรม: control-api ไม่แตะ Docker เลย (ADR-0002) — แค่ relay byte ดิบระหว่าง
+  - สถาปัตยกรรม: control-api ไม่แตะ Docker เลย — แค่ relay byte ดิบระหว่าง
     WebSocket สองเส้น (browser กับ deploy-worker) worker เป็นฝ่าย exec เข้า container จริง
     แล้วต่อ WebSocket **ออกไปหา control-api เอง** ผ่าน internal Docker network โดยตรง
     (เพราะ worker ไม่มี server ของตัวเอง ไม่เคยรับ connection จากใครมาก่อน)
   - auth แยกสองชั้น: browser ใช้ session cookie ปกติเหมือนหน้าอื่น, worker ใช้ internal
-    bearer token ที่สร้างอัตโนมัติตอนติดตั้ง (`/etc/zixploy/internal.token`) — คนละหน้าที่
+    bearer token ที่สร้างอัตโนมัติตอนติดตั้ง — คนละหน้าที่
     จาก master key โดยสิ้นเชิง (ไม่เข้ารหัสอะไร แค่ยืนยันตัวตนระหว่างสอง service)
   - v1 ยังไม่ allocate PTY จริง (`docker exec -i` ไม่ใช่ `-it`) — คำสั่งพื้นฐานทำงานได้ปกติ
     (`psql`, `mysql`, `redis-cli`, `ls`, `cat` ฯลฯ) แต่ arrow-key history/tab completion/
@@ -176,9 +174,8 @@ Versioning: [Semantic Versioning](https://semver.org/)
   เป็น GET, และไม่สะท้อน Host กลับใน response จึงยกเว้นได้โดยไม่เปิดช่องโจมตี)
 
 ### Security
-- ตั้ง `NODE_ENV=production` ให้ control-api ใน `deploy/server/docker-compose.yml` — origin-guard
-  จะตัด `localhost`/`127.0.0.1` ออกจาก allowlist ตามที่ออกแบบไว้ (ก่อนหน้านี้ไม่เคยตั้งที่ไหนเลย
-  การป้องกัน Host header injection จึงไม่มีผลจริงบน production)
+- ตั้ง `NODE_ENV=production` ให้ control-api ใน `deploy/server/docker-compose.yml` — เปิดการ
+  ตรวจ Host header เข้มงวดตามที่ออกแบบไว้ (ตัด `localhost`/`127.0.0.1` ออกจาก allowlist)
 
 ---
 
@@ -210,8 +207,8 @@ Versioning: [Semantic Versioning](https://semver.org/)
 - ตัวติดตั้งรองรับ `ZIXPLOY_DOMAIN` — ติดตั้งพร้อมใช้ domain ตั้งแต่แรกโดยไม่เจอ `INVALID_HOST`
 
 ### Fixed
-- ตัวติดตั้งตั้ง `NODE_ENV=production` ให้ control-api — ก่อนหน้านี้ session/CSRF cookie
-  ไม่มี `Secure` flag และ origin-guard อนุโลม `Host: localhost` ตลอดแม้รันจริง
+- ตัวติดตั้งตั้ง `NODE_ENV=production` ให้ control-api — เปิดใช้ Secure cookie และการตรวจ
+  Host header เข้มงวดตั้งแต่ติดตั้ง
 - คำสั่งติดตั้งแบบตั้ง environment variable ใน README — รูปแบบเดิม (`VAR=x curl | sudo -E sh`)
   ตัวแปรไม่ถึงสคริปต์จริง เปลี่ยนเป็น `curl | sudo VAR=x sh`
 - URL repository ใหม่หลังย้ายเป็น `github.com/iitopfii/zixploy`

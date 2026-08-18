@@ -13,6 +13,7 @@ import { auditRoutes } from "./routes/audit";
 import { authRoutes } from "./routes/auth";
 import { componentRoutes } from "./routes/components";
 import { deploymentRoutes } from "./routes/deployments";
+import { dockerInventoryRoutes } from "./routes/docker-inventory";
 import { dockerfileSourceRoutes } from "./routes/dockerfile-source";
 import { domainRoutes } from "./routes/domains";
 import { environmentRoutes } from "./routes/environment";
@@ -86,6 +87,7 @@ export function buildApp(db: Database, options: AppOptions = {}) {
     .use(componentRoutes(db))
     .use(terminalRoutes(db, options.terminal))
     .use(monitoringRoutes(db))
+    .use(dockerInventoryRoutes(db))
     .use(updateRoutes(db))
     .use(systemSettingsRoutes(db, settingsStore))
     .use(auditRoutes(db));

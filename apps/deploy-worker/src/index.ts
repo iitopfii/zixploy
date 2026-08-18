@@ -18,6 +18,7 @@ import { createLogger, DEPLOY_QUEUE, type LogLevel, ulid } from "@zixploy/shared
 import { DockerCliClient } from "./docker/cli-client";
 import { loadMasterKeys } from "./github/master-key";
 import { heartbeatLoop } from "./heartbeat";
+import { dockerInventoryLoop } from "./inventory/loop";
 import { runtimeLogLoop } from "./logs/runtime-poller";
 import { serviceLogLoop } from "./logs/service-poller";
 import { maintenanceLoop } from "./maintenance/loop";
@@ -181,6 +182,8 @@ await Promise.all([
   metricsLoop(db, docker, controller.signal, {
     onLog: (line) => log.warn(line, { workerId }),
   }),
+  // snapshot รายชื่อ container/image ทั้งเครื่อง → หน้า Docker ใน dashboard (ADR-0002)
+  dockerInventoryLoop(db, docker, controller.signal, (line) => log.warn(line, { workerId })),
   // คิวแยกจาก deploy — database provisioning ใช้เวลานาน ไม่ควรบล็อก deploy ของ app
   serviceJobLoop(db, docker, workerId, controller.signal, {
     masterKeys,

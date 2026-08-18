@@ -9,6 +9,20 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.1.12] — 2026-08-14
+
+### Added
+- **เมนู Docker** — หน้าใหม่ดูรายชื่อ container และ image ทั้งหมดบนเซิร์ฟเวอร์จาก dashboard
+  โดยไม่ต้อง SSH เข้าไป `docker ps`/`docker images` เอง (อ่านอย่างเดียว):
+  - แท็บ Containers: สถานะ (running/exited + ข้อความจาก Docker), image, ports พร้อมนับ
+    ว่าทำงานอยู่กี่ตัว — รวม container ที่หยุดแล้วด้วย
+  - แท็บ Images: repository/tag, ขนาด, วันที่สร้าง (รวม dangling image)
+  - badge แยกว่าอันไหนเป็นของ Zixploy เอง อันไหนเป็น container/image อื่นที่รันอยู่บนเครื่อง
+  - ค้นหาตามชื่อ/image ได้ · ข้อมูลอัปเดตอัตโนมัติทุก ~30 วินาที พร้อมแสดงเวลาอัปเดตล่าสุด
+    (worker เป็นคนกวาดข้อมูลจาก Docker แล้วเก็บลงฐานข้อมูล — ตาราง snapshot ใหม่ migration 0026)
+
+---
+
 ## [0.1.11] — 2026-08-13
 
 ### Added

@@ -20,6 +20,7 @@ const nav = [
   { to: "/", label: "Projects", icon: "grid" as const, exact: true },
   { to: "/databases", label: "Databases", icon: "database" as const, exact: false },
   { to: "/monitoring", label: "Monitoring", icon: "activity" as const, exact: false },
+  { to: "/docker", label: "Docker", icon: "box" as const, exact: false },
   { to: "/settings/github", label: "GitHub Apps", icon: "github" as const, exact: false },
   { to: "/settings/system", label: "ตั้งค่าระบบ", icon: "settings" as const, exact: false },
 ];

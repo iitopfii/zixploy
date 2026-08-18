@@ -15,9 +15,11 @@ import { assertContainerConfigSafe, assertDockerArgsSafe } from "./safety";
 import type {
   ContainerCreateParams,
   ContainerInspect,
+  ContainerPsEntry,
   ContainerSummary,
   DockerStatsEntry,
   ImageInspect,
+  ImageLsEntry,
   ImageSummary,
   VolumeInspect,
   VolumeSummary,
@@ -364,6 +366,49 @@ export class DockerCliClient {
       .split("\n")
       .filter((line) => line.trim())
       .map((line) => JSON.parse(line) as ImageSummary);
+  }
+
+  /**
+   * container ทั้งหมดบนเครื่อง (รวมที่หยุดแล้ว) — Docker inventory สำหรับหน้า Docker ใน dashboard
+   * คืน [] เมื่อ daemon มีปัญหา (ไม่ throw) — inventory ขาดรอบหนึ่งดีกว่า loop ตาย
+   */
+  async listAllContainers(): Promise<ContainerPsEntry[]> {
+    try {
+      const result = await this.exec(["ps", "-a", "--format", "{{json .}}"]);
+      if (result.code !== 0) return [];
+      return result.stdout
+        .split("\n")
+        .filter((line) => line.trim())
+        .flatMap((line) => {
+          try {
+            return [JSON.parse(line) as ContainerPsEntry];
+          } catch {
+            return [];
+          }
+        });
+    } catch {
+      return [];
+    }
+  }
+
+  /** image ทั้งหมดบนเครื่อง — Docker inventory (คืน [] เมื่อ daemon มีปัญหา ไม่ throw) */
+  async listAllImages(): Promise<ImageLsEntry[]> {
+    try {
+      const result = await this.exec(["images", "--format", "{{json .}}"]);
+      if (result.code !== 0) return [];
+      return result.stdout
+        .split("\n")
+        .filter((line) => line.trim())
+        .flatMap((line) => {
+          try {
+            return [JSON.parse(line) as ImageLsEntry];
+          } catch {
+            return [];
+          }
+        });
+    } catch {
+      return [];
+    }
   }
 
   /** idempotent — "no such image" ไม่ถือเป็น error */

@@ -102,6 +102,31 @@ export interface ContainerSummary {
 }
 
 /**
+ * หนึ่งบรรทัดจาก `docker ps -a --format "{{json .}}"` แบบเต็ม — Docker inventory (หน้า Docker)
+ * ทุก field เป็นข้อความ format มาเพื่อคนอ่าน (เช่น Status="Up 2 hours (healthy)") — เก็บไว้แสดงผลตรง ๆ
+ */
+export interface ContainerPsEntry {
+  ID: string;
+  Names: string;
+  Image: string;
+  State: string;
+  Status: string;
+  Ports: string;
+  Labels: string;
+  Networks: string;
+  CreatedAt: string;
+}
+
+/** หนึ่งบรรทัดจาก `docker images --format "{{json .}}"` — Docker inventory (หน้า Docker) */
+export interface ImageLsEntry {
+  ID: string;
+  Repository: string;
+  Tag: string;
+  Size: string;
+  CreatedSince: string;
+}
+
+/**
  * หนึ่งบรรทัดจาก `docker stats --no-stream --format "{{json .}}"` — Phase 9 (monitoring)
  *
  * ทุก field เป็น **string ที่ format มาเพื่อคนอ่าน** ไม่ใช่ตัวเลขดิบ เช่น CPUPerc="0.05%",

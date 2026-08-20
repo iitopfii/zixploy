@@ -39,6 +39,11 @@ export const UPDATE_CHECK = {
   tokenUrl: (image: string) =>
     `https://ghcr.io/token?scope=${encodeURIComponent(`repository:iitopfii/zixploy-${image}:pull`)}&service=ghcr.io`,
   tagsUrl: (image: string) => `https://ghcr.io/v2/iitopfii/zixploy-${image}/tags/list`,
+  /** manifest ของ tag/digest — ใช้ตามหา config blob เพื่ออ่านวันที่ build */
+  manifestUrl: (image: string, ref: string) =>
+    `https://ghcr.io/v2/iitopfii/zixploy-${image}/manifests/${ref}`,
+  blobUrl: (image: string, digest: string) =>
+    `https://ghcr.io/v2/iitopfii/zixploy-${image}/blobs/${digest}`,
   /** ถามซ้ำถี่กว่านี้ไม่มีประโยชน์ — release ไม่ได้ออกทุกนาที และ registry มี rate limit */
   cacheTtlMs: 30 * 60 * 1000,
   timeoutMs: 8_000,

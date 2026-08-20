@@ -23,6 +23,15 @@ const confirmUpdate = ref(false);
  */
 const updating = computed(() => starting.value || data.value?.updating === true);
 
+/**
+ * วันที่ build ของเวอร์ชันปลายทาง ต่อท้ายเลขเวอร์ชันทั้งใน tooltip และ dialog
+ * — ให้คนเห็นเองทันทีถ้าเลข "ใหม่กว่า" แต่ build เก่ากว่า (tag ค้างจากการตั้งเลขผิด)
+ */
+const publishedSuffix = computed(() => {
+  const at = data.value?.latestPublishedAt;
+  return at ? ` (เผยแพร่ ${fullDateTime(at)})` : "";
+});
+
 onMounted(() => {
   let timer: ReturnType<typeof setInterval> | null = null;
   watch(
@@ -69,7 +78,7 @@ async function startUpdate() {
     <button
       v-else-if="data.updateAvailable"
       class="update-btn"
-      :title="`อัปเดตเป็น ${data.latest}`"
+      :title="`อัปเดตเป็น ${data.latest}${publishedSuffix}`"
       @click="confirmUpdate = true"
     >
       <AppIcon name="refresh" :size="14" />
@@ -87,7 +96,7 @@ async function startUpdate() {
     <ConfirmDialog
       :open="confirmUpdate"
       title="อัปเดต Zixploy"
-      :message="`อัปเดตจาก ${data.current} เป็น ${data.latest} — ระบบจะรีสตาร์ทและใช้ไม่ได้ประมาณ 1-2 นาที แอปที่ deploy ไว้ยังทำงานต่อตามปกติ ไม่ถูกแตะ`"
+      :message="`อัปเดตจาก ${data.current} เป็น ${data.latest}${publishedSuffix} — ระบบจะรีสตาร์ทและใช้ไม่ได้ประมาณ 1-2 นาที แอปที่ deploy ไว้ยังทำงานต่อตามปกติ ไม่ถูกแตะ`"
       confirm-label="อัปเดตเลย"
       :busy="starting"
       @cancel="confirmUpdate = false"

@@ -109,6 +109,8 @@ export interface ImageInspect {
   /** ownership labels (ADR-0005) — อยู่ใต้ Config.Labels ไม่ใช่ top-level (ตรวจสอบจริงกับ Docker Desktop) */
   Config: {
     Labels: Record<string, string> | null;
+    /** env ที่ image ตั้งเอง — ใช้กรองออกตอนนำเข้า container (เหลือเฉพาะที่ผู้ใช้ตั้ง) */
+    Env?: string[] | null;
   };
 }
 

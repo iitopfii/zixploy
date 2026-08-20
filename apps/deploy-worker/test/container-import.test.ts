@@ -45,13 +45,17 @@ function inspectFixture(overrides: Partial<ContainerInspect> = {}): ContainerIns
 }
 
 /** mock docker — บันทึกทุก method ที่ถูกเรียก เพื่อพิสูจน์ว่าไม่แตะ container เดิม */
-function mockDocker(info: ContainerInspect | null) {
+function mockDocker(info: ContainerInspect | null, imageEnv: string[] = ["PATH=/usr/bin"]) {
   const calls: string[] = [];
   const docker = {
     calls,
     inspectContainer: async (id: string) => {
       calls.push(`inspectContainer:${id}`);
       return info;
+    },
+    inspectImage: async (ref: string) => {
+      calls.push(`inspectImage:${ref}`);
+      return { Id: "sha256:x", RepoDigests: [], Config: { Labels: null, Env: imageEnv } };
     },
     stopContainer: async (id: string) => {
       calls.push(`stopContainer:${id}`);
@@ -89,7 +93,7 @@ function row(db: ReturnType<typeof makeDb>, id: string) {
 
 describe("summarizeInspect", () => {
   test("ดึง image / command / restart / port / mount ได้ครบ", () => {
-    const s = summarizeInspect(inspectFixture());
+    const s = summarizeInspect(inspectFixture(), ["PATH=/usr/bin"]);
     expect(s.image).toBe("nginx:1.27-alpine");
     expect(s.command).toBe("nginx -g daemon off;");
     expect(s.restartPolicy).toBe("always");
@@ -100,10 +104,46 @@ describe("summarizeInspect", () => {
   });
 
   test("คืนเฉพาะ 'ชื่อ' ของ env และตัด PATH ของ base image ทิ้ง", () => {
-    const s = summarizeInspect(inspectFixture());
+    const s = summarizeInspect(inspectFixture(), ["PATH=/usr/bin"]);
     expect(s.envKeys).toEqual(["APP_KEY", "PORT"]);
     // ไม่มีค่าใด ๆ ติดมากับ summary
     expect(JSON.stringify(s)).not.toContain("super-secret");
+  });
+
+  /**
+   * บทเรียนจาก Docker จริง: nginx ตั้ง NGINX_VERSION/NJS_RELEASE ฯลฯ ไว้ใน image
+   * ถ้าไม่กรองจะได้ของที่ผู้ใช้ไม่ได้ตั้งติดมาเป็นสิบตัว จนแยกไม่ออกว่าอะไรคือ config ของตัวเอง
+   */
+  test("กรอง env ที่มาจาก base image ออกทั้งหมด เหลือเฉพาะที่ผู้ใช้ตั้ง", () => {
+    const info = inspectFixture({
+      Config: {
+        Image: "nginx:1.27-alpine",
+        Env: [
+          "PATH=/usr/bin",
+          "NGINX_VERSION=1.27.5",
+          "NJS_RELEASE=1",
+          "APP_KEY=super-secret",
+          "PORT=80",
+        ],
+        Cmd: ["nginx"],
+        Labels: {},
+      },
+    });
+    const s = summarizeInspect(info, ["PATH=/usr/bin", "NGINX_VERSION=1.27.5", "NJS_RELEASE=1"]);
+    expect(s.envKeys).toEqual(["APP_KEY", "PORT"]);
+  });
+
+  test("key ชื่อเดียวกับ image แต่ค่าต่าง = ผู้ใช้ override เอง ต้องเก็บไว้", () => {
+    const info = inspectFixture({
+      Config: {
+        Image: "nginx:1.27-alpine",
+        Env: ["NGINX_VERSION=9.9.9-custom", "APP_KEY=x"],
+        Cmd: ["nginx"],
+        Labels: {},
+      },
+    });
+    const s = summarizeInspect(info, ["NGINX_VERSION=1.27.5"]);
+    expect(s.envKeys).toEqual(["NGINX_VERSION", "APP_KEY"]);
   });
 });
 
@@ -133,7 +173,8 @@ describe("ขั้นตอน inspect (pending → inspected)", () => {
 
     await processPendingImports(db, docker, null);
 
-    expect(docker.calls).toEqual(["inspectContainer:abc123"]);
+    // อ่านได้อย่างเดียว: inspect container + image เท่านั้น ไม่มี start/stop/remove
+    expect(docker.calls).toEqual(["inspectContainer:abc123", "inspectImage:nginx:1.27-alpine"]);
   });
 
   test("container หายไปแล้ว → failed พร้อมเหตุผล (ไม่ค้าง pending ตลอดกาล)", async () => {

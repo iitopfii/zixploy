@@ -1,3 +1,4 @@
+import type { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { loadMigrations, migrateUp, migrationsDir, openDatabase } from "@zixploy/db";
 import { isUlid, ulid } from "@zixploy/shared";
@@ -186,6 +187,71 @@ describe("project CRUD", () => {
       expect(res.status).toBe(404);
       expect((await json(res)).error.code).toBe("PROJECT_NOT_FOUND");
     }
+  });
+});
+
+describe("envUpdatedAt", () => {
+  /** insert env ตรง ๆ ที่ DB — endpoint จริงต้องผ่านการเข้ารหัส ซึ่งไม่ใช่สิ่งที่เทสต์นี้สนใจ */
+  function insertEnvVar(
+    db: Database,
+    projectId: string,
+    key: string,
+    updatedAt: number,
+    opts: { enabled?: boolean; componentId?: string | null } = {},
+  ) {
+    db.query(
+      `INSERT INTO environment_variables
+         (id, project_id, key, value_ciphertext, is_secret, scope, enabled, version, created_at, updated_at, component_id)
+       VALUES (?, ?, ?, ?, 0, 'runtime', ?, 1, ?, ?, ?)`,
+    ).run(
+      ulid(),
+      projectId,
+      key,
+      Buffer.from("ciphertext"),
+      opts.enabled === false ? 0 : 1,
+      updatedAt,
+      updatedAt,
+      opts.componentId ?? null,
+    );
+  }
+
+  test("ไม่มี env เลย -> envUpdatedAt เป็น null", async () => {
+    const { call } = await makeApp();
+    const created = await json(
+      await call("/projects", { method: "POST", body: JSON.stringify({ name: "app" }) }),
+    );
+    const detail = await json(await call(`/projects/${created.id}`));
+    expect(detail.envUpdatedAt).toBeNull();
+  });
+
+  test("คืน MAX(updated_at) ของทุก env — รวมตัวที่ disabled และ component-scoped", async () => {
+    const { db, call } = await makeApp();
+    const created = await json(
+      await call("/projects", { method: "POST", body: JSON.stringify({ name: "app" }) }),
+    );
+    const base = Date.now();
+
+    insertEnvVar(db, created.id, "OLD_KEY", base - 5000);
+    // ตัวที่ disabled ก็นับ — การปิด/เปิด env เปลี่ยน config ที่จะถูก inject เหมือนกัน
+    insertEnvVar(db, created.id, "DISABLED_KEY", base - 1000, { enabled: false });
+
+    // component-scoped env (Phase 18) นับด้วย — เป็นการแก้ config ของ project เดียวกัน
+    const componentId = ulid();
+    db.query(
+      `INSERT INTO project_components (id, project_id, name, source_kind, image_ref, created_at, updated_at)
+       VALUES (?, ?, 'worker', 'image', 'nginx:latest', ?, ?)`,
+    ).run(componentId, created.id, base, base);
+    insertEnvVar(db, created.id, "COMPONENT_KEY", base + 3000, { componentId });
+
+    const detail = await json(await call(`/projects/${created.id}`));
+    expect(detail.envUpdatedAt).toBe(base + 3000);
+
+    // env ของ project อื่นต้องไม่ปนกัน
+    const other = await json(
+      await call("/projects", { method: "POST", body: JSON.stringify({ name: "other" }) }),
+    );
+    const otherDetail = await json(await call(`/projects/${other.id}`));
+    expect(otherDetail.envUpdatedAt).toBeNull();
   });
 });
 

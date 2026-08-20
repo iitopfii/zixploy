@@ -276,6 +276,9 @@ async function save() {
       <em v-if="form.exposedPort !== '' && !fieldErrors.exposedPort" class="field-hint-inline">
         เข้าถึงได้ที่ <code>&lt;IP เซิร์ฟเวอร์&gt;:{{ form.exposedPort }}</code> → container:{{ form.internalPort || "?" }}
         — deploy ครั้งถัดไปจะมี downtime สั้น ๆ ระหว่างสลับ container (host port ผูกได้ทีละตัว)
+        · ถ้าเข้าใช้งานผ่าน domain (Traefik) อยู่แล้ว <strong>ไม่จำเป็นต้องตั้งค่านี้</strong> —
+        เว้นว่างไว้ deploy จะไม่มี downtime และระบบคืนเวอร์ชันเก่าให้อัตโนมัติเมื่อ deploy ล้มเหลว
+        (ตั้ง port นี้แล้วจะเสียกลไกกู้คืนอัตโนมัตินั้นไป)
       </em>
     </label>
 

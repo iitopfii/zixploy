@@ -88,6 +88,13 @@ const total = ref(0);
 const loadingList = ref(true);
 const listError = ref("");
 
+/**
+ * deployment ล่าสุด (หัวรายการหน้าแรก) — เก็บแยกจาก deployments เพราะ pagination
+ * ทำให้ deployments[0] ไม่ใช่ตัวล่าสุดเมื่ออยู่หน้าอื่น
+ * ใช้โชว์ sha บนปุ่ม Redeploy (redeploy = build ซ้ำ commit ของตัวนี้) และเทียบกับเวลาแก้ env
+ */
+const latestDeployment = ref<Deployment | null>(null);
+
 const PAGE_SIZE = 10;
 
 /**
@@ -120,6 +127,8 @@ async function fetchDeployments(cursor?: string) {
     deployments.value = data?.items ?? [];
     nextCursor.value = data?.nextCursor;
     total.value = data?.total ?? 0;
+    // ไม่มี cursor = หน้าแรก — หัวรายการคือ deployment ล่าสุดจริง
+    if (!cursor) latestDeployment.value = deployments.value[0] ?? null;
   } catch {
     listError.value = "ติดต่อ API ไม่ได้";
   } finally {
@@ -151,7 +160,38 @@ async function resetToFirstPage() {
   await fetchDeployments();
 }
 
-await fetchDeployments();
+// ---------------------------------------------------------------------------
+// เตือนเมื่อแก้ env แล้วยังไม่ได้ deploy
+// ---------------------------------------------------------------------------
+
+/**
+ * โหลด envUpdatedAt เองแทนการรับเป็น prop — project ของหน้า [id].vue โหลดตอนเปิดหน้า
+ * ถ้าผู้ใช้แก้ env ในแท็บ Environment แล้วสลับมาแท็บนี้ ค่าจาก prop จะเก่า (banner ไม่ขึ้น)
+ * ส่วน component นี้ถูก mount ใหม่ทุกครั้งที่เข้าแท็บ (v-else-if) จึงได้ค่าล่าสุดเสมอ
+ */
+const envUpdatedAt = ref<number | null>(null);
+
+async function fetchEnvUpdatedAt() {
+  try {
+    const { data } = await api.api.v1.projects({ id: props.projectId }).get();
+    envUpdatedAt.value = data?.envUpdatedAt ?? null;
+  } catch {
+    // banner เป็นตัวช่วยเสริม — โหลดไม่ได้ก็แค่ไม่แสดง ไม่ควรทำให้ทั้งแท็บพัง
+  }
+}
+
+/**
+ * env ถูกแก้หลัง deployment ล่าสุดถูกสั่ง — ค่าที่รันอยู่ยังเป็นชุดเก่าจนกว่าจะ deploy ใหม่
+ * (env ถูกอ่านตอนเริ่ม build ไม่ใช่ตอนรัน — Redeploy/Deploy ครั้งถัดไปจึงจะได้ค่าใหม่)
+ */
+const envChangedAfterDeploy = computed(
+  () =>
+    envUpdatedAt.value != null &&
+    latestDeployment.value != null &&
+    envUpdatedAt.value > latestDeployment.value.queuedAt,
+);
+
+await Promise.all([fetchDeployments(), fetchEnvUpdatedAt()]);
 
 // poll for in-flight deployments
 const IN_FLIGHT = ["queued", "cloning", "building", "starting", "health_checking", "activating"];
@@ -347,9 +387,21 @@ function fmtDuration(start: number | null, end: number | null) {
           <AppIcon v-else name="rotate" :size="15" />
           {{ busy === "Deploy" ? "กำลัง deploy…" : "Deploy" }}
         </button>
-        <button class="secondary" :disabled="!!busy || deployments.length === 0" @click="redeploy">
+        <!-- โชว์ sha บนปุ่มกันเข้าใจผิดว่า Redeploy จะได้โค้ดใหม่ — มันคือ build ซ้ำ commit เดิม -->
+        <button
+          class="secondary"
+          :disabled="!!busy || deployments.length === 0"
+          :title="latestDeployment
+            ? `build ซ้ำ commit ${shortSha(latestDeployment.commitSha)} เดิม — ไม่ดึงโค้ดล่าสุดจาก branch (ถ้าเพิ่ง push โค้ดใหม่ให้ใช้ Deploy)`
+            : undefined"
+          @click="redeploy"
+        >
           <span v-if="busy === 'Redeploy'" class="spinner" />
-          {{ busy === "Redeploy" ? "กำลัง…" : "Redeploy" }}
+          <template v-if="busy === 'Redeploy'">กำลัง…</template>
+          <template v-else-if="latestDeployment">
+            Redeploy <span class="mono">{{ shortSha(latestDeployment.commitSha) }}</span>
+          </template>
+          <template v-else>Redeploy</template>
         </button>
         <button class="secondary" :disabled="!!busy" @click="restart">
           <span v-if="busy === 'Restart'" class="spinner" />
@@ -418,6 +470,16 @@ function fmtDuration(start: number | null, end: number | null) {
         <span>{{ autoDeployError }}</span>
       </p>
     </section>
+
+    <!-- env เปลี่ยนหลัง deploy ล่าสุด — ค่าใหม่ยังไม่มีผลจนกว่าจะ deploy อีกครั้ง
+         (บทเรียนจริง: แก้ env แล้วลืมกด Deploy โดยไม่มีอะไรเตือนเลย) -->
+    <p v-if="!archived && envChangedAfterDeploy" class="alert alert-warn">
+      <AppIcon name="alert" :size="15" />
+      <span>
+        มีการแก้ environment variables หลัง deploy ล่าสุด — ค่าที่รันอยู่ยังเป็นชุดเก่า
+        กด <strong>Deploy</strong> เพื่อให้ค่าใหม่มีผล
+      </span>
+    </p>
 
     <!-- Deployment list -->
     <div>

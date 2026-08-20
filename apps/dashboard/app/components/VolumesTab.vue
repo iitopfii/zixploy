@@ -23,6 +23,7 @@ interface Volume {
   readOnly: boolean;
   lifecycle: "active" | "detached" | "deletion_pending" | "deleted" | "error";
   lastAttachedAt: number | null;
+  lastError: string | null;
   createdAt: number;
 }
 
@@ -259,13 +260,14 @@ function lcTone(lc: string) {
           <dd :title="fullDateTime(v.lastAttachedAt)">{{ timeAgo(v.lastAttachedAt) }}</dd>
         </dl>
 
+        <!-- lastError จาก reconciler แม่นกว่าข้อความ hardcode — fallback เมื่อยังไม่มีค่า (record เก่า) -->
         <p v-if="v.lifecycle === 'error'" class="alert alert-bad small">
           <AppIcon name="alert" :size="13" />
-          <span>Docker volume หายไป — อาจถูกลบด้วยมือ ดู runbook สำหรับ recovery</span>
+          <span>{{ v.lastError ?? "Docker volume หายไป — อาจถูกลบด้วยมือ ดู runbook สำหรับ recovery" }}</span>
         </p>
         <p v-if="v.lifecycle === 'deletion_pending'" class="alert alert-warn small">
           <AppIcon name="clock" :size="13" />
-          <span>รอ worker ลบ Docker volume จริง…</span>
+          <span>{{ v.lastError ?? "รอ worker ลบ Docker volume จริง…" }}</span>
         </p>
 
         <p v-if="detachError[v.id]" class="alert alert-bad small">

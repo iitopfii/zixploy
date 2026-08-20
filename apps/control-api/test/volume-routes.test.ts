@@ -125,6 +125,8 @@ describe("POST /projects/:id/volumes", () => {
     expect(body.volume.driver).toBe("local");
     expect(body.volume.readOnly).toBe(false);
     expect(body.volume.dockerName).toMatch(/^zxvol-/);
+    // volume ใหม่ยังไม่มี error จาก reconciler
+    expect(body.volume.lastError).toBeNull();
   });
 
   test("ชี้ specific access_mode และ readOnly", async () => {
@@ -203,6 +205,30 @@ describe("POST /projects/:id/volumes", () => {
     const body = await json(listRes);
     expect(body.volumes).toHaveLength(1);
     expect(body.volumes[0].mountPath).toBe("/app/storage");
+    expect(body.volumes[0].lastError).toBeNull();
+  });
+
+  test("lastError ที่ worker เขียนไว้ ปรากฏทั้งใน list และ inspect", async () => {
+    const { db, projectId, request } = await setup();
+    const createRes = await request(`/api/v1/projects/${projectId}/volumes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "stuck-vol", mountPath: "/app/stuck" }),
+    });
+    const volumeId = (await json(createRes)).volume.id as string;
+
+    // จำลอง reconciler ใน worker เขียนสาเหตุที่ volume ค้าง (control-api อ่านอย่างเดียว)
+    const reason = "ยังมี container ใช้ volume นี้อยู่ — จะถูกลบอัตโนมัติหลัง redeploy";
+    db.query("UPDATE volumes SET last_error = ? WHERE id = ?").run(reason, volumeId);
+
+    const listRes = await request(`/api/v1/projects/${projectId}/volumes`);
+    const listBody = await json(listRes);
+    expect(listBody.volumes[0].lastError).toBe(reason);
+
+    const inspRes = await request(`/api/v1/projects/${projectId}/volumes/${volumeId}/inspect`, {
+      method: "POST",
+    });
+    expect((await json(inspRes)).volume.lastError).toBe(reason);
   });
 });
 
@@ -385,6 +411,7 @@ describe("POST /projects/:id/volumes/:volumeId/inspect", () => {
     const body = await json(res);
     expect(body.volume.id).toBe(volumeId);
     expect(body.volume.lifecycle).toBe("active");
+    expect(body.volume.lastError).toBeNull();
   });
 
   test("volume ไม่มีอยู่ → 404", async () => {

@@ -37,6 +37,8 @@ interface CheckResult {
   status: string;
   resolved: string[];
   cloudflare: string[];
+  /** ข้อความเมื่อเรียกตรวจไม่สำเร็จ — ไม่ใช่ผลตรวจ แต่เป็นความล้มเหลวของการเรียกเอง */
+  error?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +203,18 @@ async function checkDns(domainId: string) {
       .projects({ id: props.projectId })
       .domains({ domainId })
       .check.post({});
-    if (error) return;
+    if (error) {
+      // เดิม return เงียบ ๆ — ผู้ใช้กดแล้วเหมือนไม่มีอะไรเกิดขึ้น แยกไม่ออกว่า "ตรวจแล้วไม่เจอ"
+      // กับ "เรียกตรวจไม่สำเร็จ" (session หมดอายุ, โดน origin-guard, server error)
+      const body = error.value as { error?: { message?: string } } | null;
+      checkResults.value[domainId] = {
+        status: "unknown",
+        resolved: [],
+        cloudflare: [],
+        error: body?.error?.message ?? "เรียกตรวจ DNS ไม่สำเร็จ — ลองรีเฟรชหน้าแล้วลองใหม่",
+      };
+      return;
+    }
 
     checkResults.value[domainId] = {
       status: data?.domain?.dnsStatus ?? "unknown",
@@ -561,6 +574,10 @@ async function copyIp(ip: string) {
           <span class="muted tiny">ตรวจล่าสุด {{ fmtChecked(d.dnsCheckedAt) }}</span>
         </div>
         <p class="muted tiny hint">{{ dns(d.dnsStatus).hint }}</p>
+        <p v-if="checkResults[d.id]?.error" class="alert alert-bad small">
+          <AppIcon name="alert" :size="13" />
+          <span>{{ checkResults[d.id]?.error }}</span>
+        </p>
         <p v-if="checkResults[d.id]?.resolved?.length" class="muted tiny mono">
           resolve ได้: {{ checkResults[d.id]?.resolved.join(", ") }}
         </p>

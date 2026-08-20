@@ -24,6 +24,19 @@ export const SELF_UPDATE_DISABLED: boolean = process.env.ZIXPLOY_DISABLE_SELF_UP
 /** GHCR namespace ที่ CI push image ไป — image name = `${REGISTRY_NAMESPACE}-${service}` */
 export const REGISTRY_NAMESPACE = "ghcr.io/iitopfii/zixploy";
 
+/** repo ต้นทาง (public) — ใช้ดึงไฟล์ที่ไม่ได้อยู่ใน image เช่น compose file ตอนอัปเดต */
+export const SOURCE_REPO = "iitopfii/zixploy";
+
+/**
+ * URL ของ compose file ที่ **ปักหมุดตาม tag ของเวอร์ชันเป้าหมาย** ไม่ใช่ main
+ *
+ * ปักหมุดสำคัญมาก: main อาจล้ำหน้าไปหลายรุ่นแล้ว ถ้าดึงจาก main ตอนอัปเดตไป 0.1.15
+ * อาจได้ compose ที่อ้าง service/ตัวแปรของรุ่นที่ยังไม่ได้ติดตั้ง แล้วระบบขึ้นไม่ได้
+ */
+export function composeFileUrl(version: string): string {
+  return `https://raw.githubusercontent.com/${SOURCE_REPO}/v${version}/deploy/install/docker-compose.yml`;
+}
+
 export const SERVICE_IMAGES = ["control-api", "deploy-worker", "dashboard"] as const;
 
 /**

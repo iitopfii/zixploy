@@ -53,11 +53,21 @@ export interface InspectSummary {
   mounts: ImportMount[];
 }
 
-/** แปลงผล inspect เป็นรูปแบบที่เก็บ/แสดงได้ — ไม่รวมค่า env (เก็บแค่ชื่อ key) */
-export function summarizeInspect(info: ContainerInspect): InspectSummary {
+/**
+ * แปลงผล inspect เป็นรูปแบบที่เก็บ/แสดงได้ — ไม่รวมค่า env (เก็บแค่ชื่อ key)
+ *
+ * imageEnv: env ที่ base image ตั้งมาเอง (จาก `docker image inspect`) — ต้องกรองออกให้หมด
+ * ไม่งั้นจะได้ของที่ไม่ใช่ config ของผู้ใช้ติดมาเป็นสิบตัว (เช่น NGINX_VERSION, NJS_RELEASE
+ * ของ nginx) ทำให้แยกไม่ออกว่าอะไรคือค่าที่ตัวเองตั้งไว้จริง — พบตอนทดสอบกับ Docker จริง
+ *
+ * เทียบทั้ง "KEY=VALUE" ไม่ใช่แค่ชื่อ: ผู้ใช้อาจตั้ง key เดียวกับ image แต่ค่าต่าง ซึ่งต้องเก็บไว้
+ */
+export function summarizeInspect(info: ContainerInspect, imageEnv: string[] = []): InspectSummary {
+  const imageEnvSet = new Set(imageEnv);
   const envKeys = (info.Config?.Env ?? [])
+    .filter((e) => !imageEnvSet.has(e))
     .map((e) => e.slice(0, e.indexOf("=")))
-    // PATH และพวกที่ base image ตั้งเองไม่ใช่ config ของผู้ใช้ · key ผิดรูปแบบก็ใช้กับระบบเราไม่ได้
+    // PATH ถูกกรองด้วย imageEnv อยู่แล้วในกรณีปกติ · key ผิดรูปแบบใช้กับระบบเราไม่ได้
     .filter((k) => k && k !== "PATH" && ENV_VAR_KEY_RE.test(k));
 
   const ports: ImportPort[] = [];
@@ -88,12 +98,24 @@ export function summarizeInspect(info: ContainerInspect): InspectSummary {
   };
 }
 
+/** env ที่ image ของ container นี้ตั้งมาเอง — อ่านไม่ได้ก็ถือว่าไม่มี (กรองน้อยลงแต่ไม่พัง) */
+async function imageEnvOf(docker: DockerCliClient, info: ContainerInspect): Promise<string[]> {
+  const image = info.Config?.Image;
+  if (!image) return [];
+  try {
+    const img = await docker.inspectImage(image);
+    return img?.Config?.Env ?? [];
+  } catch {
+    return [];
+  }
+}
+
 /** จังหวะที่ 1: อ่าน config มาให้ผู้ใช้ตรวจ (ไม่มีค่า env) */
 async function runInspect(db: Database, docker: DockerCliClient, row: ImportRow): Promise<void> {
   const info = await docker.inspectContainer(row.container_id);
   if (!info) throw new AppError("VALIDATION_ERROR", "ไม่พบ container นี้บนเครื่องแล้ว");
 
-  const s = summarizeInspect(info);
+  const s = summarizeInspect(info, await imageEnvOf(docker, info));
   if (!s.image) throw new AppError("VALIDATION_ERROR", "อ่าน image ของ container ไม่ได้");
 
   db.query(
@@ -136,7 +158,7 @@ async function runImport(
   const info = await docker.inspectContainer(row.container_id);
   if (!info) throw new AppError("VALIDATION_ERROR", "container หายไปก่อนนำเข้าเสร็จ");
 
-  const s = summarizeInspect(info);
+  const s = summarizeInspect(info, await imageEnvOf(docker, info));
   const name = row.project_name?.trim() || row.container_name.replace(/^\//, "");
   const now = Date.now();
   const projectId = ulid();

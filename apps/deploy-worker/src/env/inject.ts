@@ -8,8 +8,9 @@
  *   scope=build|both    → buildArgs   (--build-arg KEY=VALUE, non-secret only)
  *   scope=build|both    → buildSecretValues  (--secret id=KEY,src=<file>, secret only)
  *
- * masterKeys null → returns empty injection (graceful — deploy continues without env vars;
- * operator must configure ZIXPLOY_MASTER_KEY_FILE if env vars are needed)
+ * masterKeys null / decrypt ล้มเหลว → key นั้นถูกข้าม แต่รายงานผ่าน definedCount + failedKeys เสมอ
+ * — ตัว pipeline เป็นคนตัดสินใจ fail-loud เมื่อ "ตั้ง env ไว้แต่ฉีดเข้าไม่ได้เลยสักตัว"
+ * (เดิมคืน empty เงียบ ๆ ทำให้ container รันไร้ config โดยไม่มีใครรู้จนแอป crash)
  *
  * AAD ตรงกับ control-api: "env:<project_id>:<key>" (encryption.md)
  *
@@ -40,6 +41,13 @@ export interface EnvInjection {
   buildSecretValues: Array<{ key: string; value: string }>;
   /** ค่าของ is_secret=true ทุกตัว (ไม่คำนึงถึง scope) — สำหรับ redaction set (M4) */
   secretValues: string[];
+  /**
+   * จำนวน env ที่ enabled อยู่ใน scope นี้ตาม DB (ไม่ใช่จำนวนที่ฉีดสำเร็จ) — pipeline ใช้เทียบกับ
+   * failedKeys เพื่อจับเคส "ตั้ง env ไว้แต่ไม่ได้อะไรเลย" ที่เคยผ่านเงียบ ๆ จน container รันไร้ config
+   */
+  definedCount: number;
+  /** key ที่ decrypt ไม่สำเร็จ (ถูกข้าม) — หรือทุก key เมื่อไม่มี master key เลย */
+  failedKeys: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -50,12 +58,17 @@ function aad(projectId: string, key: string): string {
   return `env:${projectId}:${key}`;
 }
 
-const EMPTY_INJECTION: EnvInjection = {
-  runtimeEnv: {},
-  buildArgs: {},
-  buildSecretValues: [],
-  secretValues: [],
-};
+/** สร้าง object ใหม่ทุกครั้ง (ไม่ใช่ const ร่วม) — failedKeys เป็น array ที่ต้องไม่ leak ข้าม call */
+function emptyInjection(definedCount = 0, failedKeys: string[] = []): EnvInjection {
+  return {
+    runtimeEnv: {},
+    buildArgs: {},
+    buildSecretValues: [],
+    secretValues: [],
+    definedCount,
+    failedKeys,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -72,6 +85,7 @@ async function decryptAndSplit(
   const buildArgs: Record<string, string> = {};
   const buildSecretValues: Array<{ key: string; value: string }> = [];
   const secretValues: string[] = [];
+  const failedKeys: string[] = [];
 
   for (const row of rows) {
     let value: string;
@@ -84,6 +98,7 @@ async function decryptAndSplit(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       onLog(`[env] ข้าม key "${row.key}": decrypt ไม่สำเร็จ — ${msg}`);
+      failedKeys.push(row.key);
       continue;
     }
 
@@ -106,7 +121,23 @@ async function decryptAndSplit(
     }
   }
 
-  return { runtimeEnv, buildArgs, buildSecretValues, secretValues };
+  return {
+    runtimeEnv,
+    buildArgs,
+    buildSecretValues,
+    secretValues,
+    definedCount: rows.length,
+    failedKeys,
+  };
+}
+
+/** ไม่มี master key แต่มี env ตั้งไว้ — รายงานทุก key เป็น failed (pipeline ตัดสินใจ fail-loud เอง) */
+function missingKeysInjection(rows: EnvVarRow[], onLog: (line: string) => void): EnvInjection {
+  const keys = rows.map((r) => r.key);
+  onLog(
+    `[env] ⚠️ ไม่มี master key — env ${rows.length} ตัวจะไม่ถูกฉีดเข้า deployment (${keys.join(", ")})`,
+  );
+  return emptyInjection(rows.length, keys);
 }
 
 /**
@@ -124,13 +155,15 @@ export async function injectEnvVars(
   projectId: string,
   onLog: (line: string) => void,
 ): Promise<EnvInjection> {
-  if (!masterKeys) return EMPTY_INJECTION;
   const rows = db
     .query<EnvVarRow, [string]>(
       "SELECT key, value_ciphertext, is_secret, scope FROM environment_variables WHERE project_id = ? AND enabled = 1 AND component_id IS NULL",
     )
     .all(projectId);
-  if (rows.length === 0) return EMPTY_INJECTION;
+  if (rows.length === 0) return emptyInjection();
+  // query ก่อนค่อยเช็ค masterKeys — ต้องรู้ว่ามี env ตั้งไว้กี่ตัวแม้ไม่มี key เพื่อให้ pipeline
+  // fail-loud ได้ (เดิมคืน empty เงียบ ๆ → container รันไร้ config โดยไม่มีใครรู้)
+  if (!masterKeys) return missingKeysInjection(rows, onLog);
   return decryptAndSplit(masterKeys, projectId, rows, onLog);
 }
 
@@ -145,12 +178,12 @@ export async function injectComponentEnv(
   componentId: string,
   onLog: (line: string) => void,
 ): Promise<EnvInjection> {
-  if (!masterKeys) return EMPTY_INJECTION;
   const rows = db
     .query<EnvVarRow, [string, string]>(
       "SELECT key, value_ciphertext, is_secret, scope FROM environment_variables WHERE project_id = ? AND component_id = ? AND enabled = 1",
     )
     .all(projectId, componentId);
-  if (rows.length === 0) return EMPTY_INJECTION;
+  if (rows.length === 0) return emptyInjection();
+  if (!masterKeys) return missingKeysInjection(rows, onLog);
   return decryptAndSplit(masterKeys, projectId, rows, onLog);
 }

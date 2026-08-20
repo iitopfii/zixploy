@@ -200,6 +200,51 @@ export async function replaceEnvVars(
   return listEnvVars(db, projectId, componentId);
 }
 
+export interface EnvDecryptCheck {
+  key: string;
+  componentId: string | null;
+  enabled: boolean;
+  ok: boolean;
+}
+
+/**
+ * ตรวจว่า env ทุกตัวของ project (ทุก scope รวม component) ยัง decrypt ได้ด้วย master key ปัจจุบัน
+ * — ใช้โดยปุ่ม "ตรวจสอบ" ในแท็บ Environment เพื่อจับเคส master key เปลี่ยน/ciphertext เสีย
+ * ก่อนที่จะไปพังตอน deploy ไม่คืน plaintext ใด ๆ — คืนแค่ ok/ไม่ ok ต่อ key
+ */
+export async function checkEnvDecryption(
+  db: Database,
+  projectId: string,
+  masterKeys: MasterKeys,
+): Promise<EnvDecryptCheck[]> {
+  const rows = db
+    .query<EnvVarRow, [string]>(
+      `SELECT ${SELECT_COLS} FROM environment_variables WHERE project_id = ? ORDER BY component_id, key`,
+    )
+    .all(projectId);
+
+  const results: EnvDecryptCheck[] = [];
+  for (const row of rows) {
+    let ok = true;
+    try {
+      await decryptEnvelope(
+        masterKeys,
+        new Uint8Array(row.value_ciphertext),
+        aad(projectId, row.key),
+      );
+    } catch {
+      ok = false;
+    }
+    results.push({
+      key: row.key,
+      componentId: row.component_id,
+      enabled: row.enabled === 1,
+      ok,
+    });
+  }
+  return results;
+}
+
 /**
  * Decrypt all enabled env vars for a project — ใช้โดย worker (ไม่ใช้ผ่าน HTTP)
  * masterKeys null → คืน [] พร้อม log warning (ไม่ throw — deploy ยังสำเร็จได้แต่ไม่มี env)

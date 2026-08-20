@@ -120,6 +120,26 @@ export async function runBuildOrRollbackPipeline(
     const redactFn = buildRedactFn(envInject.secretValues);
     const safeLog = (line: string) => deps.onLog(redactFn(line));
 
+    // Fail-loud: ตั้ง env ไว้แต่ฉีดเข้าไม่ได้เลยสักตัว = container จะรันไร้ config ทั้งชุด
+    // (master key เปลี่ยน/หาย) — ตัดจบตรงนี้ดีกว่าปล่อย "สำเร็จ" ที่ crash ทันทีแล้วถอด
+    // ของเก่าที่ยังดีออก partial failure ยังปล่อยผ่านพร้อม warning เพราะอาจเป็นแค่ key
+    // ตกค้างที่แอปเลิกใช้แล้ว — ไม่ควร block deploy ทั้ง project
+    if (envInject.definedCount > 0 && envInject.failedKeys.length === envInject.definedCount) {
+      throw new AppError(
+        "ENV_INJECTION_FAILED",
+        `environment variables ทั้ง ${envInject.definedCount} ตัวฉีดเข้า deployment ไม่ได้เลย ` +
+          `(${envInject.failedKeys.join(", ")}) — มักเกิดจาก master key เปลี่ยนหรือหาย ` +
+          "แก้โดยกรอกค่าใหม่ในแท็บ Environment แล้วบันทึก (ระบบจะเข้ารหัสใหม่ด้วย key ปัจจุบัน) แล้ว deploy อีกครั้ง",
+      );
+    }
+    if (envInject.failedKeys.length > 0) {
+      safeLog(
+        `[env] ⚠️ ${envInject.failedKeys.length} จาก ${envInject.definedCount} ตัว decrypt ไม่ได้ ` +
+          `(${envInject.failedKeys.join(", ")}) — ค่าเหล่านี้จะไม่ถูกส่งเข้า container ` +
+          "กรอกค่าใหม่ในแท็บ Environment เพื่อเข้ารหัสใหม่",
+      );
+    }
+
     if (payload.kind === "build") {
       const { cloneMs, buildMs } = splitTimeoutBudget(project.deployTimeoutSec);
 
@@ -330,6 +350,7 @@ export async function runBuildOrRollbackPipeline(
       timeoutSec: project.healthCheckTimeoutSec,
       retries: project.healthCheckRetries,
       signal: deployTimeout.signal,
+      onLog: safeLog,
     });
 
     // --- activating (ADR-0004: candidate ผ่านแล้วเท่านั้นถึงปิดของเก่า) ---

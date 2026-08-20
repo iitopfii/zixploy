@@ -162,6 +162,22 @@ export async function runComposePipeline(
     const redactFn = buildRedactFn(envInject.secretValues);
     const safeLog = (line: string) => onLog(redactFn(line));
 
+    // Fail-loud เหมือน single-container pipeline (build.ts): env ตั้งไว้แต่ฉีดไม่ได้เลย = ตัดจบ
+    if (envInject.definedCount > 0 && envInject.failedKeys.length === envInject.definedCount) {
+      throw new AppError(
+        "ENV_INJECTION_FAILED",
+        `environment variables ทั้ง ${envInject.definedCount} ตัวฉีดเข้า deployment ไม่ได้เลย ` +
+          `(${envInject.failedKeys.join(", ")}) — มักเกิดจาก master key เปลี่ยนหรือหาย ` +
+          "แก้โดยกรอกค่าใหม่ในแท็บ Environment แล้ว deploy อีกครั้ง",
+      );
+    }
+    if (envInject.failedKeys.length > 0) {
+      safeLog(
+        `[env] ⚠️ ${envInject.failedKeys.length} จาก ${envInject.definedCount} ตัว decrypt ไม่ได้ ` +
+          `(${envInject.failedKeys.join(", ")}) — ค่าเหล่านี้จะไม่ถูกส่งเข้า container`,
+      );
+    }
+
     // ── verify managed_ref: service ต้องมีและรันอยู่ (MVP: verify เท่านั้น, wiring = Phase F) ──
     for (const ref of refComponents) {
       if (!ref.managedServiceId) continue;
@@ -272,6 +288,19 @@ export async function runComposePipeline(
       }
       // component-scoped env override ทับสุด (ผู้ใช้ตั้งเองเจาะจง component นี้)
       const scoped = await injectComponentEnv(db, deps.masterKeys, job.projectId, c.id, onLog);
+      if (scoped.definedCount > 0 && scoped.failedKeys.length === scoped.definedCount) {
+        throw new AppError(
+          "ENV_INJECTION_FAILED",
+          `env ของ component "${c.name}" ทั้ง ${scoped.definedCount} ตัวฉีดไม่ได้เลย ` +
+            `(${scoped.failedKeys.join(", ")}) — กรอกค่าใหม่ในแท็บ Environment แล้ว deploy อีกครั้ง`,
+        );
+      }
+      if (scoped.failedKeys.length > 0) {
+        safeLog(
+          `[env] ⚠️ component "${c.name}": ${scoped.failedKeys.length} จาก ${scoped.definedCount} ตัว ` +
+            `decrypt ไม่ได้ (${scoped.failedKeys.join(", ")}) — ค่าเหล่านี้จะไม่ถูกส่งเข้า container`,
+        );
+      }
       componentEnv = { ...componentEnv, ...scoped.runtimeEnv };
       const needsProxy = c.isWeb || refDeps.length > 0;
 

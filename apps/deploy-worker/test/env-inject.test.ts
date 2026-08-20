@@ -112,6 +112,24 @@ describe("injectEnvVars — masterKeys null", () => {
     expect(result.buildArgs).toEqual({});
     expect(result.buildSecretValues).toEqual([]);
     expect(result.secretValues).toEqual([]);
+    expect(result.definedCount).toBe(0);
+    expect(result.failedKeys).toEqual([]);
+  });
+
+  test("มี env ตั้งไว้แต่ไม่มี key → รายงาน failedKeys ครบทุกตัว + log warning (fail-loud accounting)", async () => {
+    const db = makeDb();
+    const keys = await makeKeys();
+    const projectId = insertProject(db);
+    await insertEnvVar(db, keys, projectId, { key: "DB_HOST", value: "h" });
+    await insertEnvVar(db, keys, projectId, { key: "DB_PASSWORD", value: "p", isSecret: true });
+
+    const logged: string[] = [];
+    const result = await injectEnvVars(db, null, projectId, (line) => logged.push(line));
+
+    expect(result.runtimeEnv).toEqual({});
+    expect(result.definedCount).toBe(2);
+    expect(result.failedKeys.sort()).toEqual(["DB_HOST", "DB_PASSWORD"]);
+    expect(logged.some((l) => l.includes("master key"))).toBe(true);
   });
 });
 
@@ -335,6 +353,9 @@ describe("injectEnvVars — decrypt failure", () => {
     // มีการ log warning
     expect(logged).toHaveLength(1);
     expect(logged[0]).toMatch(/BAD_KEY/);
+    // accounting สำหรับ fail-loud: definedCount นับครบ, failedKeys เฉพาะตัวเสีย
+    expect(result.definedCount).toBe(2);
+    expect(result.failedKeys).toEqual(["BAD_KEY"]);
   });
 
   test("all vars bad ciphertext → empty injection ไม่ throw", async () => {
@@ -350,6 +371,9 @@ describe("injectEnvVars — decrypt failure", () => {
 
     const result = await injectEnvVars(db, keys, projectId, noLog);
     expect(result.runtimeEnv).toEqual({});
+    // ทุกตัวเสีย → failedKeys เท่ากับ definedCount (pipeline ใช้เงื่อนไขนี้ตัดสิน fail-loud)
+    expect(result.definedCount).toBe(1);
+    expect(result.failedKeys).toEqual(["K1"]);
   });
 });
 

@@ -18,6 +18,17 @@ import type { DockerCliClient } from "../docker/cli-client";
 /** RestartCount เกินนี้ระหว่าง health check ถือว่า crash-loop — fail เร็วไม่ต้องรอครบ retries */
 const CRASH_LOOP_RESTART_THRESHOLD = 3;
 
+/**
+ * ไม่ได้ตั้ง health check path → เฝ้าดู container ต่อเนื่องนานเท่านี้ก่อนนับว่าสำเร็จ
+ *
+ * เดิมเช็ค Running ครั้งเดียวแล้วผ่านเลย — แอปที่ start ติดแล้ว crash ใน 2-3 วินาที (env ขาด,
+ * config ผิด) ถูกนับเป็น deploy สำเร็จ: container เก่าถูกถอด, image เก่าถูก retention เก็บกวาด,
+ * เว็บล่มโดย rollback ไม่ได้ (เหตุการณ์จริง 2026-08-20) — 10 วินาทีจับ crash-on-boot ได้เกือบหมด
+ * โดยแลกกับ deploy ช้าลงเพียงเล็กน้อยเฉพาะ project ที่ไม่ตั้ง health check path
+ */
+const NO_HTTP_STABILITY_WINDOW_MS = 10_000;
+const NO_HTTP_STABILITY_PROBE_MS = 2_000;
+
 export interface HealthCheckParams {
   docker: DockerCliClient;
   containerId: string;
@@ -30,6 +41,11 @@ export interface HealthCheckParams {
   signal: AbortSignal;
   /** ฉีดสำหรับเทสต์ — default คือ global fetch */
   fetchFn?: typeof fetch;
+  /** ฉีดสำหรับเทสต์ — ย่นระยะเฝ้าดูของ fallback แบบไม่มี HTTP check */
+  stabilityWindowMs?: number;
+  stabilityProbeMs?: number;
+  /** log ลง deploy log (optional — ผู้เรียกส่ง redacted logger มา) */
+  onLog?: (line: string) => void;
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -68,8 +84,54 @@ async function probeHttp(
 }
 
 /**
+ * ไม่ตั้ง health check path — ยืนยันว่า container "อยู่รอดต่อเนื่อง" ตลอดช่วงเฝ้าดูก่อนนับว่าสำเร็จ
+ *
+ * container ที่เพิ่ง start ต้อง Running ตั้งแต่แรก — เห็นไม่ Running หรือ RestartCount ขยับเมื่อไหร่
+ * แปลว่า process ตายไปแล้วอย่างน้อยหนึ่งครั้ง (crash-on-boot) → fail ทันที ไม่ต้องรอครบ window
+ */
+async function assertStableWithoutHttpCheck(
+  docker: DockerCliClient,
+  containerId: string,
+  windowMs: number,
+  probeMs: number,
+  signal: AbortSignal,
+  onLog?: (line: string) => void,
+): Promise<void> {
+  onLog?.(
+    `[health] ไม่ได้ตั้ง health check path — เฝ้าดู container ${Math.round(windowMs / 1000)} วิ ` +
+      "ให้แน่ใจว่าไม่ crash หลัง start (ตั้ง health check path ใน settings เพื่อการตรวจที่แม่นยำกว่า)",
+  );
+  const deadline = Date.now() + windowMs;
+  for (;;) {
+    if (signal.aborted) {
+      throw new AppError("HEALTH_CHECK_FAILED", "health check ถูกยกเลิกระหว่างทำงาน");
+    }
+    const inspect = await docker.inspectContainer(containerId);
+    if (!inspect) {
+      throw new AppError("HEALTH_CHECK_FAILED", "container หายไประหว่างเฝ้าดูหลัง start");
+    }
+    if (inspect.RestartCount > 0) {
+      throw new AppError(
+        "CONTAINER_CRASH_LOOP",
+        `container crash แล้วถูก restart ${inspect.RestartCount} ครั้งหลัง start — ` +
+          "ดู runtime log เพื่อหาสาเหตุ (ที่พบบ่อย: env ขาด, config ผิด, port ชน)",
+      );
+    }
+    if (!inspect.State.Running) {
+      throw new AppError(
+        "HEALTH_CHECK_FAILED",
+        "container หยุดทำงานหลัง start — ดู runtime log เพื่อหาสาเหตุ",
+      );
+    }
+    if (Date.now() >= deadline) return;
+    await sleep(probeMs, signal);
+  }
+}
+
+/**
  * Poll จนกว่า container จะ healthy หรือหมด retries
- * - ไม่ตั้ง healthCheckPath/internalPort → fallback: แค่ยืนยันว่า container ยัง Running อยู่ครั้งเดียว
+ * - ไม่ตั้ง healthCheckPath/internalPort → fallback: เฝ้าดูว่า Running ต่อเนื่องตลอด stability window
+ *   (เดิมเช็คครั้งเดียว — ปล่อย crash-on-boot ผ่านเป็น succeeded จนเว็บล่มแบบ rollback ไม่ได้)
  * - ตั้งไว้ → HTTP GET ผ่าน container's network IP ซ้ำจนสำเร็จหรือหมด retries
  * - RestartCount เกิน threshold ระหว่างทาง → CONTAINER_CRASH_LOOP ทันที (ไม่รอครบ retries)
  * - cancel_requested (ผ่าน signal) → หยุด poll ทันที โยน error ทั่วไปให้ caller (pipeline) จัดการ
@@ -86,9 +148,24 @@ export async function waitForHealthy(params: HealthCheckParams): Promise<void> {
     retries,
     signal,
     fetchFn = fetch,
+    stabilityWindowMs = NO_HTTP_STABILITY_WINDOW_MS,
+    stabilityProbeMs = NO_HTTP_STABILITY_PROBE_MS,
+    onLog,
   } = params;
 
   const hasHttpCheck = internalPort != null && !!healthCheckPath;
+
+  if (!hasHttpCheck) {
+    await assertStableWithoutHttpCheck(
+      docker,
+      containerId,
+      stabilityWindowMs,
+      stabilityProbeMs,
+      signal,
+      onLog,
+    );
+    return;
+  }
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     if (signal.aborted) {
@@ -106,22 +183,13 @@ export async function waitForHealthy(params: HealthCheckParams): Promise<void> {
       );
     }
 
-    if (!inspect.State.Running) {
-      // ยังไม่ running (เช่นเพิ่ง restart) — รอรอบถัดไป
-      await sleep(intervalSec * 1000, signal);
-      continue;
-    }
-
-    if (!hasHttpCheck) {
-      // ไม่ตั้ง health check เจาะจง — running ต่อเนื่องถือว่า healthy (MVP fallback)
-      return;
-    }
-
-    const ip = inspect.NetworkSettings.Networks[networkName]?.IPAddress;
-    if (ip) {
-      // biome-ignore lint/style/noNonNullAssertion: hasHttpCheck guarantees ทั้งคู่ไม่ null
-      const healthy = await probeHttp(fetchFn, ip, internalPort!, healthCheckPath!, timeoutSec);
-      if (healthy) return;
+    if (inspect.State.Running) {
+      const ip = inspect.NetworkSettings.Networks[networkName]?.IPAddress;
+      if (ip) {
+        // biome-ignore lint/style/noNonNullAssertion: hasHttpCheck guarantees ทั้งคู่ไม่ null
+        const healthy = await probeHttp(fetchFn, ip, internalPort!, healthCheckPath!, timeoutSec);
+        if (healthy) return;
+      }
     }
 
     await sleep(intervalSec * 1000, signal);

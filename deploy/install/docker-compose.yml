@@ -82,6 +82,9 @@ services:
       ZIXPLOY_INTERNAL_TOKEN_FILE: /run/secrets/internal_token
       # เวอร์ชันที่รันอยู่ — ตัวตรวจ update เทียบค่านี้กับ tag ล่าสุดบน registry
       ZIXPLOY_VERSION: ${ZIXPLOY_VERSION}
+      # โฟลเดอร์ติดตั้งบน host — ใช้กันไม่ให้ผู้ใช้ bind mount ทับไฟล์ติดตั้งของแพลตฟอร์มเอง
+      # (ค่า default ถูกกันไว้ในโค้ดแล้ว บรรทัดนี้จำเป็นเฉพาะกรณีย้ายที่ติดตั้ง)
+      ZIXPLOY_INSTALL_DIR: ${ZIXPLOY_INSTALL_DIR:-/opt/zixploy}
     volumes:
       - zixploy-data:/data
       - zixploy-backups:/backups

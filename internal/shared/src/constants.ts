@@ -120,6 +120,12 @@ export const VOLUME_SENSITIVE_PATHS = [
 ] as const;
 
 /**
+ * โฟลเดอร์ติดตั้งเริ่มต้นของแพลตฟอร์ม (compose file + .env) — ย้ายได้ด้วย ZIXPLOY_INSTALL_DIR
+ * ตอนติดตั้ง ที่นี่เก็บไว้เป็น "ค่า default ที่ทุกส่วนเห็นตรงกัน" (install.sh, updater, validator)
+ */
+export const DEFAULT_INSTALL_DIR = "/opt/zixploy";
+
+/**
  * Host path prefixes ที่ห้ามใช้เป็น bind mount device (`driver_opts.device`) — เข้มกว่า
  * VOLUME_SENSITIVE_PATHS โดยตั้งใจ: mount path คือ path *ใน container* (mount ทับ /usr/local
  * ของ image ตัวเองได้) แต่ host path คือ path *บนเครื่อง host จริง* — เปิดให้เขียน /usr หรือ
@@ -138,6 +144,12 @@ export const VOLUME_HOST_SENSITIVE_PATHS = [
   "/bin",
   "/sbin",
   "/lib",
+  "/lib64",
+  // home ของ root — SSH key, shell history, credential ที่ผู้ดูแลวางไว้
+  "/root",
+  // โฟลเดอร์ติดตั้งของแพลตฟอร์มเอง (compose file + .env) — ย้ายที่ได้ด้วย ZIXPLOY_INSTALL_DIR
+  // จึงบล็อกค่า default ไว้ที่นี่ และให้ผู้เรียกส่ง path จริงเพิ่มผ่าน extraForbidden
+  DEFAULT_INSTALL_DIR,
 ] as const;
 
 /**

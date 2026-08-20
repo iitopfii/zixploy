@@ -8,12 +8,22 @@
 import type { Database } from "bun:sqlite";
 import {
   AppError,
+  DEFAULT_INSTALL_DIR,
   ulid,
   VOLUME_ALLOWED_DRIVERS,
   validateHostPath,
   validateMountPath,
   volumeName,
 } from "@zixploy/shared";
+
+/**
+ * โฟลเดอร์ติดตั้งจริงที่ต้องกันไม่ให้ bind mount — DEFAULT_INSTALL_DIR อยู่ใน list กลางแล้ว
+ * ที่นี่เพิ่มเฉพาะกรณีย้ายที่ด้วย ZIXPLOY_INSTALL_DIR ซึ่งรู้ได้ตอน runtime เท่านั้น
+ */
+function installDirsToProtect(): string[] {
+  const configured = process.env.ZIXPLOY_INSTALL_DIR?.trim();
+  return configured && configured !== DEFAULT_INSTALL_DIR ? [configured] : [];
+}
 
 export interface VolumeDto {
   id: string;
@@ -142,9 +152,10 @@ export function createVolume(
 
   // Bind mount (host path) — Docker "local" driver รองรับผ่าน opts {type:none, o:bind, device:<path>}
   // validate + normalize ที่นี่ที่เดียว: driver_opts เขียนได้ทางเดียวผ่าน create เท่านั้น
+  // (installDirsToProtect กันเคสย้ายโฟลเดอร์ติดตั้งไปที่อื่น — ค่า default อยู่ใน list กลางแล้ว)
   let driverOpts = "{}";
   if (params.hostPath !== undefined && params.hostPath !== "") {
-    const hostCheck = validateHostPath(params.hostPath);
+    const hostCheck = validateHostPath(params.hostPath, installDirsToProtect());
     if (!hostCheck.ok) {
       throw new AppError(
         hostCheck.code ?? "VOLUME_INVALID_PATH",

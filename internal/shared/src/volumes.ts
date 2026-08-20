@@ -64,10 +64,16 @@ export function validateMountPath(path: string): MountPathValidationResult {
  * - normalize (ยุบ // ซ้อน, ตัด segment "." และ / ท้าย) แล้วห้ามเหลือเป็น root /
  * - ห้ามเป็นหรืออยู่ใต้ VOLUME_HOST_SENSITIVE_PATHS (list เข้มกว่าฝั่ง mount path — ดู constants.ts)
  *
+ * @param extraForbidden path เพิ่มเติมที่รู้ได้ตอน runtime เท่านั้น — ปัจจุบันคือโฟลเดอร์ติดตั้งจริง
+ *   เมื่อถูกย้ายออกจาก DEFAULT_INSTALL_DIR ด้วย ZIXPLOY_INSTALL_DIR (ค่า default อยู่ใน list แล้ว)
+ *
  * ใช้ที่ control-api ตอน createVolume เท่านั้น — driver_opts เขียนได้ทางเดียวผ่าน create
  * (แก้ทีหลังไม่ได้เพราะ Docker ไม่รองรับเปลี่ยน volume opts หลังสร้าง) worker จึงเชื่อค่าใน DB ได้
  */
-export function validateHostPath(path: string): HostPathValidationResult {
+export function validateHostPath(
+  path: string,
+  extraForbidden: readonly string[] = [],
+): HostPathValidationResult {
   if (!path.startsWith("/")) {
     return {
       ok: false,
@@ -98,7 +104,20 @@ export function validateHostPath(path: string): HostPathValidationResult {
   }
 
   const lower = normalized.toLowerCase();
-  for (const forbidden of VOLUME_HOST_SENSITIVE_PATHS) {
+  // extraForbidden รับ path ที่รู้ตอน runtime เท่านั้น (เช่น ZIXPLOY_INSTALL_DIR ที่ย้ายที่ไว้)
+  // — normalize ให้เหมือนกันก่อนเทียบ ไม่งั้น "/srv/zixploy/" กับ "/srv/zixploy" จะไม่ตรงกัน
+  const forbiddenPaths = [
+    ...VOLUME_HOST_SENSITIVE_PATHS,
+    ...extraForbidden
+      .map((p) =>
+        `/${p
+          .split("/")
+          .filter((s) => s !== "" && s !== ".")
+          .join("/")}`.toLowerCase(),
+      )
+      .filter((p) => p !== "/"),
+  ];
+  for (const forbidden of forbiddenPaths) {
     // ตรงเป๊ะ หรือ เป็น sub-path (เช่น /etc/passwd, /var/lib/docker/volumes)
     if (lower === forbidden || lower.startsWith(`${forbidden}/`)) {
       return {

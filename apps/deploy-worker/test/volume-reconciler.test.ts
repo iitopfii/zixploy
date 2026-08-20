@@ -37,7 +37,7 @@ function insertVolume(
   db: ReturnType<typeof makeDb>,
   projectId: string,
   lifecycle: string,
-  opts: { lastAttachedAt?: number } = {},
+  opts: { lastAttachedAt?: number; driverOpts?: Record<string, string> } = {},
 ): string {
   const id = ulid();
   const dockerName = volumeName(projectId, id);
@@ -45,8 +45,15 @@ function insertVolume(
     `INSERT INTO volumes
        (id, project_id, display_name, docker_name, mount_path, access_mode, driver,
         driver_opts, read_only, lifecycle, last_attached_at, created_at, updated_at)
-     VALUES (?, ?, 'vol', ?, '/data', 'shared-safe', 'local', '{}', 0, ?, ?, 1, 1)`,
-  ).run(id, projectId, dockerName, lifecycle, opts.lastAttachedAt ?? null);
+     VALUES (?, ?, 'vol', ?, '/data', 'shared-safe', 'local', ?, 0, ?, ?, 1, 1)`,
+  ).run(
+    id,
+    projectId,
+    dockerName,
+    JSON.stringify(opts.driverOpts ?? {}),
+    lifecycle,
+    opts.lastAttachedAt ?? null,
+  );
   return id;
 }
 
@@ -72,6 +79,7 @@ function makeMockDocker(opts: {
     name: string;
     driver: string;
     labels?: Record<string, string>;
+    opts?: Record<string, string>;
   }) => Promise<void>;
 }) {
   return {
@@ -225,6 +233,62 @@ describe("reconciler: auto-create never-attached volume", () => {
     const state = getVolumeState(db, volumeId);
     expect(state.lifecycle).toBe("active"); // ไม่ถูกตีตรา error
     expect(state.last_error).toBeNull();
+  });
+
+  test("bind volume (driver_opts) → auto-create ส่ง opts เข้า docker.createVolume ด้วย", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    const bindOpts = { type: "none", o: "bind", device: "/home/cwie-db" };
+    insertVolume(db, projectId, "active", { driverOpts: bindOpts });
+
+    const ctrl = new AbortController();
+    const createCalls: { opts?: Record<string, string> }[] = [];
+    const docker = makeMockDocker({
+      inspectVolume: async () => {
+        ctrl.abort();
+        return null;
+      },
+      createVolume: async (params) => {
+        createCalls.push(params);
+      },
+    });
+
+    await volumeReconcileLoop(
+      db,
+      docker as unknown as Parameters<typeof volumeReconcileLoop>[1],
+      ctrl.signal,
+    );
+
+    // ไม่ส่ง opts = bind volume ถูกสร้างผิดเป็น volume เปล่า (ต้นเหตุที่ต้องแก้ในงานนี้)
+    expect(createCalls).toHaveLength(1);
+    expect(createCalls[0]!.opts).toEqual(bindOpts);
+  });
+
+  test("named volume ปกติ → auto-create ไม่ส่ง opts (call เดิม)", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    insertVolume(db, projectId, "active");
+
+    const ctrl = new AbortController();
+    const createCalls: { opts?: Record<string, string> }[] = [];
+    const docker = makeMockDocker({
+      inspectVolume: async () => {
+        ctrl.abort();
+        return null;
+      },
+      createVolume: async (params) => {
+        createCalls.push(params);
+      },
+    });
+
+    await volumeReconcileLoop(
+      db,
+      docker as unknown as Parameters<typeof volumeReconcileLoop>[1],
+      ctrl.signal,
+    );
+
+    expect(createCalls).toHaveLength(1);
+    expect(createCalls[0]!.opts).toBeUndefined();
   });
 
   test("error + ไม่เคย attach + Docker volume ไม่มี → auto-heal กลับเป็น active + ล้าง last_error", async () => {

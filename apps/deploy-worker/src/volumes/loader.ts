@@ -15,7 +15,26 @@ export interface VolumeConfig {
   mountPath: string;
   accessMode: "shared-safe" | "single-writer";
   driver: string;
+  /**
+   * driver opts สำหรับ `docker volume create --opt` — bind mount เป็น
+   * {type:"none", o:"bind", device:<host path>} ว่าง = named volume ปกติ
+   * ค่าถูก validate แล้วที่ control-api ตอนสร้าง (validateHostPath) และแก้ทีหลังไม่ได้
+   */
+  driverOpts: Record<string, string>;
   readOnly: boolean;
+}
+
+/** parse driver_opts JSON จาก DB — คืน {} เมื่อ parse ไม่ได้ (ไม่ควรเกิดถ้า schema ถูกต้อง) */
+export function parseDriverOpts(raw: string): Record<string, string> {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, string>;
+    }
+  } catch {
+    // fallthrough → {}
+  }
+  return {};
 }
 
 /**
@@ -31,11 +50,12 @@ export function loadActiveVolumes(db: Database, projectId: string): VolumeConfig
         mount_path: string;
         access_mode: string;
         driver: string;
+        driver_opts: string;
         read_only: number;
       },
       [string]
     >(
-      `SELECT id, docker_name, mount_path, access_mode, driver, read_only
+      `SELECT id, docker_name, mount_path, access_mode, driver, driver_opts, read_only
        FROM volumes
        WHERE project_id = ? AND lifecycle = 'active'
        ORDER BY created_at`,
@@ -47,6 +67,7 @@ export function loadActiveVolumes(db: Database, projectId: string): VolumeConfig
       mountPath: r.mount_path,
       accessMode: r.access_mode as VolumeConfig["accessMode"],
       driver: r.driver,
+      driverOpts: parseDriverOpts(r.driver_opts),
       readOnly: r.read_only === 1,
     }));
 }

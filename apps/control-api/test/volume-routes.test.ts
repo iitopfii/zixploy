@@ -233,6 +233,137 @@ describe("POST /projects/:id/volumes", () => {
 });
 
 // ---------------------------------------------------------------------------
+// POST (create) — bind mount (hostPath)
+// ---------------------------------------------------------------------------
+
+describe("POST /projects/:id/volumes — bind mount (hostPath)", () => {
+  test("สร้างพร้อม hostPath → driverOpts/hostPath ถูกต้องทั้ง response และ DB", async () => {
+    const { db, projectId, request } = await setup();
+    const res = await request(`/api/v1/projects/${projectId}/volumes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        displayName: "cwie-db",
+        mountPath: "/var/lib/mysql",
+        hostPath: "/home/cwie-db",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(body.volume.hostPath).toBe("/home/cwie-db");
+    // driver "local" + opts ชุดนี้คือท่า bind mount ของ Docker local driver
+    expect(body.volume.driver).toBe("local");
+    expect(body.volume.driverOpts).toEqual({
+      type: "none",
+      o: "bind",
+      device: "/home/cwie-db",
+    });
+
+    // DB ต้องเก็บ JSON ตรงกัน — worker อ่าน driver_opts ไปส่ง docker volume create --opt
+    const row = db
+      .query<{ driver_opts: string }, [string]>("SELECT driver_opts FROM volumes WHERE id = ?")
+      .get(body.volume.id as string);
+    expect(JSON.parse(row!.driver_opts)).toEqual({
+      type: "none",
+      o: "bind",
+      device: "/home/cwie-db",
+    });
+  });
+
+  test("hostPath ถูก normalize ก่อนเก็บ (trailing slash)", async () => {
+    const { projectId, request } = await setup();
+    const res = await request(`/api/v1/projects/${projectId}/volumes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "v", mountPath: "/data", hostPath: "/home/data/" }),
+    });
+    expect(res.status).toBe(200);
+    expect((await json(res)).volume.hostPath).toBe("/home/data");
+  });
+
+  test("ไม่ส่ง hostPath → hostPath=null และ driverOpts ว่าง (named volume ปกติ)", async () => {
+    const { projectId, request } = await setup();
+    const res = await request(`/api/v1/projects/${projectId}/volumes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "plain", mountPath: "/app/data" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(body.volume.hostPath).toBeNull();
+    expect(body.volume.driverOpts).toEqual({});
+  });
+
+  test("hostPath ไม่ absolute → 422", async () => {
+    const { projectId, request } = await setup();
+    const res = await request(`/api/v1/projects/${projectId}/volumes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "bad", mountPath: "/data", hostPath: "home/data" }),
+    });
+    expect(res.status).toBe(422);
+  });
+
+  test("hostPath มี .. → 422", async () => {
+    const { projectId, request } = await setup();
+    const res = await request(`/api/v1/projects/${projectId}/volumes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "bad", mountPath: "/data", hostPath: "/home/../etc" }),
+    });
+    expect(res.status).toBe(422);
+  });
+
+  test("hostPath sensitive (/etc/cron.d) → 422", async () => {
+    const { projectId, request } = await setup();
+    const res = await request(`/api/v1/projects/${projectId}/volumes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "bad", mountPath: "/data", hostPath: "/etc/cron.d" }),
+    });
+    expect(res.status).toBe(422);
+  });
+
+  test("hostPath sensitive (/var/lib/docker) → 422", async () => {
+    const { projectId, request } = await setup();
+    const res = await request(`/api/v1/projects/${projectId}/volumes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        displayName: "bad",
+        mountPath: "/data",
+        hostPath: "/var/lib/docker/volumes",
+      }),
+    });
+    expect(res.status).toBe(422);
+  });
+
+  test("updateVolume ไม่รับ hostPath — PATCH ส่ง hostPath แล้ว driver_opts ไม่เปลี่ยน", async () => {
+    const { projectId, request } = await setup();
+    // สร้างแบบ named volume ปกติ (ไม่มี bind)
+    const createRes = await request(`/api/v1/projects/${projectId}/volumes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "immutable", mountPath: "/app/data" }),
+    });
+    const volumeId = (await json(createRes)).volume.id as string;
+
+    // PATCH พยายามยัด hostPath — schema ไม่รู้จัก field นี้ (Elysia normalize ตัดทิ้ง)
+    const patchRes = await request(`/api/v1/projects/${projectId}/volumes/${volumeId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ displayName: "renamed", hostPath: "/home/sneaky" }),
+    });
+    expect(patchRes.status).toBe(200);
+    const patched = await json(patchRes);
+    expect(patched.volume.displayName).toBe("renamed");
+    // bind mount ตั้งได้เฉพาะตอนสร้าง — docker volume opts เปลี่ยนหลังสร้างไม่ได้
+    expect(patched.volume.hostPath).toBeNull();
+    expect(patched.volume.driverOpts).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
 // PATCH (update) volumes
 // ---------------------------------------------------------------------------
 

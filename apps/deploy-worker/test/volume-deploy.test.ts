@@ -79,7 +79,13 @@ function insertDeployment(
 function insertVolume(
   db: ReturnType<typeof makeDb>,
   projectId: string,
-  opts: { lifecycle?: string; mountPath?: string; accessMode?: string; volId?: string } = {},
+  opts: {
+    lifecycle?: string;
+    mountPath?: string;
+    accessMode?: string;
+    volId?: string;
+    driverOpts?: Record<string, string>;
+  } = {},
 ): string {
   const id = opts.volId ?? ulid();
   const now = Date.now();
@@ -88,19 +94,23 @@ function insertVolume(
     `INSERT INTO volumes
        (id, project_id, display_name, docker_name, mount_path, access_mode, driver,
         driver_opts, read_only, lifecycle, created_at, updated_at)
-     VALUES (?, ?, 'test-vol', ?, ?, ?, 'local', '{}', 0, ?, ?, ?)`,
+     VALUES (?, ?, 'test-vol', ?, ?, ?, 'local', ?, 0, ?, ?, ?)`,
   ).run(
     id,
     projectId,
     dockerName,
     opts.mountPath ?? "/app/data",
     opts.accessMode ?? "shared-safe",
+    JSON.stringify(opts.driverOpts ?? {}),
     opts.lifecycle ?? "active",
     now,
     now,
   );
   return id;
 }
+
+/** driver_opts ท่า bind mount ที่ control-api เขียนตอนสร้าง volume พร้อม hostPath */
+const BIND_OPTS = { type: "none", o: "bind", device: "/home/cwie-db" };
 
 // ---------------------------------------------------------------------------
 // loadActiveVolumes
@@ -139,6 +149,24 @@ describe("loadActiveVolumes", () => {
     const db = makeDb();
     const projectId = insertProject(db);
     expect(loadActiveVolumes(db, projectId)).toEqual([]);
+  });
+
+  test("parse driver_opts เป็น driverOpts (bind mount)", () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    insertVolume(db, projectId, { driverOpts: BIND_OPTS });
+
+    const vols = loadActiveVolumes(db, projectId);
+    expect(vols[0]!.driverOpts).toEqual(BIND_OPTS);
+  });
+
+  test("driver_opts ว่าง → driverOpts = {}", () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    insertVolume(db, projectId);
+
+    const vols = loadActiveVolumes(db, projectId);
+    expect(vols[0]!.driverOpts).toEqual({});
   });
 
   test("คืน readOnly=true สำหรับ read_only=1", () => {
@@ -347,6 +375,61 @@ describe("build pipeline — volume integration", () => {
     const containerCall = createContainerCalls[0] as { volumes?: Array<{ mountPath: string }> };
     expect(containerCall?.volumes).toHaveLength(1);
     expect(containerCall?.volumes?.[0]?.mountPath).toBe("/app/storage");
+  });
+
+  test("bind volume → docker.createVolume ได้รับ opts จาก driver_opts", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    const deploymentId = insertDeployment(db, projectId);
+    insertVolume(db, projectId, { mountPath: "/var/lib/mysql", driverOpts: BIND_OPTS });
+
+    const { docker, createVolumeCalls, logs } = makeMocks();
+    const deps = makeDeps(db, docker, logs);
+
+    await runBuildOrRollbackPipeline(
+      deps,
+      makeJob(projectId, deploymentId),
+      {
+        kind: "build",
+        source: { type: "github", installationId: 1, repoFullName: "user/repo" },
+        commitSha: "abc1234567890",
+        trigger: "manual",
+        commitMessage: null,
+        commitAuthor: null,
+      },
+      new AbortController().signal,
+    );
+
+    // ถ้า opts ไม่ถูกส่ง bind volume จะถูกสร้างผิดเป็น volume เปล่า (บทเรียน 2026-08-20)
+    const call = createVolumeCalls[0] as { opts?: Record<string, string> };
+    expect(call.opts).toEqual(BIND_OPTS);
+  });
+
+  test("named volume ปกติ → createVolume call ไม่มี opts key (คง call เดิม)", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    const deploymentId = insertDeployment(db, projectId);
+    insertVolume(db, projectId, { mountPath: "/app/data" });
+
+    const { docker, createVolumeCalls, logs } = makeMocks();
+    const deps = makeDeps(db, docker, logs);
+
+    await runBuildOrRollbackPipeline(
+      deps,
+      makeJob(projectId, deploymentId),
+      {
+        kind: "build",
+        source: { type: "github", installationId: 1, repoFullName: "user/repo" },
+        commitSha: "abc1234567890",
+        trigger: "manual",
+        commitMessage: null,
+        commitAuthor: null,
+      },
+      new AbortController().signal,
+    );
+
+    const call = createVolumeCalls[0] as { opts?: Record<string, string> };
+    expect(call.opts).toBeUndefined();
   });
 
   test("single-writer volume สร้าง warning log", async () => {

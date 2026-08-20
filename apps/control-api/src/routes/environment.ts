@@ -5,6 +5,7 @@
  * PUT    /api/v1/projects/:id/environment        → full replace
  * POST   /api/v1/projects/:id/environment/import → parse .env content (no DB change)
  * POST   /api/v1/projects/:id/environment/validate → validate key list
+ * GET    /api/v1/projects/:id/environment/health → ตรวจว่าทุก key ยัง decrypt ได้ (จับ master key เปลี่ยน)
  *
  * secret values ไม่ปรากฏใน response ใด ๆ — คืนแค่ hasValue: true
  */
@@ -14,7 +15,7 @@ import { API_PREFIX, AppError, ENV_VAR_KEY_RE, isUlid } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
 import type { MasterKeys } from "../crypto/master-key";
 import { parseEnvContent } from "../env/parser";
-import { listEnvVars, replaceEnvVars } from "../env/store";
+import { checkEnvDecryption, listEnvVars, replaceEnvVars } from "../env/store";
 import { authPlugin, requireAuthenticated } from "../plugins/auth";
 
 // ---------------------------------------------------------------------------
@@ -193,6 +194,37 @@ export function environmentRoutes(db: Database, masterKeys: MasterKeys | null) {
           response: t.Object({
             valid: t.Boolean(),
             errors: t.Array(t.Object({ key: t.String(), message: t.String() })),
+          }),
+        },
+      )
+
+      // GET /projects/:id/environment/health — ตรวจว่า env ทุกตัว (ทุก scope) ยัง decrypt ได้ด้วย
+      // master key ปัจจุบัน — จับเคส key เปลี่ยน/ciphertext เสียก่อนไปพังตอน deploy ไม่คืน plaintext
+      .get(
+        "/health",
+        async ({ params }) => {
+          requireProject(db, params.id);
+          const keys = requireEncryption(masterKeys);
+          const results = await checkEnvDecryption(db, params.id, keys);
+          return {
+            checkedAt: Date.now(),
+            total: results.length,
+            broken: results
+              .filter((r) => !r.ok)
+              .map((r) => ({ key: r.key, componentId: r.componentId, enabled: r.enabled })),
+          };
+        },
+        {
+          response: t.Object({
+            checkedAt: t.Number(),
+            total: t.Number(),
+            broken: t.Array(
+              t.Object({
+                key: t.String(),
+                componentId: t.Nullable(t.String()),
+                enabled: t.Boolean(),
+              }),
+            ),
           }),
         },
       )

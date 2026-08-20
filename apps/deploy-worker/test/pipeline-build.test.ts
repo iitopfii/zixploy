@@ -984,3 +984,73 @@ describe("runBuildOrRollbackPipeline — M7 hardening", () => {
     expect(deployment?.failure_code).toBe("DEPLOY_TIMEOUT_EXCEEDED");
   }, 5_000);
 });
+
+describe("runBuildOrRollbackPipeline — env injection fail-loud (2026-08-20 incident)", () => {
+  function insertEnvRow(db: ReturnType<typeof makeDb>, projectId: string, key: string) {
+    const now = Date.now();
+    db.query(
+      `INSERT INTO environment_variables
+        (id, project_id, key, value_ciphertext, is_secret, scope, enabled, version, created_at, updated_at)
+       VALUES (?, ?, ?, X'0102030405', 0, 'runtime', 1, 1, ?, ?)`,
+    ).run(ulid(), projectId, key, now, now);
+  }
+
+  test("มี env ตั้งไว้แต่ฉีดไม่ได้เลย (ไม่มี master key) → fail ด้วย ENV_INJECTION_FAILED ไม่ใช่ผ่านเงียบ ๆ", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    insertEnvRow(db, projectId, "DB_HOST");
+    insertEnvRow(db, projectId, "DB_PASSWORD");
+    const deploymentId = insertDeployment(db, projectId);
+    const job = makeJob(projectId, deploymentId);
+
+    // baseDeps default: masterKeys null — จำลอง worker ที่อ่าน key ไม่ได้ทั้งที่ env ถูกตั้งไว้
+    const deps = baseDeps({ db });
+    const result = await runBuildOrRollbackPipeline(
+      deps,
+      job,
+      {
+        kind: "build",
+        trigger: "manual",
+        commitSha: "a".repeat(40),
+        commitMessage: null,
+        commitAuthor: null,
+        source: { type: "github", installationId: 111, repoFullName: "org/repo" },
+      },
+      new AbortController().signal,
+    );
+
+    expect(result.outcome).toBe("failed");
+    const deployment = db
+      .query<
+        { status: string; failure_code: string | null; failure_message: string | null },
+        [string]
+      >("SELECT status, failure_code, failure_message FROM deployments WHERE id = ?")
+      .get(deploymentId);
+    expect(deployment?.status).toBe("failed");
+    expect(deployment?.failure_code).toBe("ENV_INJECTION_FAILED");
+    expect(deployment?.failure_message).toContain("DB_HOST");
+  });
+
+  test("ไม่มี env ตั้งไว้เลย + ไม่มี master key → deploy ผ่านตามปกติ (พฤติกรรมเดิมไม่เปลี่ยน)", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    const deploymentId = insertDeployment(db, projectId);
+    const job = makeJob(projectId, deploymentId);
+
+    const deps = baseDeps({ db });
+    const result = await runBuildOrRollbackPipeline(
+      deps,
+      job,
+      {
+        kind: "build",
+        trigger: "manual",
+        commitSha: "a".repeat(40),
+        commitMessage: null,
+        commitAuthor: null,
+        source: { type: "github", installationId: 111, repoFullName: "org/repo" },
+      },
+      new AbortController().signal,
+    );
+    expect(result.outcome).toBe("done");
+  });
+});

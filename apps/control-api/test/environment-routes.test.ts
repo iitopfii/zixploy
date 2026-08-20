@@ -498,3 +498,77 @@ describe("component-scoped environment (?componentId)", () => {
     expect((await json(res)).error.code).toBe("COMPONENT_NOT_FOUND");
   });
 });
+
+// ---------------------------------------------------------------------------
+// GET /projects/:id/environment/health — ตรวจการถอดรหัส (จับ master key เปลี่ยน)
+// ---------------------------------------------------------------------------
+
+describe("GET /projects/:id/environment/health", () => {
+  test("ทุก key ถอดรหัสได้ → broken ว่าง, total นับครบ", async () => {
+    const { app, projectId, cookie, csrf } = await setup();
+    await app.handle(
+      new Request(`http://localhost/api/v1/projects/${projectId}/environment`, {
+        method: "PUT",
+        headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" },
+        body: JSON.stringify({
+          variables: [
+            { key: "DB_HOST", value: "10.0.0.5" },
+            { key: "DB_PASSWORD", value: "s3cret", isSecret: true },
+          ],
+        }),
+      }),
+    );
+
+    const res = await app.handle(
+      new Request(`http://localhost/api/v1/projects/${projectId}/environment/health`, {
+        headers: { cookie },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(body.total).toBe(2);
+    expect(body.broken).toEqual([]);
+  });
+
+  test("ciphertext ถอดไม่ได้ (จำลอง master key เปลี่ยน) → รายงาน key นั้นใน broken โดยไม่มี plaintext", async () => {
+    const { app, db, projectId, cookie, csrf } = await setup();
+    await app.handle(
+      new Request(`http://localhost/api/v1/projects/${projectId}/environment`, {
+        method: "PUT",
+        headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" },
+        body: JSON.stringify({ variables: [{ key: "GOOD", value: "plain-value-xyz789" }] }),
+      }),
+    );
+    // junk ciphertext ตรง ๆ — decrypt ด้วย key ปัจจุบันต้องล้มเหลว
+    const now = Date.now();
+    db.query(
+      `INSERT INTO environment_variables
+        (id, project_id, key, value_ciphertext, is_secret, scope, enabled, version, created_at, updated_at)
+       VALUES (?, ?, 'STALE_KEY', X'0102030405060708', 0, 'runtime', 1, 1, ?, ?)`,
+    ).run(ulid(), projectId, now, now);
+
+    const res = await app.handle(
+      new Request(`http://localhost/api/v1/projects/${projectId}/environment/health`, {
+        headers: { cookie },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(body.total).toBe(2);
+    expect(body.broken).toHaveLength(1);
+    expect(body.broken[0].key).toBe("STALE_KEY");
+    expect(body.broken[0].enabled).toBe(true);
+    // ไม่มี plaintext หลุดออกมาใน response
+    expect(JSON.stringify(body)).not.toContain("plain-value-xyz789");
+  });
+
+  test("ไม่มี master key → 503 ENV_ENCRYPTION_NOT_CONFIGURED", async () => {
+    const { app, projectId, cookie } = await setup({ withKeys: false });
+    const res = await app.handle(
+      new Request(`http://localhost/api/v1/projects/${projectId}/environment/health`, {
+        headers: { cookie },
+      }),
+    );
+    expect(res.status).toBe(503);
+  });
+});

@@ -53,6 +53,9 @@ export const ERROR_CODES = {
   ENV_VAR_DUPLICATE_KEY: 409,
   ENV_VAR_INVALID_KEY: 422,
   ENV_ENCRYPTION_NOT_CONFIGURED: 503,
+  // env ถูกตั้งไว้ใน DB แต่ฉีดเข้า deployment ไม่ได้เลยสักตัว (master key หาย/เปลี่ยน) —
+  // fail ดัง ๆ แทนปล่อย container รันแบบไร้ config (บทเรียนจากเหตุการณ์จริง 2026-08-20)
+  ENV_INJECTION_FAILED: 500,
 
   // domains (phase 5)
   DOMAIN_NOT_FOUND: 404,

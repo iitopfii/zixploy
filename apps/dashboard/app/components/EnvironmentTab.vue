@@ -229,16 +229,92 @@ async function save() {
     saving.value = false;
   }
 }
+
+// ---------------------------------------------------------------------------
+// ตรวจสอบการถอดรหัส — จับเคส master key เปลี่ยน/ciphertext เสียก่อนไปพังตอน deploy
+// (ตรวจทุก scope รวม component ในคราวเดียว — server ไม่คืน plaintext ใด ๆ)
+// ---------------------------------------------------------------------------
+
+interface BrokenEnvKey {
+  key: string;
+  componentId: string | null;
+}
+
+const checking = ref(false);
+const checkError = ref("");
+const checkResult = ref<{ total: number; broken: BrokenEnvKey[] } | null>(null);
+
+async function checkDecryption() {
+  checking.value = true;
+  checkError.value = "";
+  checkResult.value = null;
+  try {
+    const { data, error } = await api.api.v1
+      .projects({ id: props.projectId })
+      .environment.health.get();
+    if (error || !data) {
+      checkError.value = "ตรวจสอบไม่สำเร็จ";
+      return;
+    }
+    checkResult.value = { total: data.total, broken: data.broken };
+  } catch {
+    checkError.value = "ติดต่อ API ไม่ได้";
+  } finally {
+    checking.value = false;
+  }
+}
+
+function brokenLabel(b: BrokenEnvKey): string {
+  if (!b.componentId) return b.key;
+  const name = components.value.find((c) => c.id === b.componentId)?.name ?? b.componentId;
+  return `${b.key} (component: ${name})`;
+}
 </script>
 
 <template>
   <div class="stack-lg">
     <div class="row-between">
       <h2 class="section-title">Environment Variables</h2>
-      <button v-if="!archived" class="secondary small" @click="showImport = !showImport">
-        <AppIcon :name="showImport ? 'x' : 'copy'" :size="13" />
-        {{ showImport ? "ปิด" : "Import .env" }}
-      </button>
+      <div class="row wrap">
+        <button
+          v-if="!archived"
+          class="secondary small"
+          :disabled="checking"
+          title="ตรวจว่าค่าที่บันทึกไว้ยังถอดรหัสได้ด้วย master key ปัจจุบัน"
+          @click="checkDecryption"
+        >
+          <span v-if="checking" class="spinner" />
+          {{ checking ? "กำลังตรวจ…" : "ตรวจสอบการถอดรหัส" }}
+        </button>
+        <button v-if="!archived" class="secondary small" @click="showImport = !showImport">
+          <AppIcon :name="showImport ? 'x' : 'copy'" :size="13" />
+          {{ showImport ? "ปิด" : "Import .env" }}
+        </button>
+      </div>
+    </div>
+
+    <!-- ผลตรวจการถอดรหัส -->
+    <p v-if="checkError" class="alert alert-bad small">
+      <AppIcon name="alert" :size="13" />
+      <span>{{ checkError }}</span>
+    </p>
+    <p v-else-if="checkResult && checkResult.total === 0" class="alert alert-ok small">
+      <AppIcon name="check" :size="13" />
+      <span>ยังไม่มี environment variable ให้ตรวจ</span>
+    </p>
+    <p v-else-if="checkResult && checkResult.broken.length === 0" class="alert alert-ok small">
+      <AppIcon name="check" :size="13" />
+      <span>ตรวจแล้ว {{ checkResult.total }} ตัว — ถอดรหัสได้ทั้งหมด</span>
+    </p>
+    <div v-else-if="checkResult" class="alert alert-bad small broken-list">
+      <AppIcon name="alert" :size="13" />
+      <div>
+        <p>
+          {{ checkResult.broken.length }} จาก {{ checkResult.total }} ตัวถอดรหัสไม่ได้
+          (master key อาจเปลี่ยน) — deploy จะไม่ได้ค่าเหล่านี้ กรอกค่าใหม่แล้วบันทึกเพื่อเข้ารหัสใหม่:
+        </p>
+        <p class="mono">{{ checkResult.broken.map(brokenLabel).join(", ") }}</p>
+      </div>
     </div>
 
     <!-- Scope selector — เฉพาะ compose project ที่มี component (Phase 18 · F) -->
@@ -415,6 +491,17 @@ async function save() {
 }
 .scope-select select {
   max-width: 320px;
+}
+
+.broken-list {
+  align-items: flex-start;
+}
+.broken-list p {
+  margin: 0;
+}
+.broken-list .mono {
+  margin-top: var(--s-1);
+  word-break: break-word;
 }
 
 @media (max-width: 720px) {

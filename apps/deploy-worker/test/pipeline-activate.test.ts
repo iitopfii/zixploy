@@ -70,7 +70,9 @@ describe("activate — ADR-0004 start-before-stop", () => {
 });
 
 describe("waitForHealthy — fallback (ไม่มี health check path)", () => {
-  test("container Running ครั้งแรก → healthy ทันที ไม่ poll ซ้ำ", async () => {
+  // พฤติกรรมเปลี่ยนหลังเหตุการณ์ 2026-08-20: เดิมเห็น Running ครั้งเดียวก็ผ่าน — container ที่
+  // crash ใน 2-3 วิถูกนับสำเร็จจนเว็บล่ม ตอนนี้ต้อง Running ต่อเนื่องตลอด stability window
+  test("Running ต่อเนื่องตลอด stability window → healthy (inspect หลายครั้ง ไม่ใช่ครั้งเดียว)", async () => {
     const docker = mockDocker();
     await waitForHealthy({
       // biome-ignore lint/suspicious/noExplicitAny: mock
@@ -83,11 +85,13 @@ describe("waitForHealthy — fallback (ไม่มี health check path)", () =
       timeoutSec: 1,
       retries: 3,
       signal: new AbortController().signal,
+      stabilityWindowMs: 40,
+      stabilityProbeMs: 5,
     });
-    expect(docker.calls.filter((c) => c.method === "inspectContainer").length).toBe(1);
+    expect(docker.calls.filter((c) => c.method === "inspectContainer").length).toBeGreaterThan(1);
   });
 
-  test("container ยังไม่ Running รอบแรก แล้ว Running รอบสอง → รอแล้วผ่าน", async () => {
+  test("container ไม่ Running หลัง start (process ตายแล้ว) → HEALTH_CHECK_FAILED ทันที ไม่รอครบ window", async () => {
     let call = 0;
     const docker = mockDocker({
       inspectContainer: async () => {
@@ -95,25 +99,34 @@ describe("waitForHealthy — fallback (ไม่มี health check path)", () =
         return {
           Id: "c1",
           Name: "/test",
-          State: { Status: call === 1 ? "created" : "running", Running: call !== 1 },
+          State: { Status: "exited", Running: false },
           RestartCount: 0,
           NetworkSettings: { Networks: {} },
         };
       },
     });
-    await waitForHealthy({
-      // biome-ignore lint/suspicious/noExplicitAny: mock
-      docker: docker as any,
-      containerId: "c1",
-      networkName: "zixploy-proxy",
-      internalPort: null,
-      healthCheckPath: null,
-      intervalSec: 0.01,
-      timeoutSec: 1,
-      retries: 3,
-      signal: new AbortController().signal,
-    });
-    expect(call).toBe(2);
+    let err: unknown;
+    try {
+      await waitForHealthy({
+        // biome-ignore lint/suspicious/noExplicitAny: mock
+        docker: docker as any,
+        containerId: "c1",
+        networkName: "zixploy-proxy",
+        internalPort: null,
+        healthCheckPath: null,
+        intervalSec: 0.01,
+        timeoutSec: 1,
+        retries: 3,
+        signal: new AbortController().signal,
+        stabilityWindowMs: 40,
+        stabilityProbeMs: 5,
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(AppError);
+    expect((err as AppError).code).toBe("HEALTH_CHECK_FAILED");
+    expect(call).toBe(1);
   });
 
   test("container หายไป (inspectContainer คืน null) → HEALTH_CHECK_FAILED", async () => {
@@ -340,14 +353,16 @@ describe("waitForHealthy — crash-loop detection", () => {
     expect(call).toBe(1);
   });
 
-  test("RestartCount ต่ำกว่า threshold → ไม่ trigger crash-loop", async () => {
+  // threshold 3 ใช้กับ HTTP path เท่านั้น — fallback แบบไม่มี HTTP check เข้มกว่า (RestartCount > 0
+  // = crash แล้ว) เพราะไม่มีสัญญาณอื่นยืนยันว่าแอปฟื้นแล้วใช้งานได้จริง
+  test("RestartCount ต่ำกว่า threshold ระหว่าง HTTP check → ไม่ trigger crash-loop", async () => {
     const docker = mockDocker({
       inspectContainer: async () => ({
         Id: "c1",
         Name: "/test",
         State: { Status: "running", Running: true },
         RestartCount: 2,
-        NetworkSettings: { Networks: {} },
+        NetworkSettings: { Networks: { "zixploy-proxy": { IPAddress: "172.20.0.5" } } },
       }),
     });
 
@@ -356,8 +371,9 @@ describe("waitForHealthy — crash-loop detection", () => {
       docker: docker as any,
       containerId: "c1",
       networkName: "zixploy-proxy",
-      internalPort: null,
-      healthCheckPath: null,
+      internalPort: 3000,
+      healthCheckPath: "/healthz",
+      fetchFn: (async () => new Response(null, { status: 200 })) as unknown as typeof fetch,
       intervalSec: 0.01,
       timeoutSec: 1,
       retries: 3,

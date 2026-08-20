@@ -5,8 +5,14 @@
  *
  * ทุก VOLUME_RECONCILE_INTERVAL_MS:
  * 1. Deletion pending → `docker volume rm` → lifecycle='deleted'
- * 2. Active/detached → ตรวจว่า Docker volume มีอยู่จริง
- *    - ไม่มีอยู่ → lifecycle='error' (orphan detection — report-only ตาม phase doc)
+ *    - ลบไม่ได้ → คง deletion_pending + เขียน last_error บอกสาเหตุ (เช่น VOLUME_IN_USE
+ *      ต้อง redeploy ก่อน) — ผู้ใช้เคยเห็น "รอ worker ลบ…" ค้างตลอดกาลโดยไม่รู้สาเหตุ
+ * 2. Active/detached/error → ตรวจว่า Docker volume มีอยู่จริง
+ *    - ไม่มี + ไม่เคยถูก mount (last_attached_at NULL) → ไม่ใช่ orphan: Docker volume
+ *      จริงถูกสร้างตอน deploy เท่านั้น volume ที่เพิ่งสร้างใน UI จึงยังไม่มีเสมอ —
+ *      สร้างให้เลย (idempotent) แทนการตีตรา error (บทเรียน 2026-08-20: volume ใหม่
+ *      กลายเป็น error เสมอถ้ายัง redeploy ไม่ทัน แล้วไม่มีทางกลับมา active)
+ *    - ไม่มี + เคยถูกใช้งานจริง → orphan จริง: lifecycle='error' + last_error ชี้ runbook
  *
  * Architecture constraints:
  * - control-api ไม่แตะ Docker ตาม ADR-0002 — reconciler อยู่ใน worker เท่านั้น
@@ -15,20 +21,26 @@
  */
 
 import type { Database } from "bun:sqlite";
+import { AppError } from "@zixploy/shared";
 import type { DockerCliClient } from "../docker/cli-client";
 
 const VOLUME_RECONCILE_INTERVAL_MS = 30_000; // reconcile ทุก 30 วินาที
+
+// last_error โชว์ตรงใน dashboard — ตัดสั้นกันข้อความ Docker ยาวๆ ล้นการ์ด UI
+const LAST_ERROR_MAX_LENGTH = 200;
 
 interface VolumeRow {
   id: string;
   docker_name: string;
   lifecycle: string;
+  driver: string;
+  last_attached_at: number | null;
 }
 
 function listNonDeletedVolumes(db: Database): VolumeRow[] {
   return db
     .query<VolumeRow, []>(
-      `SELECT id, docker_name, lifecycle
+      `SELECT id, docker_name, lifecycle, driver, last_attached_at
        FROM volumes
        WHERE lifecycle NOT IN ('deleted')
        ORDER BY created_at`,
@@ -36,9 +48,24 @@ function listNonDeletedVolumes(db: Database): VolumeRow[] {
     .all();
 }
 
-function setVolumeLifecycle(db: Database, volumeId: string, lifecycle: string): void {
-  db.query("UPDATE volumes SET lifecycle = ?, updated_at = ? WHERE id = ?").run(
+function setVolumeLifecycle(
+  db: Database,
+  volumeId: string,
+  lifecycle: string,
+  lastError: string | null,
+): void {
+  db.query("UPDATE volumes SET lifecycle = ?, last_error = ?, updated_at = ? WHERE id = ?").run(
     lifecycle,
+    lastError,
+    Date.now(),
+    volumeId,
+  );
+}
+
+/** เขียนเฉพาะ last_error โดยไม่แตะ lifecycle (ใช้ตอนคง deletion_pending ไว้รอบหน้า) */
+function setVolumeLastError(db: Database, volumeId: string, lastError: string): void {
+  db.query("UPDATE volumes SET last_error = ?, updated_at = ? WHERE id = ?").run(
+    lastError.slice(0, LAST_ERROR_MAX_LENGTH),
     Date.now(),
     volumeId,
   );
@@ -46,8 +73,10 @@ function setVolumeLifecycle(db: Database, volumeId: string, lifecycle: string): 
 
 /**
  * Reconcile one round:
- * - deletion_pending → docker volume rm → deleted (หรือ error ถ้า in-use)
- * - active/detached/error → ตรวจว่า Docker volume มีอยู่จริง → error ถ้าไม่มี
+ * - deletion_pending → docker volume rm → deleted (fail → คงสถานะ + last_error บอกสาเหตุ)
+ * - active/detached/error ที่ Docker volume หาย:
+ *   - ไม่เคย attach → auto-create (+ heal error → active)
+ *   - เคย attach → error + last_error
  */
 async function reconcileOnce(db: Database, docker: DockerCliClient): Promise<void> {
   const volumes = listNonDeletedVolumes(db);
@@ -55,16 +84,45 @@ async function reconcileOnce(db: Database, docker: DockerCliClient): Promise<voi
   for (const vol of volumes) {
     try {
       if (vol.lifecycle === "deletion_pending") {
-        // พยายาม rm — docker.removeVolume คืน VOLUME_IN_USE ถ้ายังมี container ใช้
-        await docker.removeVolume(vol.docker_name);
-        setVolumeLifecycle(db, vol.id, "deleted");
+        try {
+          // พยายาม rm — docker.removeVolume คืน VOLUME_IN_USE ถ้ายังมี container ใช้
+          await docker.removeVolume(vol.docker_name);
+          setVolumeLifecycle(db, vol.id, "deleted", null);
+        } catch (err) {
+          // คง deletion_pending ไว้ลองรอบหน้า แต่เขียนสาเหตุให้ผู้ใช้เห็น —
+          // เดิมค้าง "รอ worker ลบ…" เงียบๆ โดย user ไม่มีทางรู้ว่าติดอะไร
+          const message =
+            err instanceof AppError && err.code === "VOLUME_IN_USE"
+              ? "ยังมี container ใช้ volume นี้อยู่ — จะถูกลบอัตโนมัติหลัง redeploy (container ใหม่จะไม่ mount volume นี้)"
+              : err instanceof Error
+                ? err.message
+                : String(err);
+          setVolumeLastError(db, vol.id, message);
+        }
       } else {
         // active / detached / error — ตรวจว่า Docker volume มีอยู่จริง
         const info = await docker.inspectVolume(vol.docker_name);
         if (!info) {
-          // orphan: DB record อยู่ แต่ Docker volume หาย — อาจถูกลบมือ
-          if (vol.lifecycle !== "error") {
-            setVolumeLifecycle(db, vol.id, "error");
+          if (vol.last_attached_at === null) {
+            // ยังไม่เคยถูก mount = ไม่ใช่ orphan — Docker volume จริงเกิดตอน deploy เท่านั้น
+            // สร้างให้เลยด้วย labels ชุดเดียวกับ pipeline (idempotent) แทนการตีตรา error
+            await docker.createVolume({
+              name: vol.docker_name,
+              driver: vol.driver,
+              labels: { "platform.managed": "true", "platform.volume_id": vol.id },
+            });
+            if (vol.lifecycle === "error") {
+              // auto-heal false positive จากเวอร์ชันก่อนที่ตีตรา error ทั้งที่แค่ยังไม่ deploy
+              setVolumeLifecycle(db, vol.id, "active", null);
+            }
+          } else if (vol.lifecycle !== "error") {
+            // เคยถูกใช้งานจริงแล้ว Docker volume หาย = ผิดปกติจริง (อาจถูกลบมือ)
+            setVolumeLifecycle(
+              db,
+              vol.id,
+              "error",
+              "Docker volume หายไปทั้งที่เคยถูกใช้งาน — อาจถูกลบด้วยมือ ดู docs/runbooks/volume-backup-restore.md สำหรับการกู้คืน",
+            );
           }
         } else if (vol.lifecycle === "error") {
           // Docker volume กลับมามีอยู่ (recreated) — ยังไม่ auto-recover lifecycle
@@ -81,7 +139,7 @@ async function reconcileOnce(db: Database, docker: DockerCliClient): Promise<voi
  * Background reconcile loop — รัน parallel กับ heartbeatLoop + jobLoop
  *
  * @param db      SQLite connection (เดียวกับที่ worker ใช้)
- * @param docker  DockerCliClient สำหรับ volume inspect / rm
+ * @param docker  DockerCliClient สำหรับ volume inspect / create / rm
  * @param signal  AbortSignal จาก global AbortController ของ worker
  */
 export async function volumeReconcileLoop(

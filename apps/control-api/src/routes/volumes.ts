@@ -56,6 +56,7 @@ const volumeSchema = t.Object({
   readOnly: t.Boolean(),
   lifecycle: lifecycleSchema,
   lastAttachedAt: t.Nullable(t.Number()),
+  lastError: t.Nullable(t.String()),
   createdAt: t.Number(),
   updatedAt: t.Number(),
 });

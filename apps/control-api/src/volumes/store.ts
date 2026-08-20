@@ -26,6 +26,8 @@ export interface VolumeDto {
   readOnly: boolean;
   lifecycle: "active" | "detached" | "deletion_pending" | "deleted" | "error";
   lastAttachedAt: number | null;
+  /** สาเหตุล่าสุดจาก reconciler (worker เขียน) — dashboard ใช้แสดงแทนข้อความ hardcode */
+  lastError: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -42,6 +44,7 @@ interface VolumeRow {
   read_only: number;
   lifecycle: string;
   last_attached_at: number | null;
+  last_error: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -65,6 +68,7 @@ function toDto(row: VolumeRow): VolumeDto {
     readOnly: row.read_only === 1,
     lifecycle: row.lifecycle as VolumeDto["lifecycle"],
     lastAttachedAt: row.last_attached_at,
+    lastError: row.last_error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -74,7 +78,7 @@ export function listVolumes(db: Database, projectId: string): VolumeDto[] {
   return db
     .query<VolumeRow, [string]>(
       `SELECT id, project_id, display_name, docker_name, mount_path, access_mode, driver,
-              driver_opts, read_only, lifecycle, last_attached_at, created_at, updated_at
+              driver_opts, read_only, lifecycle, last_attached_at, last_error, created_at, updated_at
        FROM volumes
        WHERE project_id = ? AND lifecycle != 'deleted'
        ORDER BY created_at`,
@@ -87,7 +91,7 @@ export function getVolume(db: Database, volumeId: string): VolumeDto | null {
   const row = db
     .query<VolumeRow, [string]>(
       `SELECT id, project_id, display_name, docker_name, mount_path, access_mode, driver,
-              driver_opts, read_only, lifecycle, last_attached_at, created_at, updated_at
+              driver_opts, read_only, lifecycle, last_attached_at, last_error, created_at, updated_at
        FROM volumes WHERE id = ?`,
     )
     .get(volumeId);

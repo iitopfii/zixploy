@@ -3,8 +3,11 @@
  *
  * ครอบคลุม:
  * - deletion_pending → docker volume rm สำเร็จ → lifecycle='deleted'
- * - deletion_pending → docker volume rm ล้มเหลว (in-use) → lifecycle ยังเป็น deletion_pending
- * - active volume ที่ Docker volume ไม่มีอยู่ → lifecycle='error'
+ * - deletion_pending → docker volume rm ล้มเหลว (in-use) → คงสถานะ + last_error บอกสาเหตุ
+ * - never-attached volume ที่ Docker volume ไม่มีอยู่ → auto-create ไม่ใช่ error
+ *   (บทเรียน 2026-08-20: volume ที่เพิ่งสร้างใน UI ถูกตีตรา error ก่อน redeploy ทัน)
+ * - error + never-attached → auto-heal กลับเป็น active
+ * - orphan จริง (เคย attach แล้ว Docker volume หาย) → error + last_error ชี้ runbook
  * - active volume ที่ Docker volume มีอยู่จริง → lifecycle ไม่เปลี่ยน
  * - signal abort หยุด loop
  */
@@ -30,31 +33,51 @@ function insertProject(db: ReturnType<typeof makeDb>): string {
   return id;
 }
 
-function insertVolume(db: ReturnType<typeof makeDb>, projectId: string, lifecycle: string): string {
+function insertVolume(
+  db: ReturnType<typeof makeDb>,
+  projectId: string,
+  lifecycle: string,
+  opts: { lastAttachedAt?: number } = {},
+): string {
   const id = ulid();
   const dockerName = volumeName(projectId, id);
   db.query(
     `INSERT INTO volumes
        (id, project_id, display_name, docker_name, mount_path, access_mode, driver,
-        driver_opts, read_only, lifecycle, created_at, updated_at)
-     VALUES (?, ?, 'vol', ?, '/data', 'shared-safe', 'local', '{}', 0, ?, 1, 1)`,
-  ).run(id, projectId, dockerName, lifecycle);
+        driver_opts, read_only, lifecycle, last_attached_at, created_at, updated_at)
+     VALUES (?, ?, 'vol', ?, '/data', 'shared-safe', 'local', '{}', 0, ?, ?, 1, 1)`,
+  ).run(id, projectId, dockerName, lifecycle, opts.lastAttachedAt ?? null);
   return id;
 }
 
-function getLifecycle(db: ReturnType<typeof makeDb>, volumeId: string): string {
+function getVolumeState(
+  db: ReturnType<typeof makeDb>,
+  volumeId: string,
+): { lifecycle: string; last_error: string | null } {
   return db
-    .query<{ lifecycle: string }, [string]>("SELECT lifecycle FROM volumes WHERE id = ?")
-    .get(volumeId)!.lifecycle;
+    .query<{ lifecycle: string; last_error: string | null }, [string]>(
+      "SELECT lifecycle, last_error FROM volumes WHERE id = ?",
+    )
+    .get(volumeId)!;
+}
+
+function getLifecycle(db: ReturnType<typeof makeDb>, volumeId: string): string {
+  return getVolumeState(db, volumeId).lifecycle;
 }
 
 function makeMockDocker(opts: {
   removeVolume?: (name: string) => Promise<void>;
   inspectVolume?: (name: string) => Promise<unknown>;
+  createVolume?: (params: {
+    name: string;
+    driver: string;
+    labels?: Record<string, string>;
+  }) => Promise<void>;
 }) {
   return {
     removeVolume: opts.removeVolume ?? (async (_name: string) => {}),
     inspectVolume: opts.inspectVolume ?? (async (_name: string): Promise<unknown> => null),
+    createVolume: opts.createVolume ?? (async () => {}),
   };
 }
 
@@ -106,7 +129,7 @@ describe("reconciler: deletion_pending", () => {
     expect(getLifecycle(db2, volumeId2)).toBe("deleted");
   });
 
-  test("docker volume rm ล้มเหลว (in-use) → lifecycle ยังเป็น deletion_pending", async () => {
+  test("docker volume rm ล้มเหลว (in-use) → คง deletion_pending + last_error บอกให้ redeploy", async () => {
     const db = makeDb();
     const projectId = insertProject(db);
     const volumeId = insertVolume(db, projectId, "deletion_pending");
@@ -129,25 +152,24 @@ describe("reconciler: deletion_pending", () => {
 
     expect(called).toBe(true);
     // lifecycle ต้องยังเป็น deletion_pending (ไม่ถูกอัปเดตถ้า rm fail)
-    expect(getLifecycle(db, volumeId)).toBe("deletion_pending");
+    const state = getVolumeState(db, volumeId);
+    expect(state.lifecycle).toBe("deletion_pending");
+    // สาเหตุต้องถูกเขียนให้ user เห็น — เดิมค้าง "รอ worker ลบ…" โดยไม่รู้ว่าติด in-use
+    expect(state.last_error).toContain("redeploy");
+    expect(state.last_error).toContain("container");
   });
-});
 
-// ---------------------------------------------------------------------------
-// active → error (orphan)
-// ---------------------------------------------------------------------------
-
-describe("reconciler: orphan detection", () => {
-  test("active volume ที่ Docker volume ไม่มีอยู่ → lifecycle='error'", async () => {
+  test("docker volume rm ล้มเหลวด้วยเหตุอื่น → คง deletion_pending + last_error = ข้อความ error (ตัดสั้น)", async () => {
     const db = makeDb();
     const projectId = insertProject(db);
-    const volumeId = insertVolume(db, projectId, "active");
+    const volumeId = insertVolume(db, projectId, "deletion_pending");
 
     const ctrl = new AbortController();
+    const longMessage = "docker daemon ล่ม: ".repeat(50); // ยาวเกิน 200 ตัวอักษร
     const docker = makeMockDocker({
-      inspectVolume: async () => {
+      removeVolume: async () => {
         ctrl.abort();
-        return null; // Docker volume ไม่มีอยู่
+        throw new AppError("DOCKER_UNAVAILABLE", longMessage);
       },
     });
 
@@ -157,7 +179,113 @@ describe("reconciler: orphan detection", () => {
       ctrl.signal,
     );
 
-    expect(getLifecycle(db, volumeId)).toBe("error");
+    const state = getVolumeState(db, volumeId);
+    expect(state.lifecycle).toBe("deletion_pending");
+    expect(state.last_error).toContain("docker daemon");
+    expect(state.last_error!.length).toBeLessThanOrEqual(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// never-attached + Docker volume ไม่มีอยู่ → auto-create (ไม่ใช่ orphan)
+// ---------------------------------------------------------------------------
+
+describe("reconciler: auto-create never-attached volume", () => {
+  test("active + ไม่เคย attach + Docker volume ไม่มี → createVolume ถูกเรียก, lifecycle คงเดิม", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    const volumeId = insertVolume(db, projectId, "active"); // last_attached_at = NULL
+
+    const ctrl = new AbortController();
+    const createCalls: { name: string; driver: string; labels?: Record<string, string> }[] = [];
+    const docker = makeMockDocker({
+      inspectVolume: async () => {
+        ctrl.abort();
+        return null; // Docker volume ยังไม่ถูกสร้าง (ยังไม่เคย deploy)
+      },
+      createVolume: async (params) => {
+        createCalls.push(params);
+      },
+    });
+
+    await volumeReconcileLoop(
+      db,
+      docker as unknown as Parameters<typeof volumeReconcileLoop>[1],
+      ctrl.signal,
+    );
+
+    // ต้องสร้างด้วย labels ชุดเดียวกับ pipeline (platform.managed / platform.volume_id)
+    expect(createCalls).toHaveLength(1);
+    expect(createCalls[0]!.driver).toBe("local");
+    expect(createCalls[0]!.labels).toEqual({
+      "platform.managed": "true",
+      "platform.volume_id": volumeId,
+    });
+
+    const state = getVolumeState(db, volumeId);
+    expect(state.lifecycle).toBe("active"); // ไม่ถูกตีตรา error
+    expect(state.last_error).toBeNull();
+  });
+
+  test("error + ไม่เคย attach + Docker volume ไม่มี → auto-heal กลับเป็น active + ล้าง last_error", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    // จำลอง false positive จากเวอร์ชันก่อน: ถูกตีตรา error ทั้งที่ยังไม่เคย deploy
+    const volumeId = insertVolume(db, projectId, "error");
+    db.query("UPDATE volumes SET last_error = 'stale error' WHERE id = ?").run(volumeId);
+
+    const ctrl = new AbortController();
+    let created = false;
+    const docker = makeMockDocker({
+      inspectVolume: async () => {
+        ctrl.abort();
+        return null;
+      },
+      createVolume: async () => {
+        created = true;
+      },
+    });
+
+    await volumeReconcileLoop(
+      db,
+      docker as unknown as Parameters<typeof volumeReconcileLoop>[1],
+      ctrl.signal,
+    );
+
+    expect(created).toBe(true);
+    const state = getVolumeState(db, volumeId);
+    expect(state.lifecycle).toBe("active");
+    expect(state.last_error).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// orphan จริง (เคย attach แล้ว Docker volume หาย) → error
+// ---------------------------------------------------------------------------
+
+describe("reconciler: orphan detection", () => {
+  test("active volume ที่เคย attach แล้ว Docker volume ไม่มีอยู่ → lifecycle='error' + last_error ชี้ runbook", async () => {
+    const db = makeDb();
+    const projectId = insertProject(db);
+    const volumeId = insertVolume(db, projectId, "active", { lastAttachedAt: Date.now() });
+
+    const ctrl = new AbortController();
+    const docker = makeMockDocker({
+      inspectVolume: async () => {
+        ctrl.abort();
+        return null; // Docker volume ไม่มีอยู่ทั้งที่เคยถูกใช้งาน
+      },
+    });
+
+    await volumeReconcileLoop(
+      db,
+      docker as unknown as Parameters<typeof volumeReconcileLoop>[1],
+      ctrl.signal,
+    );
+
+    const state = getVolumeState(db, volumeId);
+    expect(state.lifecycle).toBe("error");
+    expect(state.last_error).toContain("docs/runbooks/volume-backup-restore.md");
   });
 
   test("active volume ที่ Docker volume มีอยู่จริง → lifecycle ไม่เปลี่ยน", async () => {
@@ -187,10 +315,10 @@ describe("reconciler: orphan detection", () => {
     expect(getLifecycle(db, volumeId)).toBe("active");
   });
 
-  test("detached volume orphan → lifecycle='error'", async () => {
+  test("detached volume ที่เคย attach แล้วหาย → lifecycle='error'", async () => {
     const db = makeDb();
     const projectId = insertProject(db);
-    const volumeId = insertVolume(db, projectId, "detached");
+    const volumeId = insertVolume(db, projectId, "detached", { lastAttachedAt: Date.now() });
 
     const ctrl = new AbortController();
     const docker = makeMockDocker({
@@ -212,7 +340,7 @@ describe("reconciler: orphan detection", () => {
   test("volume error ที่ Docker volume มีอยู่แล้ว → lifecycle ยังเป็น error (ต้อง manual recovery)", async () => {
     const db = makeDb();
     const projectId = insertProject(db);
-    const volumeId = insertVolume(db, projectId, "error");
+    const volumeId = insertVolume(db, projectId, "error", { lastAttachedAt: Date.now() });
 
     const ctrl = new AbortController();
     const docker = makeMockDocker({

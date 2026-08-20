@@ -193,23 +193,49 @@ const envChangedAfterDeploy = computed(
 
 await Promise.all([fetchDeployments(), fetchEnvUpdatedAt()]);
 
-// poll for in-flight deployments
+// ---------------------------------------------------------------------------
+// รีเฟรชอัตโนมัติ
+//
+// deploy เริ่มได้จากหลายทางที่ไม่ใช่หน้านี้ — push เข้า repo (webhook), แท็บอื่น, หรือคนอื่น
+// เดิม poll เฉพาะตอนที่ "มีงานค้างอยู่แล้ว" เท่านั้น เปิดหน้าทิ้งไว้เฉย ๆ จึงไม่เห็น deploy ใหม่
+// เลยจนกว่าจะกดรีเฟรชเอง — ตอนนี้ poll ตลอด แต่ปรับความถี่ตามสถานการณ์
+// ---------------------------------------------------------------------------
+
 const IN_FLIGHT = ["queued", "cloning", "building", "starting", "health_checking", "activating"];
 const hasInFlight = computed(() => deployments.value.some((d) => IN_FLIGHT.includes(d.status)));
 
+/** มีงานเดินอยู่ = ต้องเห็นสถานะขยับทันที · ว่าง = แค่คอยจับ deploy ที่เริ่มจากที่อื่น */
+const POLL_ACTIVE_MS = 3_000;
+const POLL_IDLE_MS = 15_000;
+
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
+
 function schedulePoll() {
   if (pollTimer) clearTimeout(pollTimer);
-  if (hasInFlight.value) {
-    pollTimer = setTimeout(async () => {
-      await fetchDeployments();
+  if (!import.meta.client) return;
+  pollTimer = setTimeout(
+    async () => {
+      // แท็บถูกซ่อนอยู่ = ไม่ยิง API ทิ้งไปเรื่อย ๆ (กลับมาดูเมื่อไรมี visibilitychange รีเฟรชให้)
+      if (!document.hidden) await fetchDeployments();
       schedulePoll();
-    }, 3000);
-  }
+    },
+    hasInFlight.value ? POLL_ACTIVE_MS : POLL_IDLE_MS,
+  );
 }
 
+// สลับความถี่ทันทีที่สถานะเปลี่ยน (เพิ่งกด deploy ไม่ต้องรอรอบ idle 15 วิให้ครบก่อน)
 watch(hasInFlight, schedulePoll, { immediate: true });
+
+/** กลับมาที่แท็บ = อยากเห็นของสดทันที ไม่ต้องรอรอบ poll ถัดไป */
+function onVisibilityChange() {
+  if (document.hidden) return;
+  fetchDeployments();
+  schedulePoll();
+}
+
+onMounted(() => document.addEventListener("visibilitychange", onVisibilityChange));
 onUnmounted(() => {
+  document.removeEventListener("visibilitychange", onVisibilityChange);
   if (pollTimer) clearTimeout(pollTimer);
 });
 

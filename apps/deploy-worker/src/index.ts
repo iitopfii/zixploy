@@ -7,14 +7,9 @@
  * Phase 3 M6: pipeline dispatcher จริง (clone→build→start→health→activate→rollback/restart/stop)
  */
 import { existsSync } from "node:fs";
-import {
-  assertMigrated,
-  databasePath,
-  loadMigrations,
-  migrationsDir,
-  openDatabase,
-} from "@zixploy/db";
+import { databasePath, loadMigrations, migrationsDir, openDatabase } from "@zixploy/db";
 import { createLogger, DEPLOY_QUEUE, type LogLevel, ulid } from "@zixploy/shared";
+import { waitForSchema } from "./db/wait-schema";
 import { DockerCliClient } from "./docker/cli-client";
 import { loadMasterKeys } from "./github/master-key";
 import { heartbeatLoop } from "./heartbeat";
@@ -69,14 +64,14 @@ if (!(await waitForDatabase())) {
 
 const db = openDatabase({ path: dbPath });
 
-// fail closed ถ้า schema ไม่ครบ — เวอร์ชันไม่ตรงแปลว่า API ยัง migrate ไม่เสร็จหรือ deploy ไม่ตรงกัน
-try {
-  assertMigrated(db, loadMigrations(migrationsDir()));
-} catch (e) {
-  log.error("schema ไม่ตรงกับ migrations", {
-    workerId,
-    reason: e instanceof Error ? e.message : String(e),
-  });
+// fail closed ถ้า schema ไม่ครบ — แต่รอ control-api migrate ให้ครบก่อน (ดู db/wait-schema.ts)
+// deploy ที่มี migration ใหม่ worker จะเห็น schema เก่าอยู่ครู่หนึ่งเป็นปกติ ไม่ใช่ error
+const schemaError = await waitForSchema(db, loadMigrations(migrationsDir()), {
+  onWait: (reason) => log.info("รอ control-api migrate database ให้ครบ", { workerId, reason }),
+  onReady: (waitedMs) => log.info("schema ครบแล้ว", { workerId, waitedMs }),
+});
+if (schemaError) {
+  log.error("schema ไม่ตรงกับ migrations", { workerId, reason: schemaError });
   process.exit(1);
 }
 

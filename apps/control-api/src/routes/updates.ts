@@ -24,6 +24,8 @@ import { checkForUpdate, clearUpdateCache } from "../updates/check";
 const versionSchema = t.Object({
   current: t.String(),
   latest: t.Nullable(t.String()),
+  /** วันที่ build ของ image เวอร์ชันล่าสุด (epoch ms) — null เมื่ออ่านจาก registry ไม่ได้ */
+  latestPublishedAt: t.Nullable(t.Number()),
   updateAvailable: t.Boolean(),
   checkedAt: t.Number(),
   error: t.Nullable(t.String()),

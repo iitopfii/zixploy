@@ -7,6 +7,8 @@ import type { Database } from "bun:sqlite";
 
 export interface ProjectConfig {
   id: string;
+  /** ชื่อที่ผู้ใช้ตั้ง — ใช้เป็นคำนำหน้าชื่อ container ให้อ่านออก (ตกแต่งเท่านั้น ดู naming.ts) */
+  name: string;
   dockerfilePath: string;
   buildContext: string;
   targetStage: string | null;
@@ -26,6 +28,7 @@ export interface ProjectConfig {
 
 interface ProjectConfigRow {
   id: string;
+  name: string;
   dockerfile_path: string;
   build_context: string;
   target_stage: string | null;
@@ -42,7 +45,7 @@ interface ProjectConfigRow {
   deploy_timeout_sec: number;
 }
 
-const SELECT_COLUMNS = `id, dockerfile_path, build_context, target_stage, internal_port, exposed_port,
+const SELECT_COLUMNS = `id, name, dockerfile_path, build_context, target_stage, internal_port, exposed_port,
   health_check_path, health_check_interval_sec, health_check_timeout_sec, health_check_retries,
   start_command, cpu_limit, memory_limit_mb, restart_policy, deploy_timeout_sec`;
 
@@ -54,6 +57,7 @@ export function loadProjectConfig(db: Database, projectId: string): ProjectConfi
 
   return {
     id: row.id,
+    name: row.name,
     dockerfilePath: row.dockerfile_path,
     buildContext: row.build_context,
     targetStage: row.target_stage,

@@ -16,10 +16,14 @@ import type { DockerCliClient } from "../docker/cli-client";
 /** ความถี่กวาด — ถูกกว่า metrics (แค่ docker ps + docker images อย่างละครั้ง) แต่ไม่ต้องสดเท่า */
 export const INVENTORY_INTERVAL_MS = 30_000;
 
-/** container ของแพลตฟอร์มเอง — มี platform.* label หรือชื่อตาม convention ของระบบ */
+/**
+ * container ของแพลตฟอร์มเอง — label เป็นตัวชี้ขาด (ทุก container ที่เราสร้างติด platform.* เสมอ)
+ * ส่วน pattern ชื่อเป็นแค่ตาข่ายสำรอง: ชื่ออาจมีคำนำหน้าที่อ่านออกได้จากชื่อ project นำหน้า `zx-`
+ * (ดู naming.ts) จึงต้องจับ `-zx-` ตรงกลางด้วย ไม่ใช่เฉพาะที่ขึ้นต้น
+ */
 function isManagedContainer(name: string, labels: string): boolean {
   if (labels.includes("platform.")) return true;
-  return /^(zx-|zxsvc-|zixploy-)/.test(name);
+  return /^(zx-|zxsvc-|zixploy-)/.test(name) || /-zx-[0-9a-z]{26}-/.test(name);
 }
 
 /** image ที่แพลตฟอร์ม build/ใช้เอง — namespace "zixploy/" (imageName/componentImageName) */

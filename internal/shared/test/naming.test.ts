@@ -9,6 +9,7 @@ import {
   deploymentLabels,
   deploymentNetworkName,
   imageName,
+  projectSlug,
   volumeLabels,
   volumeName,
 } from "../src/naming";
@@ -103,5 +104,60 @@ describe("naming — multi-container (Phase 18)", () => {
       "platform.deployment_id": deploymentId,
       "platform.component_id": componentId,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// คำนำหน้าที่อ่านออกได้จากชื่อ project (ตกแต่งเท่านั้น — ULID ยังเป็นตัวชี้ขาด)
+// ---------------------------------------------------------------------------
+
+describe("projectSlug", () => {
+  test("ชื่อทั่วไป → slug ที่ Docker รับได้", () => {
+    expect(projectSlug("Giveme")).toBe("giveme");
+    expect(projectSlug("DB Zayn")).toBe("db-zayn");
+    expect(projectSlug("zayn-console")).toBe("zayn-console");
+  });
+
+  test("อักขระที่ Docker ไม่รับถูกตัดทิ้ง และไม่ทิ้งขีดค้างหัว/ท้าย", () => {
+    expect(projectSlug("  My App!!  ")).toBe("my-app");
+    expect(projectSlug("a/b:c")).toBe("a-b-c");
+  });
+
+  test("ชื่อที่ไม่เหลืออักขระใช้ได้ (เช่นภาษาไทยล้วน) → ว่าง = กลับไปใช้ชื่อรูปแบบเดิม", () => {
+    expect(projectSlug("ทดสอบ")).toBe("");
+    expect(projectSlug("")).toBe("");
+    expect(projectSlug(null)).toBe("");
+  });
+
+  test("ยาวเกินถูกตัด และไม่ลงท้ายด้วยขีด", () => {
+    const slug = projectSlug("this-is-a-very-long-project-name-indeed");
+    expect(slug.length).toBeLessThanOrEqual(16);
+    expect(slug.endsWith("-")).toBe(false);
+  });
+});
+
+describe("containerName — คำนำหน้าที่อ่านออก", () => {
+  const pid = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  const did = "01BX5ZZKBKACTAV9WEVGEMMVRZ";
+
+  test("มีชื่อ project → <slug>-zx-<ids> และยังมี ULID ครบ", () => {
+    const name = containerName(pid, did, "Giveme");
+    expect(name).toBe(`giveme-zx-${pid.toLowerCase()}-${did.toLowerCase()}`);
+  });
+
+  test("ไม่ส่งชื่อ / ชื่อใช้ไม่ได้ → รูปแบบเดิมเป๊ะ (backward compatible)", () => {
+    const legacy = `zx-${pid.toLowerCase()}-${did.toLowerCase()}`;
+    expect(containerName(pid, did)).toBe(legacy);
+    expect(containerName(pid, did, "ทดสอบ")).toBe(legacy);
+  });
+
+  test("component: มีทั้งชื่อ project และชื่อ component ให้อ่านออก", () => {
+    const cid = "01BX5ZZKBKACTAV9WEVGEMMVRY";
+    const name = componentContainerName(pid, did, cid, {
+      projectName: "Giveme",
+      componentName: "web",
+    });
+    expect(name.startsWith("giveme-web-zx-")).toBe(true);
+    expect(name.endsWith(cid.toLowerCase())).toBe(true);
   });
 });

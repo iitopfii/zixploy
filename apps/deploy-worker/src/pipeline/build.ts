@@ -97,7 +97,7 @@ export async function runBuildOrRollbackPipeline(
     return { outcome: "failed", retryable: false };
   }
 
-  const cName = containerName(job.projectId, deploymentId);
+  const cName = containerName(job.projectId, deploymentId, project.name);
 
   // ครอบทั้ง pipeline ด้วย deploy_timeout_sec แยกจาก lease/cancel signal ที่รับมา (timeout.ts) —
   // ต้อง cleanup() เสมอไม่ว่าจบแบบไหน กัน timer ค้าง/leak

@@ -21,10 +21,45 @@ export function imageName(projectId: string, commitSha: string, deploymentId: st
   return `zixploy/${projectId.toLowerCase()}:${commitSha.slice(0, 7)}-${deploymentId.toLowerCase()}`;
 }
 
-export function containerName(projectId: string, deploymentId: string): string {
+/**
+ * คำนำหน้าชื่อ container ที่อ่านออกได้จากชื่อ project — เพื่อให้ `docker ps` บอกได้ทันทีว่า
+ * container ไหนของ project ไหน (เดิมเห็นแต่ ULID ต้องเปิด dashboard เทียบ)
+ *
+ * เป็น **ส่วนตกแต่งล้วน ๆ** ไม่ใช่ตัวระบุตัวตน: ULID ที่ตามหลังยังเป็นตัวชี้ขาดเหมือนเดิม และ
+ * การค้นหา/ลบ resource ยังใช้ label + container_id จาก DB เท่านั้น (ADR-0005) — rename project
+ * จึงยังไม่กระทบ container ที่รันอยู่ ตรงตามเจตนาเดิมของ ADR
+ *
+ * คืน "" เมื่อชื่อไม่เหลืออักขระที่ Docker รับได้ (เช่นชื่อภาษาไทยล้วน) → ชื่อกลับไปเป็นรูปแบบเดิม
+ */
+export function projectSlug(projectName: string | null | undefined): string {
+  if (!projectName) return "";
+  return projectName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, SLUG_MAX_LEN)
+    .replace(/-+$/g, "");
+}
+
+/** จำกัดความยาว slug — ชื่อ container รวม ULID หลายตัวอยู่แล้ว ไม่ควรยาวจนอ่านยากกว่าเดิม */
+const SLUG_MAX_LEN = 16;
+
+/** ต่อ slug ไว้หน้าชื่อ ถ้ามี — แยกเป็นฟังก์ชันเพื่อให้ทุกชื่อใช้กติกาเดียวกัน */
+function withSlug(slug: string, base: string): string {
+  return slug ? `${slug}-${base}` : base;
+}
+
+export function containerName(
+  projectId: string,
+  deploymentId: string,
+  projectName?: string | null,
+): string {
   assertUlid(projectId, "projectId");
   assertUlid(deploymentId, "deploymentId");
-  return `zx-${projectId.toLowerCase()}-${deploymentId.toLowerCase()}`;
+  return withSlug(
+    projectSlug(projectName),
+    `zx-${projectId.toLowerCase()}-${deploymentId.toLowerCase()}`,
+  );
 }
 
 export function volumeName(projectId: string, volumeId: string): string {
@@ -95,11 +130,19 @@ export function componentContainerName(
   projectId: string,
   deploymentId: string,
   componentId: string,
+  names?: { projectName?: string | null; componentName?: string | null },
 ): string {
   assertUlid(projectId, "projectId");
   assertUlid(deploymentId, "deploymentId");
   assertUlid(componentId, "componentId");
-  return `zx-${projectId.toLowerCase()}-${deploymentId.toLowerCase()}-${componentId.toLowerCase()}`;
+  // component name ผ่าน COMPONENT_NAME_RE (DNS label) มาแล้ว จึงปลอดภัยต่อ แต่ยัง slug ซ้ำกันเผื่อไว้
+  const parts = [projectSlug(names?.projectName), projectSlug(names?.componentName)].filter(
+    Boolean,
+  );
+  return withSlug(
+    parts.join("-"),
+    `zx-${projectId.toLowerCase()}-${deploymentId.toLowerCase()}-${componentId.toLowerCase()}`,
+  );
 }
 
 /** image ที่ build จาก component (source_kind='build') */

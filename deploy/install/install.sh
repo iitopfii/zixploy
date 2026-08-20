@@ -304,7 +304,9 @@ services:
       traefik.http.routers.api-secure.entrypoints: "websecure"
       traefik.http.routers.api-secure.tls: "true"
       traefik.http.routers.api-secure.tls.certresolver: "letsencrypt"
-      traefik.http.services.api-secure.loadbalancer.server.port: "3001"
+      # ผูกกับ service ที่ base compose ประกาศไว้แล้ว — ห้ามประกาศ service ใหม่ที่นี่
+      # container ที่มีหลาย service ทำให้ Traefik ผูก router ไม่ได้เลยสักตัว (พังทั้ง http และ https)
+      traefik.http.routers.api-secure.service: "api"
 
   dashboard:
     labels:
@@ -315,7 +317,7 @@ services:
       traefik.http.routers.dashboard-secure.tls.certresolver: "letsencrypt"
       # ต่ำกว่า router ของ API เพื่อให้ /api/ ไปที่ control-api ก่อน (เหมือนฝั่ง HTTP)
       traefik.http.routers.dashboard-secure.priority: "1"
-      traefik.http.services.dashboard-secure.loadbalancer.server.port: "3000"
+      traefik.http.routers.dashboard-secure.service: "dashboard"
 EOF
   ok "เปิด HTTPS + Let's Encrypt ให้ dashboard แล้ว"
 elif [ -f "$OVERRIDE_FILE" ]; then

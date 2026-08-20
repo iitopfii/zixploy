@@ -46,6 +46,24 @@ describe("install.sh — HTTPS ของ control plane", () => {
     expect(INSTALL_SH).toContain('traefik.http.routers.dashboard-secure.priority: "1"');
   });
 
+  /**
+   * บทเรียนจากของจริง: override รุ่นแรกประกาศ service ใหม่ (api-secure/dashboard-secure)
+   * ทำให้ container มีสอง service — Traefik ปฏิเสธการผูก router ทั้งหมดของ container นั้น
+   * ("cannot be linked automatically with multiple Services") จึงพังทั้ง HTTP และ HTTPS พร้อมกัน
+   */
+  test("router ใหม่ต้องผูกกับ service เดิมของ base compose ไม่ใช่ประกาศ service ใหม่", () => {
+    expect(INSTALL_SH).toContain('traefik.http.routers.api-secure.service: "api"');
+    expect(INSTALL_SH).toContain('traefik.http.routers.dashboard-secure.service: "dashboard"');
+    // ห้ามมี service ใหม่เด็ดขาด
+    expect(INSTALL_SH).not.toContain("traefik.http.services.api-secure");
+    expect(INSTALL_SH).not.toContain("traefik.http.services.dashboard-secure");
+  });
+
+  test("service ที่ router ใหม่อ้างถึง มีอยู่จริงใน base compose", () => {
+    expect(BASE_COMPOSE).toContain("traefik.http.services.api.loadbalancer.server.port");
+    expect(BASE_COMPOSE).toContain("traefik.http.services.dashboard.loadbalancer.server.port");
+  });
+
   test("ไม่มี domain → ลบ override เก่าทิ้ง (กันขอ cert ให้ domain ที่เลิกใช้จนติด rate limit)", () => {
     expect(INSTALL_SH).toContain('rm -f "$OVERRIDE_FILE"');
   });

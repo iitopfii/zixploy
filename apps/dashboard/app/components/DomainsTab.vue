@@ -3,6 +3,8 @@
  * Domains Tab — Phase 5 (+ M5: custom TLS certificate, Cloudflare-aware DNS)
  *
  * List + add + edit + delete domains, DNS check, TLS certificate management
+ * + โหมด "TLS จัดการโดย proxy ภายนอก" (UI preset — ปิด HTTPS/redirect เมื่อรันหลัง
+ *   proxy ที่ terminate TLS เอง กัน redirect วนซ้ำ)
  *
  * หลักการออกแบบ: ทุกสถานะที่ผู้ใช้เห็นต้องบอก "แล้วต้องทำอะไรต่อ" ไม่ใช่แค่รายงานผล
  * โดยเฉพาะ DNS ที่ผู้ใช้ต้องไปตั้งค่าที่ registrar ซึ่งอยู่นอกระบบเรา — ถ้าบอกแค่ว่า
@@ -79,9 +81,34 @@ const addForm = reactive({
   internalPort: 3000,
   httpsEnabled: true,
   redirectHttp: true,
+  externalProxy: false,
 });
 const addError = ref("");
 const adding = ref(false);
+
+/**
+ * preset "TLS จัดการโดย proxy ภายนอก" — ตัวช่วยตั้งค่าใน UI ล้วน ๆ ไม่มี field ใหม่ใน API
+ *
+ * ที่มา: ผู้ใช้รัน Zixploy หลัง Nginx Proxy Manager / load balancer ที่ terminate TLS
+ * แล้ว forward เป็น HTTP เข้ามา — ถ้า domain ยังเปิด HTTPS + redirect ไว้ Traefik จะเห็น
+ * ทุก request เป็น HTTP แล้วสั่ง redirect ไม่รู้จบ (ERR_TOO_MANY_REDIRECTS)
+ *
+ * ติ๊ก → บังคับปิด HTTPS + redirect (ให้ proxy เป็นคนจัดการ TLS แทน)
+ * เอาติ๊กออก → กลับค่าเริ่มต้น เปิด HTTPS + redirect ตามปกติ
+ */
+function applyExternalProxyPreset(form: {
+  httpsEnabled: boolean;
+  redirectHttp: boolean;
+  externalProxy: boolean;
+}) {
+  if (form.externalProxy) {
+    form.httpsEnabled = false;
+    form.redirectHttp = false;
+  } else {
+    form.httpsEnabled = true;
+    form.redirectHttp = true;
+  }
+}
 
 function errMessage(error: unknown, fallback: string): string {
   const value = (error as { value?: { error?: { message?: string } } } | null)?.value;
@@ -109,6 +136,54 @@ async function addDomain() {
     addError.value = "ติดต่อ API ไม่ได้";
   } finally {
     adding.value = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Edit HTTPS settings (inline panel ต่อ domain — ใช้ PATCH field เดิม)
+// ---------------------------------------------------------------------------
+
+const editPanelId = ref<string | null>(null);
+const editForm = reactive({ httpsEnabled: true, redirectHttp: true, externalProxy: false });
+const editError = ref("");
+const editSaving = ref(false);
+
+function toggleEditPanel(d: Domain) {
+  if (editPanelId.value === d.id) {
+    editPanelId.value = null;
+    return;
+  }
+  editPanelId.value = d.id;
+  editForm.httpsEnabled = d.httpsEnabled;
+  editForm.redirectHttp = d.redirectHttp;
+  // อนุมานสถานะติ๊กจากค่าเดิม: ปิดทั้ง HTTPS และ redirect = ท่าเดียวกับโหมด proxy ภายนอก
+  editForm.externalProxy = !d.httpsEnabled && !d.redirectHttp;
+  editError.value = "";
+}
+
+async function saveHttpsSettings(domainId: string) {
+  editSaving.value = true;
+  editError.value = "";
+  try {
+    const { error } = await api.api.v1
+      .projects({ id: props.projectId })
+      .domains({ domainId })
+      .patch({
+        httpsEnabled: editForm.httpsEnabled,
+        // ปิด HTTPS แล้ว redirect ไม่มีความหมาย — ส่ง false ไปด้วยให้ค่าใน DB สอดคล้อง
+        // กับที่ผู้ใช้เห็น (และให้การอนุมานติ๊ก proxy ภายนอกรอบหน้าไม่เพี้ยน)
+        redirectHttp: editForm.httpsEnabled ? editForm.redirectHttp : false,
+      });
+    if (error) {
+      editError.value = errMessage(error, "บันทึกไม่สำเร็จ");
+      return;
+    }
+    editPanelId.value = null;
+    await fetchDomains();
+  } catch {
+    editError.value = "ติดต่อ API ไม่ได้";
+  } finally {
+    editSaving.value = false;
   }
 }
 
@@ -193,6 +268,18 @@ const FALLBACK_DNS_PRESENTATION = DNS_PRESENTATION.unknown as (typeof DNS_PRESEN
 
 function dns(status: string) {
   return DNS_PRESENTATION[status] ?? FALLBACK_DNS_PRESENTATION;
+}
+
+/**
+ * ความเสี่ยง redirect วนซ้ำ: DNS ชี้ผ่าน proxy/CDN (proxied) หรือชี้ไปที่อื่น (mismatch
+ * — อาจเป็น load balancer ที่เราตรวจไม่รู้จัก) แต่ยังเปิด HTTPS/redirect ฝั่งเราอยู่
+ * ถ้า proxy นั้น terminate TLS แล้ว forward เป็น HTTP เข้ามา จะเกิด redirect ไม่รู้จบ
+ * — เตือนไว้ก่อนเพราะผู้ใช้ไม่มีทางรู้จาก UI เดิมว่าต้องปิดสองสวิตช์นี้
+ */
+function riskProxyRedirectLoop(d: Domain): boolean {
+  return (
+    (d.dnsStatus === "proxied" || d.dnsStatus === "mismatch") && (d.httpsEnabled || d.redirectHttp)
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -384,7 +471,12 @@ async function copyIp(ip: string) {
       </label>
       <div class="form-checks">
         <div class="check-row">
-          <input id="dom-https" v-model="addForm.httpsEnabled" type="checkbox" />
+          <input
+            id="dom-https"
+            v-model="addForm.httpsEnabled"
+            type="checkbox"
+            :disabled="addForm.externalProxy"
+          />
           <label for="dom-https">เปิด HTTPS</label>
         </div>
         <div class="check-row">
@@ -392,11 +484,26 @@ async function copyIp(ip: string) {
             id="dom-redirect"
             v-model="addForm.redirectHttp"
             type="checkbox"
-            :disabled="!addForm.httpsEnabled"
+            :disabled="!addForm.httpsEnabled || addForm.externalProxy"
           />
           <label for="dom-redirect">บังคับ HTTP → HTTPS</label>
         </div>
       </div>
+      <div class="check-row">
+        <input
+          id="dom-ext-proxy"
+          v-model="addForm.externalProxy"
+          type="checkbox"
+          @change="applyExternalProxyPreset(addForm)"
+        />
+        <label for="dom-ext-proxy">
+          TLS จัดการโดย proxy ภายนอก (เช่น Nginx Proxy Manager, Cloudflare, load balancer)
+        </label>
+      </div>
+      <p v-if="addForm.externalProxy" class="muted tiny proxy-note">
+        proxy ภายนอกเป็นคน terminate TLS — Zixploy จะเสิร์ฟ HTTP ให้ proxy ตรง ๆ
+        (การเปิด HTTPS/redirect ที่นี่จะทำให้เกิด redirect วนซ้ำ)
+      </p>
       <p v-if="addError" class="alert alert-bad small">
         <AppIcon name="alert" :size="13" />
         <span>{{ addError }}</span>
@@ -456,6 +563,16 @@ async function copyIp(ip: string) {
         <p class="muted tiny hint">{{ dns(d.dnsStatus).hint }}</p>
         <p v-if="checkResults[d.id]?.resolved?.length" class="muted tiny mono">
           resolve ได้: {{ checkResults[d.id]?.resolved.join(", ") }}
+        </p>
+
+        <!-- เตือนความเสี่ยง redirect วนซ้ำเมื่อ DNS ผ่าน proxy/CDN แต่ยังเปิด HTTPS/redirect -->
+        <p v-if="riskProxyRedirectLoop(d)" class="alert alert-warn small">
+          <AppIcon name="alert" :size="13" />
+          <span>
+            DNS ของ domain นี้ชี้ผ่าน proxy/CDN — ถ้า TLS ถูก terminate ที่ proxy
+            การเปิด HTTPS/Redirect ที่นี่จะทำให้ redirect วนซ้ำ
+            พิจารณาใช้โหมด "TLS จัดการโดย proxy ภายนอก" ในปุ่มตั้งค่า HTTPS
+          </span>
         </p>
 
         <!-- TLS -->
@@ -552,6 +669,10 @@ async function copyIp(ip: string) {
             <AppIcon v-else name="refresh" :size="13" />
             {{ checkingId === d.id ? "กำลังตรวจ…" : "ตรวจ DNS" }}
           </button>
+          <button class="secondary small" @click="toggleEditPanel(d)">
+            <AppIcon name="settings" :size="13" />
+            ตั้งค่า HTTPS
+          </button>
           <button class="secondary small" @click="toggleEnabled(d)">
             {{ d.enabled ? "ปิดใช้งาน" : "เปิดใช้งาน" }}
           </button>
@@ -559,6 +680,56 @@ async function copyIp(ip: string) {
             <AppIcon name="trash" :size="13" />
             ลบ
           </button>
+        </div>
+
+        <!-- inline แก้ไข HTTPS/redirect — field เดิมของ PATCH ไม่มี field ใหม่ -->
+        <div v-if="editPanelId === d.id" class="inset stack edit-panel">
+          <div class="form-checks">
+            <div class="check-row">
+              <input
+                :id="`edit-https-${d.id}`"
+                v-model="editForm.httpsEnabled"
+                type="checkbox"
+                :disabled="editForm.externalProxy"
+              />
+              <label :for="`edit-https-${d.id}`">เปิด HTTPS</label>
+            </div>
+            <div class="check-row">
+              <input
+                :id="`edit-redirect-${d.id}`"
+                v-model="editForm.redirectHttp"
+                type="checkbox"
+                :disabled="!editForm.httpsEnabled || editForm.externalProxy"
+              />
+              <label :for="`edit-redirect-${d.id}`">บังคับ HTTP → HTTPS</label>
+            </div>
+          </div>
+          <div class="check-row">
+            <input
+              :id="`edit-ext-proxy-${d.id}`"
+              v-model="editForm.externalProxy"
+              type="checkbox"
+              @change="applyExternalProxyPreset(editForm)"
+            />
+            <label :for="`edit-ext-proxy-${d.id}`">
+              TLS จัดการโดย proxy ภายนอก (เช่น Nginx Proxy Manager, Cloudflare, load balancer)
+            </label>
+          </div>
+          <p v-if="editForm.externalProxy" class="muted tiny proxy-note">
+            proxy ภายนอกเป็นคน terminate TLS — Zixploy จะเสิร์ฟ HTTP ให้ proxy ตรง ๆ
+            (การเปิด HTTPS/redirect ที่นี่จะทำให้เกิด redirect วนซ้ำ)
+          </p>
+          <p v-if="editError" class="alert alert-bad small">
+            <AppIcon name="alert" :size="13" />
+            <span>{{ editError }}</span>
+          </p>
+          <div class="confirm-actions">
+            <button class="primary small" :disabled="editSaving" @click="saveHttpsSettings(d.id)">
+              <span v-if="editSaving" class="spinner" />
+              {{ editSaving ? "กำลังบันทึก…" : "บันทึก" }}
+            </button>
+            <button class="secondary small" @click="editPanelId = null">ยกเลิก</button>
+          </div>
         </div>
 
         <!-- inline confirm delete -->
@@ -618,6 +789,15 @@ async function copyIp(ip: string) {
 }
 .form-checks .check-row {
   margin-bottom: 0;
+}
+/* check-row ที่วางเดี่ยวใน panel (inset ใช้ stack gap อยู่แล้ว ไม่ต้องมี margin ซ้ำ) */
+.inset > .check-row {
+  margin-bottom: 0;
+}
+/* คำอธิบายใต้ checkbox โหมด proxy ภายนอก */
+.proxy-note {
+  margin: 0;
+  line-height: 1.5;
 }
 
 /* ── domain card ── */
@@ -718,6 +898,9 @@ async function copyIp(ip: string) {
   flex-wrap: wrap;
 }
 .cert-panel {
+  margin-top: var(--s-1);
+}
+.edit-panel {
   margin-top: var(--s-1);
 }
 

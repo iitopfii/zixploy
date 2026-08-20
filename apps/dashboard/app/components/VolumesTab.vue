@@ -20,6 +20,8 @@ interface Volume {
   mountPath: string;
   accessMode: "shared-safe" | "single-writer";
   driver: string;
+  /** host path เมื่อเป็น bind mount — null = Docker จัดการที่เก็บเอง */
+  hostPath: string | null;
   readOnly: boolean;
   lifecycle: "active" | "detached" | "deletion_pending" | "deleted" | "error";
   lastAttachedAt: number | null;
@@ -61,6 +63,8 @@ const showCreate = ref(false);
 const createForm = reactive({
   displayName: "",
   mountPath: "",
+  // bind mount (optional) — ตั้งได้เฉพาะตอนสร้าง แก้ทีหลังไม่ได้ (docker volume opts เปลี่ยนไม่ได้)
+  hostPath: "",
   accessMode: "shared-safe" as "shared-safe" | "single-writer",
   readOnly: false,
 });
@@ -76,6 +80,8 @@ async function createVolume() {
       mountPath: createForm.mountPath.trim(),
       accessMode: createForm.accessMode,
       readOnly: createForm.readOnly,
+      // ส่งเฉพาะเมื่อกรอก — เว้นว่าง = named volume ปกติ (Docker จัดการที่เก็บเอง)
+      ...(createForm.hostPath.trim() ? { hostPath: createForm.hostPath.trim() } : {}),
     });
     if (error) {
       createError.value =
@@ -86,6 +92,7 @@ async function createVolume() {
     showCreate.value = false;
     createForm.displayName = "";
     createForm.mountPath = "";
+    createForm.hostPath = "";
     await fetchVolumes();
   } catch {
     createError.value = "ติดต่อ API ไม่ได้";
@@ -202,6 +209,14 @@ function lcTone(lc: string) {
         <input v-model="createForm.mountPath" class="mono" placeholder="/app/data" />
       </label>
       <label>
+        <span>Host path (bind mount) — ไม่บังคับ</span>
+        <input v-model="createForm.hostPath" class="mono" placeholder="/home/mydata" />
+        <span class="muted small">
+          เว้นว่าง = Docker จัดการที่เก็บให้ (แนะนำ) · ระบุ path เช่น /home/mydata =
+          ข้อมูลไปอยู่โฟลเดอร์นั้นบนเซิร์ฟเวอร์ตรงๆ — โฟลเดอร์ต้องมีอยู่แล้ว และแก้ path ทีหลังไม่ได้
+        </span>
+      </label>
+      <label>
         <span>Access mode</span>
         <select v-model="createForm.accessMode">
           <option value="shared-safe">shared-safe (แนะนำ)</option>
@@ -252,6 +267,11 @@ function lcTone(lc: string) {
         <dl class="kv">
           <dt>Mount path</dt>
           <dd><code>{{ v.mountPath }}</code></dd>
+          <!-- bind mount: บอกให้เห็นชัดว่าข้อมูลอยู่โฟลเดอร์ไหนบน host จริง -->
+          <template v-if="v.hostPath">
+            <dt>Host path</dt>
+            <dd><code>{{ v.hostPath }}</code></dd>
+          </template>
           <dt>Docker name</dt>
           <dd><code class="muted small">{{ v.dockerName }}</code></dd>
           <dt>Access mode</dt>

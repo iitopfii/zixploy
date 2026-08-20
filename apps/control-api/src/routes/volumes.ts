@@ -10,6 +10,7 @@
  *
  * Security:
  * - mount path ผ่าน validateMountPath() ก่อน store (reject /proc, /sys, /dev, /etc ฯลฯ)
+ * - host path (bind mount) ผ่าน validateHostPath() ก่อน store — ตั้งได้เฉพาะตอนสร้างเท่านั้น
  * - docker_name สร้างจาก volumeName(projectId, volumeId) — ไม่ใช้ user input ใน Docker name
  * - ห้ามลบ active volume โดยตรง — ต้อง detach ก่อน
  * - control-api ไม่แตะ Docker (architecture.test.ts guard) — Worker ทำ docker volume create/rm
@@ -53,6 +54,8 @@ const volumeSchema = t.Object({
   accessMode: accessModeSchema,
   driver: t.String(),
   driverOpts: t.Record(t.String(), t.String()),
+  // host path เมื่อเป็น bind mount (derive จาก driverOpts.device) — null = Docker จัดการที่เก็บเอง
+  hostPath: t.Nullable(t.String()),
   readOnly: t.Boolean(),
   lifecycle: lifecycleSchema,
   lastAttachedAt: t.Nullable(t.Number()),
@@ -113,6 +116,7 @@ export function volumeRoutes(db: Database) {
             ...(body.accessMode !== undefined ? { accessMode: body.accessMode } : {}),
             ...(body.driver !== undefined ? { driver: body.driver } : {}),
             ...(body.readOnly !== undefined ? { readOnly: body.readOnly } : {}),
+            ...(body.hostPath !== undefined ? { hostPath: body.hostPath } : {}),
           });
           return { volume: vol };
         },
@@ -123,6 +127,8 @@ export function volumeRoutes(db: Database) {
             accessMode: t.Optional(accessModeSchema),
             driver: t.Optional(t.String()),
             readOnly: t.Optional(t.Boolean()),
+            // bind mount ตั้งได้เฉพาะตอนสร้าง — PATCH ไม่รับ hostPath (docker volume opts เปลี่ยนไม่ได้)
+            hostPath: t.Optional(t.String({ maxLength: 4096 })),
           }),
           response: t.Object({ volume: volumeSchema }),
         },

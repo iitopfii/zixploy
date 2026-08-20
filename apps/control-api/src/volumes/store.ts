@@ -10,6 +10,7 @@ import {
   AppError,
   ulid,
   VOLUME_ALLOWED_DRIVERS,
+  validateHostPath,
   validateMountPath,
   volumeName,
 } from "@zixploy/shared";
@@ -23,6 +24,8 @@ export interface VolumeDto {
   accessMode: "shared-safe" | "single-writer";
   driver: string;
   driverOpts: Record<string, string>;
+  /** host path เมื่อเป็น bind mount (derive จาก driverOpts.device) — null = Docker จัดการที่เก็บเอง */
+  hostPath: string | null;
   readOnly: boolean;
   lifecycle: "active" | "detached" | "deletion_pending" | "deleted" | "error";
   lastAttachedAt: number | null;
@@ -56,6 +59,8 @@ function toDto(row: VolumeRow): VolumeDto {
   } catch {
     // fallback to empty (ไม่ควรเกิด ถ้า DB schema ถูกต้อง)
   }
+  // bind mount เมื่อ o มี "bind" และมี device — เผื่อ opts ที่ตั้งมือใน DB เป็น "bind,uid=1000"
+  const isBind = (driverOpts.o ?? "").split(",").includes("bind") && !!driverOpts.device;
   return {
     id: row.id,
     projectId: row.project_id,
@@ -65,6 +70,7 @@ function toDto(row: VolumeRow): VolumeDto {
     accessMode: row.access_mode as VolumeDto["accessMode"],
     driver: row.driver,
     driverOpts,
+    hostPath: isBind ? (driverOpts.device ?? null) : null,
     readOnly: row.read_only === 1,
     lifecycle: row.lifecycle as VolumeDto["lifecycle"],
     lastAttachedAt: row.last_attached_at,
@@ -104,6 +110,11 @@ export interface CreateVolumeParams {
   accessMode?: "shared-safe" | "single-writer";
   driver?: string;
   readOnly?: boolean;
+  /**
+   * Host path สำหรับ bind mount — ตั้งได้เฉพาะตอนสร้าง (Docker ไม่รองรับเปลี่ยน volume opts
+   * หลังสร้าง — updateVolume จึงห้ามรับ field นี้) ไม่ระบุ = Docker จัดการที่เก็บเอง
+   */
+  hostPath?: string;
 }
 
 export function createVolume(
@@ -129,6 +140,25 @@ export function createVolume(
     );
   }
 
+  // Bind mount (host path) — Docker "local" driver รองรับผ่าน opts {type:none, o:bind, device:<path>}
+  // validate + normalize ที่นี่ที่เดียว: driver_opts เขียนได้ทางเดียวผ่าน create เท่านั้น
+  let driverOpts = "{}";
+  if (params.hostPath !== undefined && params.hostPath !== "") {
+    const hostCheck = validateHostPath(params.hostPath);
+    if (!hostCheck.ok) {
+      throw new AppError(
+        hostCheck.code ?? "VOLUME_INVALID_PATH",
+        hostCheck.reason ?? "invalid host path",
+        { field: "hostPath" },
+      );
+    }
+    driverOpts = JSON.stringify({
+      type: "none",
+      o: "bind",
+      device: hostCheck.normalized ?? params.hostPath,
+    });
+  }
+
   // ตรวจ duplicate mount path ใน project เดียวกัน (active volumes เท่านั้น)
   const dup = db
     .query<{ id: string }, [string, string]>(
@@ -152,7 +182,7 @@ export function createVolume(
     `INSERT INTO volumes
        (id, project_id, display_name, docker_name, mount_path, access_mode, driver,
         driver_opts, read_only, lifecycle, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, '{}', ?, 'active', ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
   ).run(
     id,
     projectId,
@@ -161,6 +191,7 @@ export function createVolume(
     params.mountPath,
     params.accessMode ?? "shared-safe",
     driver,
+    driverOpts,
     params.readOnly ? 1 : 0,
     now,
     now,
@@ -169,6 +200,7 @@ export function createVolume(
   return getVolume(db, id)!;
 }
 
+/** ไม่มี hostPath โดยตั้งใจ — docker volume opts เปลี่ยนหลังสร้างไม่ได้ ต้องลบแล้วสร้างใหม่เท่านั้น */
 export interface UpdateVolumeParams {
   displayName?: string;
   mountPath?: string;

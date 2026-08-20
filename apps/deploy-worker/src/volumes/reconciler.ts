@@ -23,6 +23,7 @@
 import type { Database } from "bun:sqlite";
 import { AppError } from "@zixploy/shared";
 import type { DockerCliClient } from "../docker/cli-client";
+import { parseDriverOpts } from "./loader";
 
 const VOLUME_RECONCILE_INTERVAL_MS = 30_000; // reconcile ทุก 30 วินาที
 
@@ -34,13 +35,14 @@ interface VolumeRow {
   docker_name: string;
   lifecycle: string;
   driver: string;
+  driver_opts: string;
   last_attached_at: number | null;
 }
 
 function listNonDeletedVolumes(db: Database): VolumeRow[] {
   return db
     .query<VolumeRow, []>(
-      `SELECT id, docker_name, lifecycle, driver, last_attached_at
+      `SELECT id, docker_name, lifecycle, driver, driver_opts, last_attached_at
        FROM volumes
        WHERE lifecycle NOT IN ('deleted')
        ORDER BY created_at`,
@@ -106,10 +108,14 @@ async function reconcileOnce(db: Database, docker: DockerCliClient): Promise<voi
           if (vol.last_attached_at === null) {
             // ยังไม่เคยถูก mount = ไม่ใช่ orphan — Docker volume จริงเกิดตอน deploy เท่านั้น
             // สร้างให้เลยด้วย labels ชุดเดียวกับ pipeline (idempotent) แทนการตีตรา error
+            // bind mount ต้องส่ง driver_opts ด้วย — ไม่งั้นถูกสร้างผิดเป็น volume เปล่า
+            // แล้ว deploy รอบถัดไปจะ mount ผิดที่แบบเงียบ ๆ (opts เปลี่ยนหลังสร้างไม่ได้)
+            const driverOpts = parseDriverOpts(vol.driver_opts);
             await docker.createVolume({
               name: vol.docker_name,
               driver: vol.driver,
               labels: { "platform.managed": "true", "platform.volume_id": vol.id },
+              ...(Object.keys(driverOpts).length > 0 ? { opts: driverOpts } : {}),
             });
             if (vol.lifecycle === "error") {
               // auto-heal false positive จากเวอร์ชันก่อนที่ตีตรา error ทั้งที่แค่ยังไม่ deploy

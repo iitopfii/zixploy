@@ -279,10 +279,13 @@ export async function runBuildOrRollbackPipeline(
         );
       }
       // docker volume create เป็น idempotent — ไม่ fail ถ้า volume มีอยู่แล้ว
+      // bind mount (driver_opts มีค่า) ต้องส่ง opts ด้วย ไม่งั้นถูกสร้างผิดเป็น volume เปล่า
+      // — opts มีผลเฉพาะตอนสร้างครั้งแรก volume ที่มีอยู่แล้วไม่ถูกเปลี่ยน
       await deps.docker.createVolume({
         name: vol.dockerName,
         driver: vol.driver,
         labels: { "platform.managed": "true", "platform.volume_id": vol.id },
+        ...(Object.keys(vol.driverOpts).length > 0 ? { opts: vol.driverOpts } : {}),
       });
     }
 

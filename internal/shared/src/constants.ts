@@ -120,6 +120,27 @@ export const VOLUME_SENSITIVE_PATHS = [
 ] as const;
 
 /**
+ * Host path prefixes ที่ห้ามใช้เป็น bind mount device (`driver_opts.device`) — เข้มกว่า
+ * VOLUME_SENSITIVE_PATHS โดยตั้งใจ: mount path คือ path *ใน container* (mount ทับ /usr/local
+ * ของ image ตัวเองได้) แต่ host path คือ path *บนเครื่อง host จริง* — เปิดให้เขียน /usr หรือ
+ * /run ของ host เท่ากับยึดเครื่องได้ทั้งเครื่อง จึงแบนทั้ง directory ไม่ใช่เฉพาะไฟล์อ่อนไหวข้างใน
+ */
+export const VOLUME_HOST_SENSITIVE_PATHS = [
+  "/etc",
+  "/proc",
+  "/sys",
+  "/dev",
+  "/boot",
+  "/run",
+  "/var/run",
+  "/var/lib/docker",
+  "/usr",
+  "/bin",
+  "/sbin",
+  "/lib",
+] as const;
+
+/**
  * Sandbox limits สำหรับ `docker buildx build` เอง (RUN instructions ระหว่าง build) — threat-model.md
  * section 3 "Build กิน CPU/RAM/disk จน host ตาย" / "Fork bomb / PID exhaustion"
  * ต่างจาก ContainerCreateParams.cpuLimit/memoryLimitMb/pidsLimit ซึ่งเป็น limit ของ container

@@ -516,15 +516,23 @@ export class DockerCliClient {
   /**
    * สร้าง Docker named volume (idempotent — ถ้า volume มีอยู่แล้ว error ไม่ถูก throw)
    * Worker เรียกก่อน createContainer ทุกครั้งเพื่อ ensure volume exists
+   *
+   * opts → `--opt key=value` ต่อ entry — bind mount ใช้ {type:"none", o:"bind", device:<path>}
+   * ค่าถูก validate แล้วที่ control-api ตอนสร้าง (validateHostPath — ทางเดียวที่ driver_opts ถูกเขียน)
+   * หมายเหตุ: opts มีผลเฉพาะตอน Docker สร้าง volume ครั้งแรก — volume เดิมที่มีอยู่แล้วไม่เปลี่ยน
    */
   async createVolume(params: {
     name: string;
     driver: string;
     labels?: Record<string, string>;
+    opts?: Record<string, string>;
   }): Promise<void> {
     const args = ["volume", "create", "--driver", params.driver];
     for (const [k, v] of Object.entries(params.labels ?? {})) {
       args.push("--label", `${k}=${v}`);
+    }
+    for (const [k, v] of Object.entries(params.opts ?? {})) {
+      args.push("--opt", `${k}=${v}`);
     }
     args.push(params.name);
 

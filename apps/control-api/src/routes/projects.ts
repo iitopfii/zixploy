@@ -37,6 +37,8 @@ interface ProjectRow {
   active_deployment_sha: string | null;
   /** สถานะ deployment ล่าสุดที่จบแล้ว — ใช้ชี้ว่า "deploy ครั้งล่าสุดพัง" โดยไม่แตะ project status */
   last_deployment_status: string | null;
+  /** เวลาแก้ env ล่าสุด (MAX จาก subquery — ทุก scope รวม component และ disabled) — null = ไม่มี env */
+  env_updated_at: number | null;
 }
 
 const projectSchema = t.Object({
@@ -72,6 +74,12 @@ const projectSchema = t.Object({
   /** deployment ที่ยังไม่จบ — null = ไม่มีงานค้าง (ดู comment ที่ ProjectRow) */
   activeDeployment: t.Nullable(t.Object({ status: t.String(), commitSha: t.String() })),
   lastDeploymentStatus: t.Nullable(t.String()),
+  /**
+   * เวลาแก้ environment variables ครั้งล่าสุด (ทุก scope รวม component และตัวที่ disabled —
+   * การแก้ใดๆ ก็ทำให้ค่าที่ deploy ไว้ล้าสมัยได้) — null = ยังไม่มี env เลย
+   * dashboard ใช้เทียบกับเวลา deploy ล่าสุด เพื่อเตือนว่า "แก้ env แล้วแต่ยังไม่ได้กด Deploy"
+   */
+  envUpdatedAt: t.Nullable(t.Number()),
 });
 
 const createBody = t.Object({
@@ -113,13 +121,14 @@ function toProject(row: ProjectRow) {
       ? { status: row.active_deployment_status, commitSha: row.active_deployment_sha ?? "" }
       : null,
     lastDeploymentStatus: row.last_deployment_status,
+    envUpdatedAt: row.env_updated_at,
   };
 }
 
 /**
- * subquery สอง lookup ต่อ project — ทั้งคู่มี partial index รองรับตั้งแต่ migration 0006
- * (idx_deployments_in_flight, idx_deployments_project_created) จึงไม่ scan ตาราง
- * ใช้ p. prefix เพราะ query หลักต้อง alias projects เป็น p
+ * subquery lookup ต่อ project — deployments มี partial index รองรับตั้งแต่ migration 0006
+ * (idx_deployments_in_flight, idx_deployments_project_created) ส่วน env ใช้ idx_env_vars_project
+ * จึงไม่ scan ตาราง · ใช้ p. prefix เพราะ query หลักต้อง alias projects เป็น p
  */
 const SELECT_COLUMNS = `p.id, p.name, p.status, p.mode, p.source_type, p.installation_id, p.repo_id, p.repo_full_name,
   p.branch, p.auto_deploy, p.dockerfile_path, p.build_context, p.internal_port, p.exposed_port,
@@ -132,7 +141,9 @@ const SELECT_COLUMNS = `p.id, p.name, p.status, p.mode, p.source_type, p.install
     ORDER BY d.created_at DESC LIMIT 1) AS active_deployment_sha,
   (SELECT d.status FROM deployments d
     WHERE d.project_id = p.id AND d.status IN ('succeeded','failed','cancelled')
-    ORDER BY d.created_at DESC LIMIT 1) AS last_deployment_status`;
+    ORDER BY d.created_at DESC LIMIT 1) AS last_deployment_status,
+  (SELECT MAX(e.updated_at) FROM environment_variables e
+    WHERE e.project_id = p.id) AS env_updated_at`;
 
 function loadProject(db: Database, id: string): ProjectRow {
   // ตรวจรูปแบบ ID ก่อนแตะ DB — public ID เป็น ULID เสมอ (ADR-0005)

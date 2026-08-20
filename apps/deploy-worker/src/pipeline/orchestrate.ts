@@ -266,7 +266,10 @@ export async function runComposePipeline(
     for (const c of components) {
       const image = imageTags.get(c.id);
       if (!image) throw new AppError("BUILD_FAILED", `component "${c.name}" ไม่มี image`);
-      const cName = componentContainerName(job.projectId, deploymentId, c.id);
+      const cName = componentContainerName(job.projectId, deploymentId, c.id, {
+        projectName: project.name,
+        componentName: c.name,
+      });
       await docker.removeContainer(cName, { force: true });
 
       // web component ได้ Traefik labels ของ project (MVP: web เดียว; multi-web = Phase D)
@@ -444,7 +447,13 @@ export async function runComposePipeline(
     // (managed_ref ไม่อยู่ใน components จึงไม่ถูกแตะ — service คนละ lifecycle)
     for (const c of components) {
       await docker
-        .removeContainer(componentContainerName(job.projectId, deploymentId, c.id), { force: true })
+        .removeContainer(
+          componentContainerName(job.projectId, deploymentId, c.id, {
+            projectName: project.name,
+            componentName: c.name,
+          }),
+          { force: true },
+        )
         .catch(() => {});
     }
     await docker.removeNetwork(networkName).catch(() => {});

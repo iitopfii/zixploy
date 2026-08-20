@@ -15,6 +15,9 @@ SECRET_DIR="/etc/zixploy"
 MASTER_KEY="$SECRET_DIR/master.key"
 INTERNAL_TOKEN="$SECRET_DIR/internal.token"
 COMPOSE_FILE="$INSTALL_DIR/docker-compose.yml"
+# override ที่ install.sh สร้างเอง (ไม่ได้ดาวน์โหลด) — ตัวอัปเดตในระบบทับแค่ docker-compose.yml
+# ไฟล์นี้จึงอยู่รอดข้ามการอัปเดต และ compose รวมให้อัตโนมัติ
+OVERRIDE_FILE="$INSTALL_DIR/docker-compose.override.yml"
 ENV_FILE="$INSTALL_DIR/.env"
 
 # ── สี (ปิดเองเมื่อไม่ใช่ terminal เช่นตอน pipe เข้า log) ──
@@ -226,6 +229,12 @@ else
   # URL ก็ generate จากค่านี้เหมือนกัน ถ้าเข้าผ่าน domain (เช่นอยู่หลัง Cloudflare) ต้องตั้ง
   # ZIXPLOY_DOMAIN ไม่งั้นค่า default จะเป็น IP ตรง ๆ ซึ่ง login ผ่าน domain จะโดน INVALID_HOST
   if [ -n "${ZIXPLOY_DOMAIN:-}" ]; then
+    # ค่านี้ถูกใส่ลง Traefik rule (Host(`...`)) ตรง ๆ — จำกัดเป็น hostname จริงเท่านั้น
+    # กัน backtick/ช่องว่าง/เครื่องหมายคำพูดที่จะแหกออกจาก rule ไปเป็น config อื่น
+    case "$ZIXPLOY_DOMAIN" in
+      *[!a-zA-Z0-9.-]*|-*|.*|"")
+        die "ZIXPLOY_DOMAIN ไม่ถูกต้อง — ใช้ได้เฉพาะ a-z 0-9 . - (เช่น panel.example.com)" ;;
+    esac
     if [ "$HTTPS_PORT" = "443" ]; then
       BASE_URL_VALUE="https://$ZIXPLOY_DOMAIN"
     else
@@ -259,6 +268,61 @@ ACME_EMAIL=${ZIXPLOY_ACME_EMAIL:-}
 EOF
   chmod 600 "$ENV_FILE"
   ok "สร้าง .env แล้ว"
+fi
+
+# ---------------------------------------------------------------------------
+# HTTPS ของ dashboard/API
+#
+# base compose ให้ router เฉพาะ entrypoint web (:80) เพราะการติดตั้งด้วย IP ล้วนขอ cert
+# จาก Let's Encrypt ไม่ได้ (ACME ออกให้เฉพาะ domain) — แต่ถ้ามี domain ต้องเป็น HTTPS เสมอ
+# ไม่งั้นรหัสผ่าน admin กับ session cookie เดินทางแบบ plaintext ทุกครั้งที่ login
+#
+# เขียนเป็น override แยกแทนการแก้ base เพราะ (1) base ต้องเหมือนกันทุกเครื่องเพื่อให้ตัวอัปเดต
+# ทับได้ (2) ตัวอัปเดตทับแค่ docker-compose.yml ไฟล์นี้จึงอยู่รอดข้ามการอัปเดต
+# ---------------------------------------------------------------------------
+
+DOMAIN_VALUE="${ZIXPLOY_DOMAIN:-}"
+if [ -z "$DOMAIN_VALUE" ] && [ -f "$ENV_FILE" ]; then
+  # ติดตั้งซ้ำบนเครื่องที่เคยตั้ง domain ไว้ — อ่านคืนจาก .env เดิม (BASE_URL เป็น https://<domain>)
+  DOMAIN_VALUE=$(grep -E '^ZIXPLOY_BASE_URL=https://' "$ENV_FILE" 2>/dev/null     | sed -e 's|^ZIXPLOY_BASE_URL=https://||' -e 's|[:/].*$||' || true)
+  case "$DOMAIN_VALUE" in *[!a-zA-Z0-9.-]*) DOMAIN_VALUE="" ;; esac
+fi
+
+if [ -n "$DOMAIN_VALUE" ]; then
+  step "ตั้งค่า HTTPS สำหรับ $DOMAIN_VALUE…"
+  cat > "$OVERRIDE_FILE" <<EOF
+# สร้างโดย install.sh — HTTPS ของ dashboard/API สำหรับ domain นี้เท่านั้น
+# ลบไฟล์นี้แล้ว up -d ใหม่ = กลับไปเป็น HTTP อย่างเดียว
+services:
+  control-api:
+    labels:
+      # http://<domain> ทุกเส้นทางถูกส่งไป https (ACME challenge ของ Traefik ไม่ผ่าน router นี้)
+      traefik.http.middlewares.zx-https.redirectscheme.scheme: "https"
+      traefik.http.middlewares.zx-https.redirectscheme.permanent: "true"
+      traefik.http.routers.api.middlewares: "zx-https@docker"
+      traefik.http.routers.api-secure.rule: "Host(\`$DOMAIN_VALUE\`) && PathPrefix(\`/api/\`)"
+      traefik.http.routers.api-secure.entrypoints: "websecure"
+      traefik.http.routers.api-secure.tls: "true"
+      traefik.http.routers.api-secure.tls.certresolver: "letsencrypt"
+      traefik.http.services.api-secure.loadbalancer.server.port: "3001"
+
+  dashboard:
+    labels:
+      traefik.http.routers.dashboard.middlewares: "zx-https@docker"
+      traefik.http.routers.dashboard-secure.rule: "Host(\`$DOMAIN_VALUE\`)"
+      traefik.http.routers.dashboard-secure.entrypoints: "websecure"
+      traefik.http.routers.dashboard-secure.tls: "true"
+      traefik.http.routers.dashboard-secure.tls.certresolver: "letsencrypt"
+      # ต่ำกว่า router ของ API เพื่อให้ /api/ ไปที่ control-api ก่อน (เหมือนฝั่ง HTTP)
+      traefik.http.routers.dashboard-secure.priority: "1"
+      traefik.http.services.dashboard-secure.loadbalancer.server.port: "3000"
+EOF
+  ok "เปิด HTTPS + Let's Encrypt ให้ dashboard แล้ว"
+elif [ -f "$OVERRIDE_FILE" ]; then
+  # เคยตั้ง domain ไว้แต่รอบนี้ไม่มีแล้ว — ทิ้ง override เก่าไว้จะทำให้ Traefik ขอ cert
+  # ให้ domain ที่ไม่ได้ใช้แล้วซ้ำ ๆ จนติด rate limit ของ Let's Encrypt
+  rm -f "$OVERRIDE_FILE"
+  warn "ลบค่า HTTPS เดิมออก (ไม่ได้ระบุ ZIXPLOY_DOMAIN รอบนี้)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -321,6 +385,11 @@ say ""
 say "${G}${B}ติดตั้งเรียบร้อย${N}"
 say ""
 say "  เปิดใช้งานที่:  ${B}${BASE_URL}${N}"
+if [ -z "$DOMAIN_VALUE" ]; then
+  say "  ${Y}หมายเหตุ: เข้าผ่าน HTTP — รหัสผ่านและ session ไม่ถูกเข้ารหัสระหว่างทาง${N}"
+  say "  ${Y}ถ้ามี domain ให้ชี้ A record มาที่เครื่องนี้ แล้วติดตั้งซ้ำด้วย:${N}"
+  say "    curl -fsSL $REPO_RAW/install.sh | sudo ZIXPLOY_DOMAIN=panel.example.com sh"
+fi
 say "  ไฟล์ติดตั้ง:    $INSTALL_DIR"
 say "  master key:     $MASTER_KEY  ${Y}(สำรองไว้ด้วย)${N}"
 say ""

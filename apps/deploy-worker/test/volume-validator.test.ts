@@ -342,3 +342,56 @@ describe("assertContainerConfigSafe — volumes param", () => {
     expect(() => assertContainerConfigSafe(baseParams({ volumes: [] }))).not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// validateHostPath — path ที่เพิ่มเข้ามาภายหลัง (hardening 2026-08-20)
+// ---------------------------------------------------------------------------
+
+describe("validateHostPath — โฟลเดอร์ระบบและของแพลตฟอร์มเอง", () => {
+  const blocked = [
+    ["/root", "home ของ root (SSH key)"],
+    ["/root/.ssh", "ใต้ home ของ root"],
+    ["/lib64", "shared library 64-bit"],
+    ["/opt/zixploy", "โฟลเดอร์ติดตั้งของแพลตฟอร์ม"],
+    ["/opt/zixploy/.env", "ไฟล์ config ใต้โฟลเดอร์ติดตั้ง"],
+  ] as const;
+
+  for (const [path, label] of blocked) {
+    test(`${path} (${label}) → VOLUME_SENSITIVE_PATH`, () => {
+      const result = validateHostPath(path);
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe("VOLUME_SENSITIVE_PATH");
+    });
+  }
+
+  test("/opt path อื่นยังใช้ได้ — บล็อกเฉพาะโฟลเดอร์ติดตั้ง ไม่ใช่ /opt ทั้งก้อน", () => {
+    expect(validateHostPath("/opt/myapp-data").ok).toBe(true);
+    expect(validateHostPath("/opt/zixploy-backup").ok).toBe(true); // prefix คล้ายแต่คนละโฟลเดอร์
+  });
+
+  test("/home ยังใช้ได้ตามปกติ (use case หลักของ bind mount)", () => {
+    expect(validateHostPath("/home/cwie-db").ok).toBe(true);
+  });
+});
+
+describe("validateHostPath — extraForbidden (โฟลเดอร์ติดตั้งที่ถูกย้ายที่)", () => {
+  test("path ที่ส่งมาเพิ่มถูกบล็อกทั้งตัวมันเองและ sub-path", () => {
+    expect(validateHostPath("/srv/zixploy", ["/srv/zixploy"]).code).toBe("VOLUME_SENSITIVE_PATH");
+    expect(validateHostPath("/srv/zixploy/.env", ["/srv/zixploy"]).code).toBe(
+      "VOLUME_SENSITIVE_PATH",
+    );
+  });
+
+  test("normalize ก่อนเทียบ — / ท้ายหรือ // ซ้อนก็ยังจับได้", () => {
+    expect(validateHostPath("/srv/zixploy", ["/srv/zixploy/"]).ok).toBe(false);
+    expect(validateHostPath("//srv//zixploy", ["/srv/zixploy"]).ok).toBe(false);
+  });
+
+  test("path อื่นไม่ได้รับผลกระทบจาก extraForbidden", () => {
+    expect(validateHostPath("/srv/other", ["/srv/zixploy"]).ok).toBe(true);
+  });
+
+  test("ไม่ส่ง extraForbidden = พฤติกรรมเดิม", () => {
+    expect(validateHostPath("/srv/zixploy").ok).toBe(true);
+  });
+});

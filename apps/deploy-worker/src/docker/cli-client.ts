@@ -43,8 +43,18 @@ function truncate(text: string, max = 400): string {
   return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
 }
 
-function isNotFoundError(stderr: string): boolean {
-  return /no such (container|image|object|network)/i.test(stderr);
+/**
+ * stderr บอกว่า resource ไม่มีอยู่แล้วหรือไม่ — ใช้ทำให้ทุก remove* เป็น idempotent
+ *
+ * ต้องครอบชนิด resource ให้ครบทุกตัวที่ client นี้สั่งลบจริง (container/image/network/volume)
+ * — เดิมตกคำว่า "volume" ไป ทำให้ `docker volume rm` บน volume ที่ไม่มีอยู่ถูกตีความเป็น
+ * DOCKER_UNAVAILABLE แล้ว reconciler กลืน error เงียบ ๆ (fail-open) volume จึงค้างสถานะ
+ * deletion_pending ตลอดไปโดยไม่มีใครรู้สาเหตุ (เหตุการณ์จริง 2026-08-20)
+ *
+ * export เพื่อให้ทดสอบด้วยข้อความจริงจาก Docker ได้โดยไม่ต้องมี daemon
+ */
+export function isNotFoundError(stderr: string): boolean {
+  return /no such (container|image|object|network|volume)/i.test(stderr);
 }
 
 const PIPE_DRAIN_GRACE_MS = 2_000;

@@ -13,6 +13,7 @@ import { waitForSchema } from "./db/wait-schema";
 import { DockerCliClient } from "./docker/cli-client";
 import { loadMasterKeys } from "./github/master-key";
 import { heartbeatLoop } from "./heartbeat";
+import { containerImportLoop } from "./imports/loop";
 import { dockerInventoryLoop } from "./inventory/loop";
 import { runtimeLogLoop } from "./logs/runtime-poller";
 import { serviceLogLoop } from "./logs/service-poller";
@@ -179,6 +180,10 @@ await Promise.all([
   }),
   // snapshot รายชื่อ container/image ทั้งเครื่อง → หน้า Docker ใน dashboard (ADR-0002)
   dockerInventoryLoop(db, docker, controller.signal, (line) => log.warn(line, { workerId })),
+  // นำเข้า container ที่มีอยู่แล้วให้เป็น project (control-api แตะ Docker ไม่ได้ จึงสั่งผ่าน DB)
+  containerImportLoop(db, docker, masterKeys, controller.signal, (line) =>
+    log.warn(line, { workerId }),
+  ),
   // คิวแยกจาก deploy — database provisioning ใช้เวลานาน ไม่ควรบล็อก deploy ของ app
   serviceJobLoop(db, docker, workerId, controller.signal, {
     masterKeys,

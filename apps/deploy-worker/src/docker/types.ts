@@ -82,7 +82,25 @@ export interface ContainerInspect {
    */
   HostConfig?: {
     Memory?: number;
+    /** นำเข้า container ที่มีอยู่ (0028) — คัดลอก restart policy/port/mount มาเป็น project */
+    RestartPolicy?: { Name?: string };
+    PortBindings?: Record<string, Array<{ HostIp?: string; HostPort?: string }> | null>;
   };
+  /** config ตอนสร้าง container — ใช้ตอนนำเข้า container ที่มีอยู่ (0028) */
+  Config?: {
+    Image?: string;
+    /** ["KEY=VALUE", ...] — ค่าจริงของ env มีอยู่ตรงนี้ ห้ามเขียนลง DB แบบ plaintext */
+    Env?: string[] | null;
+    Cmd?: string[] | null;
+    Labels?: Record<string, string> | null;
+  };
+  Mounts?: Array<{
+    Type?: string;
+    Name?: string;
+    Source?: string;
+    Destination?: string;
+    RW?: boolean;
+  }>;
 }
 
 export interface ImageInspect {

@@ -9,8 +9,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   connectionUri,
+  credentialModeFor,
   getTemplate,
   isServiceType,
+  resolveUsername,
   resolveVersion,
   SERVICE_CATALOG,
   SERVICE_TYPES,
@@ -251,5 +253,84 @@ describe("connectionUri", () => {
     expect(uri).toContain(encodeURIComponent(tricky.password));
     // ต้อง parse กลับได้และได้รหัสผ่านเดิม
     expect(decodeURIComponent(new URL(uri).password)).toBe(tricky.password);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stateful templates (pgvector / minio / clamav)
+// ---------------------------------------------------------------------------
+
+describe("pgvector", () => {
+  test("ใช้ env/healthcheck/backup ชุดเดียวกับ postgres — ต่างกันแค่ image", () => {
+    const pg = getTemplate("postgres");
+    const vec = getTemplate("pgvector");
+    expect(vec.env(CREDS)).toEqual(pg.env(CREDS));
+    expect(vec.healthCmd()).toEqual(pg.healthCmd());
+    expect(vec.backupStrategy()).toEqual(pg.backupStrategy());
+    expect(vec.dataPath).toBe(pg.dataPath);
+    expect(serviceImage("pgvector", "pg16")).toBe("pgvector/pgvector:pg16");
+  });
+
+  test("connection URI เป็น postgresql:// เหมือน postgres", () => {
+    expect(connectionUri("pgvector", CREDS, "h", 5432)).toStartWith("postgresql://zxuser:");
+  });
+});
+
+describe("minio", () => {
+  test("root user/password มาจาก credential และ command ไม่มีรหัสผ่าน", () => {
+    const tpl = getTemplate("minio");
+    expect(tpl.env(CREDS)).toEqual({
+      MINIO_ROOT_USER: CREDS.username,
+      MINIO_ROOT_PASSWORD: CREDS.password,
+    });
+    expect(tpl.command?.()).toEqual(["server", "/data", "--console-address", ":9001"]);
+    expect(tpl.dataPath).toBe("/data");
+  });
+
+  test("ปัก release tag — ไม่ใช้ latest", () => {
+    for (const v of getTemplate("minio").versions) expect(v).toStartWith("RELEASE.");
+  });
+
+  test("URI ไม่ฝัง credential (S3 ใช้ access key แยก)", () => {
+    const uri = connectionUri("minio", CREDS, "h", 9000);
+    expect(uri).toBe("http://h:9000");
+  });
+
+  test("credentialMode = user-password และเติม username ที่สั้นเกิน", () => {
+    expect(credentialModeFor("minio")).toBe("user-password");
+    expect(resolveUsername("minio", "a")).toBe("a_user");
+    expect(resolveUsername("minio", "files")).toBe("files");
+    // ชนิดอื่นไม่ถูกแตะ
+    expect(resolveUsername("postgres", "a")).toBe("a");
+  });
+});
+
+describe("clamav", () => {
+  test("ไม่มี credential ใน env และ healthcheck ใช้ script ของ image", () => {
+    const tpl = getTemplate("clamav");
+    const env = tpl.env(CREDS);
+    expect(Object.values(env)).not.toContain(CREDS.password);
+    expect(env.CLAMD_CONF_ConcurrentDatabaseReload).toBe("no");
+    expect(tpl.healthCmd()).toEqual(["CMD-SHELL", "clamdcheck.sh"]);
+    expect(credentialModeFor("clamav")).toBe("none");
+  });
+
+  test("RAM/เวลารอ เผื่อการโหลด signature ครั้งแรก", () => {
+    const tpl = getTemplate("clamav");
+    expect(tpl.defaultMemoryMb ?? 0).toBeGreaterThanOrEqual(1536);
+    expect(tpl.healthStartPeriodSec ?? 0).toBeGreaterThanOrEqual(300);
+    expect(tpl.readyTimeoutMs ?? 0).toBeGreaterThan((tpl.healthStartPeriodSec ?? 0) * 1000);
+  });
+
+  test("URI เป็น tcp://host:3310", () => {
+    expect(connectionUri("clamav", CREDS, "h", 3310)).toBe("tcp://h:3310");
+  });
+});
+
+describe("credentialModeFor", () => {
+  test("database เดิมทุกตัวเป็น full", () => {
+    for (const type of ["postgres", "mysql", "mariadb", "redis", "mongodb", "libsql"] as const) {
+      expect(credentialModeFor(type)).toBe("full");
+    }
   });
 });

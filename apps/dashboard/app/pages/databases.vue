@@ -152,6 +152,37 @@ async function showCredentials(id: string) {
   }
 }
 
+/** credentialMode ของ template — MinIO ไม่มีชื่อ database, ClamAV ไม่มี auth เลย */
+function credentialModeOf(type: string | undefined): string {
+  return catalog.value?.find((c) => c.type === type)?.credentialMode ?? "full";
+}
+
+const credsMode = computed(() =>
+  credentialModeOf(services.value?.find((s) => s.id === credsFor.value)?.type),
+);
+
+const credRows = computed(() => {
+  const c = creds.value;
+  if (!c) return [];
+  const rows = [
+    { label: "Host (ภายในเซิร์ฟเวอร์)", value: String(c.internalHost) },
+    { label: "Port", value: String(c.internalPort) },
+  ];
+  if (credsMode.value === "user-password") {
+    rows.push(
+      { label: "Access key", value: String(c.username) },
+      { label: "Secret key", value: String(c.password) },
+    );
+  } else if (credsMode.value === "full") {
+    rows.push(
+      { label: "Username", value: String(c.username) },
+      { label: "Password", value: String(c.password) },
+      { label: "Database", value: String(c.databaseName) },
+    );
+  }
+  return rows;
+});
+
 // ── logs ──
 const logsFor = ref<{ id: string; name: string } | null>(null);
 
@@ -184,6 +215,8 @@ const CATEGORY_LABEL: Record<string, string> = {
   sql: "SQL",
   nosql: "NoSQL",
   cache: "Cache",
+  storage: "Storage",
+  security: "Security",
 };
 
 // ต้องตรงกับ SERVICE_BACKUP_SETTINGS.allowedIntervalHours (internal/shared/src/constants.ts)
@@ -251,7 +284,12 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
           <label>
             <span>ชื่อ</span>
             <input v-model="form.name" maxlength="60" :disabled="saving" />
-            <span class="field-hint">ใช้เป็นชื่อ user และชื่อ database ด้วย</span>
+            <span v-if="pickedTemplate.credentialMode === 'full'" class="field-hint">
+              ใช้เป็นชื่อ user และชื่อ database ด้วย
+            </span>
+            <span v-else-if="pickedTemplate.credentialMode === 'user-password'" class="field-hint">
+              ใช้เป็น access key ด้วย
+            </span>
           </label>
 
           <label>
@@ -278,12 +316,25 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
             <input v-model.number="form.exposedPort" type="number" min="1024" max="60000" />
           </label>
 
-          <p v-if="form.exposePort" class="alert alert-warn">
+          <p
+            v-if="form.exposePort && pickedTemplate.credentialMode === 'none'"
+            class="alert alert-bad"
+          >
+            <AppIcon name="alert" :size="15" />
+            <span>
+              {{ pickedTemplate.displayName }} ไม่มีรหัสผ่าน — เปิด port แล้วใครก็ตามที่รู้ IP ใช้ได้ทันที
+              ควรเปิดเฉพาะเมื่อมี firewall จำกัด IP ต้นทางแล้วเท่านั้น
+            </span>
+          </p>
+          <p v-else-if="form.exposePort" class="alert alert-warn">
             <AppIcon name="alert" :size="15" />
             <span>
               port นี้จะเปิดออกอินเทอร์เน็ต ใครก็ตามที่รู้ IP และรหัสผ่านจะต่อได้
               — ตั้ง firewall จำกัด IP ต้นทางด้วยถ้าเป็นไปได้
             </span>
+          </p>
+          <p v-if="pickedTemplate.defaultMemoryMb > 512" class="field-hint">
+            จอง RAM {{ pickedTemplate.defaultMemoryMb }} MB — ตรวจว่าเซิร์ฟเวอร์มี RAM ว่างพอก่อนสร้าง
           </p>
         </div>
 
@@ -324,7 +375,7 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
       <div class="empty">
         <span class="empty-icon"><AppIcon name="database" :size="20" /></span>
         <span class="empty-title">ยังไม่มีฐานข้อมูล</span>
-        <p class="small">เพิ่ม PostgreSQL, MySQL, Redis, MongoDB หรือ libSQL ได้ในไม่กี่คลิก</p>
+        <p class="small">เพิ่ม PostgreSQL (pgvector), MySQL, Redis, MongoDB, MinIO หรือ ClamAV ได้ในไม่กี่คลิก</p>
         <button class="primary" @click="creating = true">
           <AppIcon name="plus" :size="15" />
           เพิ่ม Database
@@ -481,19 +532,13 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
           <p v-if="credsLoading" class="muted small">กำลังโหลด…</p>
 
           <template v-else-if="creds">
-            <p class="alert alert-warn tiny">
+            <p v-if="credsMode !== 'none'" class="alert alert-warn tiny">
               <AppIcon name="lock" :size="14" />
               <span>รหัสผ่านนี้เป็นความลับ — อย่าแชร์หรือ commit ลง repository</span>
             </p>
 
             <div class="cred-list">
-              <div v-for="row in [
-                { label: 'Host (ภายในเซิร์ฟเวอร์)', value: String(creds.internalHost) },
-                { label: 'Port', value: String(creds.internalPort) },
-                { label: 'Username', value: String(creds.username) },
-                { label: 'Password', value: String(creds.password) },
-                { label: 'Database', value: String(creds.databaseName) },
-              ]" :key="row.label" class="cred-row">
+              <div v-for="row in credRows" :key="row.label" class="cred-row">
                 <span class="cred-label muted tiny">{{ row.label }}</span>
                 <code class="cred-value">{{ row.value }}</code>
                 <button class="ghost tiny" @click="copy(row.value, row.label)">
@@ -624,9 +669,20 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
 .type-postgres,
 .type-mysql,
 .type-mariadb,
-.type-libsql {
+.type-libsql,
+.type-pgvector {
   background: var(--info-tint);
   color: var(--info);
+}
+.cat-storage,
+.type-minio {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+.cat-security,
+.type-clamav {
+  background: var(--warn-tint);
+  color: var(--warn);
 }
 .cat-cache,
 .type-redis {

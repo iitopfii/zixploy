@@ -263,7 +263,7 @@ export async function provisionService(
             timeoutSec: 5,
             retries: 5,
             // database ใหญ่ ๆ ใช้เวลา init ครั้งแรกนาน — ระหว่าง start period ที่ fail ไม่นับ
-            startPeriodSec: 60,
+            startPeriodSec: template.healthStartPeriodSec ?? 60,
           },
         }
       : {}),
@@ -277,7 +277,7 @@ export async function provisionService(
     docker,
     containerId,
     healthCmd.length > 0,
-    SERVICE_SETTINGS.readyTimeoutMs,
+    template.readyTimeoutMs ?? SERVICE_SETTINGS.readyTimeoutMs,
     signal,
   );
 
@@ -311,7 +311,7 @@ export async function startService(
     docker,
     existing.Id,
     template.healthCmd().length > 0,
-    SERVICE_SETTINGS.readyTimeoutMs,
+    template.readyTimeoutMs ?? SERVICE_SETTINGS.readyTimeoutMs,
     signal,
   );
 

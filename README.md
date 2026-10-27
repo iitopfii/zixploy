@@ -77,7 +77,7 @@ Custom TLS
 | **Zero-downtime** | container ใหม่ต้องผ่าน health check ก่อนจึงสลับ traffic — build ที่ล้มเหลวไม่กระทบเวอร์ชันที่ให้บริการอยู่ |
 | **Rollback** | ย้อนกลับไป deployment ก่อนหน้าโดยไม่ต้อง build ใหม่ |
 | **Domain + HTTPS** | ผูก domain แล้วออกใบรับรอง Let's Encrypt อัตโนมัติ หรืออัปโหลดใบรับรองเอง รองรับ Cloudflare proxy |
-| **ฐานข้อมูลสำเร็จรูป** | PostgreSQL, MySQL, MariaDB, Redis, MongoDB, libSQL — กดสร้างแล้วได้ connection string ทันที |
+| **ฐานข้อมูลสำเร็จรูป** | PostgreSQL (รวม pgvector), MySQL, MariaDB, Redis, MongoDB, libSQL, MinIO, ClamAV — กดสร้างแล้วได้ connection string ทันที พร้อม volume ถาวร |
 | **Environment variables** | เข้ารหัส AES-256-GCM ก่อนบันทึก และกรองออกจาก log ทุกทาง |
 | **Logs** | build log และ runtime log แบบสด ผ่าน SSE |
 | **Monitoring** | CPU, หน่วยความจำ, ดิสก์ และ load ของเครื่อง รวมถึงทรัพยากรราย project |

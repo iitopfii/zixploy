@@ -28,6 +28,7 @@ import {
   API_PREFIX,
   AppError,
   connectionUri,
+  credentialModeFor,
   getTemplate,
   isUlid,
   SERVICE_BACKUP_SETTINGS,
@@ -72,6 +73,9 @@ const serviceTypeSchema = t.Union([
   t.Literal("redis"),
   t.Literal("mongodb"),
   t.Literal("libsql"),
+  t.Literal("pgvector"),
+  t.Literal("minio"),
+  t.Literal("clamav"),
 ]);
 
 const statusSchema = t.Union([
@@ -151,10 +155,18 @@ const catalogEntrySchema = t.Object({
   type: serviceTypeSchema,
   displayName: t.String(),
   tagline: t.String(),
-  category: t.Union([t.Literal("sql"), t.Literal("nosql"), t.Literal("cache")]),
+  category: t.Union([
+    t.Literal("sql"),
+    t.Literal("nosql"),
+    t.Literal("cache"),
+    t.Literal("storage"),
+    t.Literal("security"),
+  ]),
   versions: t.Array(t.String()),
   defaultVersion: t.String(),
   internalPort: t.Number(),
+  credentialMode: t.Union([t.Literal("full"), t.Literal("user-password"), t.Literal("none")]),
+  defaultMemoryMb: t.Number(),
 });
 
 // ---------------------------------------------------------------------------
@@ -195,6 +207,8 @@ export function serviceRoutes(db: Database, masterKeys: MasterKeys | null) {
               versions: [...tpl.versions],
               defaultVersion: tpl.versions[0] as string,
               internalPort: tpl.internalPort,
+              credentialMode: credentialModeFor(type),
+              defaultMemoryMb: tpl.defaultMemoryMb ?? SERVICE_SETTINGS.defaultMemoryMb,
             };
           }),
         }),

@@ -113,6 +113,28 @@ describe("POST /services", () => {
     expect(body.image).toStartWith("postgres:");
   });
 
+  test("stateful templates: image ถูกต้อง, RAM default ตาม template, username MinIO ยาวพอ", async () => {
+    const { app, cookie, csrf } = await setup();
+
+    const vec = await json(await createSvc(app, cookie, csrf, { name: "vec", type: "pgvector" }));
+    expect(vec.image).toBe("pgvector/pgvector:pg17");
+    expect(vec.memoryLimitMb).toBe(SERVICE_SETTINGS.defaultMemoryMb);
+
+    const av = await json(await createSvc(app, cookie, csrf, { name: "av", type: "clamav" }));
+    expect(av.image).toBe("clamav/clamav-debian:1.5");
+    expect(av.memoryLimitMb).toBe(1600);
+
+    // ชื่อตัวอักษรเดียวผ่าน safeIdentifier แล้วยังสั้นเกิน — MinIO ต้องการ root user ≥ 3 ตัว
+    const s3 = await json(await createSvc(app, cookie, csrf, { name: "s", type: "minio" }));
+    expect(s3.username).toBe("s_user");
+
+    // ผู้ใช้ระบุ RAM เองยังชนะค่า default ของ template
+    const av2 = await json(
+      await createSvc(app, cookie, csrf, { name: "av2", type: "clamav", memoryLimitMb: 2048 }),
+    );
+    expect(av2.memoryLimitMb).toBe(2048);
+  });
+
   test("สร้างงาน provision ให้ worker หนึ่งงาน", async () => {
     const { app, db, cookie, csrf } = await setup();
     await createSvc(app, cookie, csrf, { name: "db1", type: "redis" });

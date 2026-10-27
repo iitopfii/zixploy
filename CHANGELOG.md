@@ -9,6 +9,25 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.1.23] — 2026-10-27
+
+### Added
+- **PostgreSQL + pgvector, MinIO และ ClamAV ในหน้า Databases** — ระบบที่ต้องใช้ vector search,
+  ที่เก็บไฟล์ หรือตัวสแกนไวรัส เดิมต้องรันด้วย docker compose แยกเอง เพราะ Postgres สำเร็จรูป
+  ไม่มี pgvector และโหมด compose ยังไม่เก็บข้อมูลข้ามรอบ deploy · ตอนนี้กดสร้างได้จากหน้า
+  Databases ทั้งสามตัว ได้ volume ถาวร, backup/restore และ log เหมือน database อื่น
+  - **PostgreSQL + pgvector** (pg17/pg16) — ใช้ `CREATE EXTENSION vector` ได้ทันที
+  - **MinIO** — S3 API ที่ port 9000 หน้าข้อมูลเชื่อมต่อแสดงเป็น access key / secret key
+  - **ClamAV** — clamd ที่ port 3310 จอง RAM 1600 MB และรอโหลด signature ครั้งแรกได้นานสุด
+    10 นาที · ไม่มีรหัสผ่าน หน้าเว็บจึงเตือนชัดขึ้นถ้าจะเปิด port ออกภายนอก
+
+### Changed
+- migration ที่ต้องสร้างตารางใหม่ทับตารางที่มีตารางอื่นอ้างอิงอยู่ ปิด foreign key ชั่วคราว
+  ระหว่างรัน แล้วตรวจความถูกต้องก่อนบันทึก — กันประวัติ backup/log ของ database ถูกลบตาม
+  ตอนอัปเกรด
+
+---
+
 ## [0.1.22] — 2026-08-21
 
 ### Fixed

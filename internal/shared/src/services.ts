@@ -24,11 +24,23 @@ export const SERVICE_TYPES = [
   "redis",
   "mongodb",
   "libsql",
+  "pgvector",
+  "minio",
+  "clamav",
 ] as const;
 
 export type ServiceType = (typeof SERVICE_TYPES)[number];
 
-export type ServiceCategory = "sql" | "nosql" | "cache";
+export type ServiceCategory = "sql" | "nosql" | "cache" | "storage" | "security";
+
+/**
+ * credential ไหนมีความหมายกับ service ชนิดนี้ — UI ใช้ซ่อนช่องที่ไม่เกี่ยว
+ * - "full": username + password + database (database ทั่วไป)
+ * - "user-password": ไม่มีชื่อ database (MinIO ใช้เป็น access key / secret key)
+ * - "none": ไม่มี auth เลย (ClamAV) — เข้าถึงได้เฉพาะใน Docker network เท่านั้น
+ * ฝั่ง DB ยังเก็บ username/password ไว้ตามปกติเพื่อไม่ให้ schema ต้องแยกกรณี
+ */
+export type CredentialMode = "full" | "user-password" | "none";
 
 /**
  * ค่าที่ generate ตอนสร้าง service — เก็บเข้ารหัสใน DB
@@ -89,6 +101,25 @@ export interface ServiceTemplate {
    * ใช้ terminalShellFor()/serviceSupportsTerminal() แทนการเรียกตรง เพื่อ handle default ให้ถูก
    */
   terminalShell?(): string | null;
+  /** ปล่อยว่าง = "full" — ดู CredentialMode */
+  credentialMode?: CredentialMode;
+  /**
+   * memory limit เริ่มต้นของ template นี้ ปล่อยว่าง = SERVICE_SETTINGS.defaultMemoryMb
+   * (ClamAV โหลด signature ทั้งชุดเข้า RAM ~1 GB — ใช้ค่า default 512 MB แล้วโดน OOM kill ทันที)
+   */
+  defaultMemoryMb?: number;
+  /**
+   * ช่วงเวลาหลัง start ที่ healthcheck fail ไม่นับ (วินาที) และเวลารอ ready สูงสุดของ worker (ms)
+   * ปล่อยว่าง = 60 วินาที / SERVICE_SETTINGS.readyTimeoutMs — ClamAV ครั้งแรกต้องโหลด signature
+   * หลายร้อย MB จากอินเทอร์เน็ตก่อน clamd จะตอบได้ ใช้เวลาหลายนาที
+   */
+  healthStartPeriodSec?: number;
+  readyTimeoutMs?: number;
+  /**
+   * username ต้องยาวอย่างน้อยเท่านี้ — ชื่อสั้นกว่าจะถูกเติม suffix ตอนสร้าง (MinIO ต้อง ≥ 3 ตัว)
+   * ใช้ resolveUsername() แทนการอ่านตรง
+   */
+  minUsernameLength?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -284,6 +315,71 @@ const LIBSQL: ServiceTemplate = {
   terminalShell: () => null,
 };
 
+// image ต่อยอดจาก postgres official (Debian) — env, healthcheck และ pg_dump ใช้ชุดเดียวกันได้ทั้งหมด
+// แยกเป็นชนิดของตัวเองแทนการเพิ่ม version ใน POSTGRES เพราะ image repository คนละตัว
+const PGVECTOR: ServiceTemplate = {
+  ...POSTGRES,
+  type: "pgvector",
+  displayName: "PostgreSQL + pgvector",
+  tagline: "PostgreSQL ที่มี extension vector ในตัว เหมาะกับ embedding/AI search",
+  image: "pgvector/pgvector",
+  versions: ["pg17", "pg16"],
+};
+
+const MINIO: ServiceTemplate = {
+  type: "minio",
+  displayName: "MinIO",
+  tagline: "object storage ที่ใช้ S3 API ได้ เก็บไฟล์ที่ผู้ใช้อัปโหลด",
+  category: "storage",
+  // MinIO หยุดปล่อย image บน Docker Hub แล้ว — ใช้ build จาก source ของ pgsty ที่ปักเวอร์ชัน
+  image: "pgsty/minio",
+  versions: ["RELEASE.2026-08-04T00-00-00Z"],
+  internalPort: 9000,
+  dataPath: "/data",
+  // S3 endpoint — client ใช้ access key/secret key แยกจาก URL
+  uriScheme: "http",
+  usesUriCredentials: false,
+  credentialMode: "user-password",
+  minUsernameLength: 3,
+  env: (c) => ({
+    MINIO_ROOT_USER: c.username,
+    MINIO_ROOT_PASSWORD: c.password,
+  }),
+  // console อยู่ที่ 9001 ภายใน network — ไม่ publish ออก host (exposed_port ใช้กับ 9000 เท่านั้น)
+  command: () => ["server", "/data", "--console-address", ":9001"],
+  healthCmd: () => ["CMD-SHELL", "mc ready local"],
+  // ไม่มี dump tool ที่สมบูรณ์ (mc mirror ไม่เก็บ policy/user) — tar ทั้ง volume ครบกว่า
+  backupStrategy: () => ({ mode: "file-copy", fileExtension: "tar.gz" }),
+  defaultMemoryMb: 512,
+};
+
+const CLAMAV: ServiceTemplate = {
+  type: "clamav",
+  displayName: "ClamAV",
+  tagline: "สแกนไวรัสไฟล์ที่อัปโหลดผ่าน clamd (TCP 3310)",
+  category: "security",
+  image: "clamav/clamav-debian",
+  versions: ["1.5", "1.4"],
+  internalPort: 3310,
+  // signature database — เก็บไว้เพื่อไม่ต้องโหลดใหม่หลายร้อย MB ทุกครั้งที่ recreate
+  dataPath: "/var/lib/clamav",
+  // clamd protocol ไม่มี auth — ห้ามเปิด port ออกภายนอกถ้าไม่จำเป็น
+  uriScheme: "tcp",
+  usesUriCredentials: false,
+  credentialMode: "none",
+  env: () => ({
+    // ไม่โหลด signature ชุดใหม่คู่ขนานกับชุดเดิม — ไม่งั้น RAM ช่วง reload พุ่งเป็นสองเท่า
+    CLAMD_CONF_ConcurrentDatabaseReload: "no",
+  }),
+  // script ที่มากับ image — ส่ง PING ไปที่ clamd แล้วรอ PONG
+  healthCmd: () => ["CMD-SHELL", "clamdcheck.sh"],
+  // ข้อมูลใน volume คือ signature ที่โหลดใหม่ได้เสมอ แต่ให้ backup ได้เหมือนตัวอื่นเพื่อความสม่ำเสมอ
+  backupStrategy: () => ({ mode: "file-copy", fileExtension: "tar.gz" }),
+  defaultMemoryMb: 1600,
+  healthStartPeriodSec: 300,
+  readyTimeoutMs: 600_000,
+};
+
 export const SERVICE_CATALOG: Readonly<Record<ServiceType, ServiceTemplate>> = Object.freeze({
   postgres: POSTGRES,
   mysql: MYSQL,
@@ -291,6 +387,9 @@ export const SERVICE_CATALOG: Readonly<Record<ServiceType, ServiceTemplate>> = O
   redis: REDIS,
   mongodb: MONGODB,
   libsql: LIBSQL,
+  pgvector: PGVECTOR,
+  minio: MINIO,
+  clamav: CLAMAV,
 });
 
 // ---------------------------------------------------------------------------
@@ -312,6 +411,19 @@ export function getTemplate(type: ServiceType): ServiceTemplate {
 export function terminalShellFor(type: ServiceType): string | null {
   const template = getTemplate(type);
   return template.terminalShell ? template.terminalShell() : "sh";
+}
+
+export function credentialModeFor(type: ServiceType): CredentialMode {
+  return getTemplate(type).credentialMode ?? "full";
+}
+
+/**
+ * username ที่ใช้จริงกับ service ชนิดนี้ — เติม "_user" ถ้าสั้นกว่าที่ engine ยอมรับ
+ * (ชื่อ service ตัวอักษรเดียวผ่าน safeIdentifier มาแล้วยังสั้นเกินสำหรับ MinIO)
+ */
+export function resolveUsername(type: ServiceType, identifier: string): string {
+  const min = getTemplate(type).minUsernameLength ?? 1;
+  return identifier.length >= min ? identifier : `${identifier}_user`;
 }
 
 /** เปิด web terminal เข้า service ชนิดนี้ได้ไหม — false เมื่อ image ไม่มี shell (libsql) */

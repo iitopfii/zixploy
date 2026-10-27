@@ -12,9 +12,19 @@ export interface Migration {
   name: string; // "0001_init"
   up: string;
   down: string;
+  /**
+   * ไฟล์มี `-- migrate:disable-foreign-keys` — ปิด foreign_keys ระหว่างรัน (ทั้ง up และ down)
+   *
+   * จำเป็นเมื่อต้อง rebuild ตาราง parent ที่ตารางอื่นอ้างด้วย ON DELETE CASCADE: SQLite แก้ CHECK
+   * ตรง ๆ ไม่ได้ และ DROP TABLE ตอน foreign_keys เปิดอยู่ = DELETE ทุกแถว → cascade ลบตารางลูกหมด
+   * (ขั้นตอน 12 ข้อใน https://www.sqlite.org/lang_altertable.html#otheralter) PRAGMA นี้ตั้งใน
+   * transaction ไม่ได้ runner จึงตั้งให้ก่อนเปิด transaction แล้วรัน foreign_key_check ก่อน commit
+   */
+  disableForeignKeys: boolean;
 }
 
 const FILE_RE = /^(\d{4})_[a-z0-9_]+\.sql$/;
+const DISABLE_FK_DIRECTIVE = "-- migrate:disable-foreign-keys";
 
 export function parseMigrationFile(name: string, content: string): Migration {
   const match = FILE_RE.exec(name);
@@ -29,7 +39,39 @@ export function parseMigrationFile(name: string, content: string): Migration {
   const up = content.slice(upIndex + "-- migrate:up".length, downIndex).trim();
   const down = content.slice(downIndex + "-- migrate:down".length).trim();
   if (!up) throw new Error(`migration ${name} has empty up section`);
-  return { version: match[1], name: name.replace(/\.sql$/, ""), up, down };
+  return {
+    version: match[1],
+    name: name.replace(/\.sql$/, ""),
+    up,
+    down,
+    disableForeignKeys: content.slice(0, upIndex).includes(DISABLE_FK_DIRECTIVE),
+  };
+}
+
+/**
+ * รัน fn ใน transaction — ถ้า migration ขอปิด foreign_keys จะปิดก่อนเปิด transaction
+ * แล้วตรวจ foreign_key_check ภายใน transaction (เจอ = throw → rollback ทั้งไฟล์) และคืนค่าเดิมเสมอ
+ */
+function runMigrationStep(db: Database, migration: Migration, fn: () => void): void {
+  if (!migration.disableForeignKeys) {
+    db.transaction(fn)();
+    return;
+  }
+  const previous = db.query<{ foreign_keys: number }, []>("PRAGMA foreign_keys").get();
+  db.exec("PRAGMA foreign_keys = OFF;");
+  try {
+    db.transaction(() => {
+      fn();
+      const violations = db.query("PRAGMA foreign_key_check").all();
+      if (violations.length > 0) {
+        throw new Error(
+          `migration ${migration.name} left ${violations.length} foreign key violation(s): ${JSON.stringify(violations.slice(0, 5))}`,
+        );
+      }
+    })();
+  } finally {
+    db.exec(`PRAGMA foreign_keys = ${previous?.foreign_keys ? "ON" : "OFF"};`);
+  }
 }
 
 export function loadMigrations(dir: string): Migration[] {
@@ -69,7 +111,7 @@ export function migrateUp(db: Database, migrations: Migration[]): string[] {
   const ran: string[] = [];
   for (const migration of migrations) {
     if (applied.has(migration.version)) continue;
-    const run = db.transaction(() => {
+    runMigrationStep(db, migration, () => {
       db.exec(migration.up);
       db.query("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
         migration.version,
@@ -77,7 +119,6 @@ export function migrateUp(db: Database, migrations: Migration[]): string[] {
         Date.now(),
       );
     });
-    run();
     ran.push(migration.name);
   }
   return ran;
@@ -94,11 +135,10 @@ export function migrateDown(db: Database, migrations: Migration[], steps = 1): s
   for (const version of applied.reverse().slice(0, steps)) {
     const migration = byVersion.get(version);
     if (!migration) throw new Error(`applied migration ${version} not found on disk`);
-    const run = db.transaction(() => {
+    runMigrationStep(db, migration, () => {
       db.exec(migration.down);
       db.query("DELETE FROM schema_migrations WHERE version = ?").run(version);
     });
-    run();
     ran.push(migration.name);
   }
   return ran;

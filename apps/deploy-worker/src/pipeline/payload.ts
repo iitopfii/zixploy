@@ -7,10 +7,12 @@
 /**
  * source แยกตาม source_type ของ project (Phase 13) — 'github' ต้อง clone ผ่าน installation token,
  * 'dockerfile' ใช้เนื้อหาที่ผู้ใช้วางเองตรง ๆ ไม่มี clone/token เลย
+ * 'images' = โปรเจกต์ compose ที่ทุก component เป็น image/managed_ref — ไม่มีอะไรต้อง clone หรือ build
  */
 export type DeployJobSource =
   | { type: "github"; installationId: number; repoFullName: string }
-  | { type: "dockerfile"; dockerfileContent: string };
+  | { type: "dockerfile"; dockerfileContent: string }
+  | { type: "images" };
 
 export type DeployJobPayload =
   | {

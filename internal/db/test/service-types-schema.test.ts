@@ -24,6 +24,8 @@ import {
 
 const all = loadMigrations(migrationsDir());
 const before0029 = all.filter((m) => m.version < "0029");
+// up ถึง 0029 พอดี — rollback 1 ขั้นจะได้ย้อน 0029 จริง ไม่ใช่ migration ที่มาทีหลัง
+const through0029 = all.filter((m) => m.version <= "0029");
 
 type Db = ReturnType<typeof openDatabase>;
 
@@ -69,7 +71,8 @@ describe("0029 — directive", () => {
   test("parse directive ได้ และ foreign_keys กลับมาเปิดหลัง migrate", () => {
     const m = all.find((x) => x.version === "0029");
     expect(m?.disableForeignKeys).toBe(true);
-    expect(all.filter((x) => x.disableForeignKeys).map((x) => x.version)).toEqual(["0029"]);
+    // migration ที่ rebuild ตาราง parent ต้องปิด FK — 0030 (project_domains) ใช้ directive เดียวกัน
+    expect(all.filter((x) => x.disableForeignKeys).map((x) => x.version)).toContain("0029");
 
     const db = openDatabase({ path: ":memory:" });
     migrateUp(db, all);
@@ -128,13 +131,13 @@ describe("0029 — ข้อมูลลูกต้องไม่หาย", (
 
   test("rollback ทิ้งเฉพาะชนิดใหม่ ของเดิมและแถวลูกอยู่ครบ ไม่เหลือ orphan", () => {
     const db = openDatabase({ path: ":memory:" });
-    migrateUp(db, all);
+    migrateUp(db, through0029);
     insertService(db, "svc-pg", "postgres");
     insertChildren(db, "svc-pg");
     insertService(db, "svc-minio", "minio");
     insertChildren(db, "svc-minio");
 
-    migrateDown(db, all, 1);
+    migrateDown(db, through0029, 1);
 
     for (const table of CHILD_TABLES) {
       expect(count(db, table, "svc-pg")).toBe(1);

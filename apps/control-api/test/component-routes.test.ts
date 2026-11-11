@@ -452,3 +452,67 @@ describe("POST /projects/:id/compose/promote", () => {
     expect(mode?.mode).toBe("compose");
   });
 });
+
+describe("component hardening fields (0.1.24)", () => {
+  const ocr = {
+    name: "ocr",
+    sourceKind: "image",
+    imageRef: "ghcr.io/acme/ocr:1.0.0",
+    memoryLimitMb: 3584,
+  };
+
+  test("ค่าเริ่มต้น: ไม่ตั้ง hardening", async () => {
+    const { app, cookie, csrf, projectId } = await setup();
+    const body = await json(
+      await post(app, `/api/v1/projects/${projectId}/components`, cookie, csrf, ocr),
+    );
+    expect(body.capDropAll).toBe(false);
+    expect(body.noNewPrivileges).toBe(false);
+    expect(body.memorySwapMb).toBeNull();
+    expect(body.pidsLimit).toBeNull();
+  });
+
+  test("ตั้งครบตอนสร้าง และแก้ทีหลังได้", async () => {
+    const { app, cookie, csrf, projectId } = await setup();
+    const res = await post(app, `/api/v1/projects/${projectId}/components`, cookie, csrf, {
+      ...ocr,
+      memorySwapMb: 3584,
+      pidsLimit: 256,
+      capDropAll: true,
+      noNewPrivileges: true,
+    });
+    expect(res.status).toBe(201);
+    const created = await json(res);
+    expect(created).toMatchObject({
+      memorySwapMb: 3584,
+      pidsLimit: 256,
+      capDropAll: true,
+      noNewPrivileges: true,
+    });
+    const updated = await json(
+      await patch(app, `/api/v1/projects/${projectId}/components/${created.id}`, cookie, csrf, {
+        capDropAll: false,
+        memorySwapMb: null,
+      }),
+    );
+    expect(updated.capDropAll).toBe(false);
+    expect(updated.memorySwapMb).toBeNull();
+    expect(updated.noNewPrivileges).toBe(true);
+  });
+
+  test("memorySwapMb น้อยกว่า memory หรือไม่มี memory → 422", async () => {
+    const { app, cookie, csrf, projectId } = await setup();
+    const lower = await post(app, `/api/v1/projects/${projectId}/components`, cookie, csrf, {
+      ...ocr,
+      memorySwapMb: 1024,
+    });
+    expect(lower.status).toBe(422);
+    const noMem = await post(app, `/api/v1/projects/${projectId}/components`, cookie, csrf, {
+      name: "ocr2",
+      sourceKind: "image",
+      imageRef: "ghcr.io/acme/ocr:1.0.0",
+      memorySwapMb: 1024,
+    });
+    expect(noMem.status).toBe(422);
+  });
+});

@@ -71,6 +71,74 @@ async function readWithGracePeriod(stream: ReadableStream<Uint8Array> | null): P
   ]);
 }
 
+/**
+ * argv ของ `docker create` (ไม่รวมคำว่า docker) — แยกเป็น pure function ให้ทดสอบ flag ได้โดยไม่ต้องมี daemon
+ * ผ่าน assertDockerArgsSafe ก่อนต่อ image/cmd เสมอ (image/cmd ไม่ใช่ flag จึงอยู่หลังการตรวจ)
+ */
+export function buildCreateArgs(params: ContainerCreateParams): string[] {
+  assertContainerConfigSafe(params);
+
+  const args = [
+    "create",
+    "--name",
+    params.name,
+    "--network",
+    params.networkName,
+    "--restart",
+    params.restartPolicy,
+    "--pids-limit",
+    String(params.pidsLimit ?? 512),
+  ];
+  // DNS alias บน network หลัก (Phase 18) — ใส่หลัง --network เพื่ออ่านง่าย ค่าถูก validate แล้ว
+  for (const alias of params.networkAliases ?? []) args.push("--network-alias", alias);
+  for (const [k, v] of Object.entries(params.labels)) args.push("--label", `${k}=${v}`);
+  if (params.env) {
+    for (const [k, v] of Object.entries(params.env)) args.push("-e", `${k}=${v}`);
+  }
+  if (params.cpuLimit != null) args.push("--cpus", String(params.cpuLimit));
+  if (params.memoryLimitMb != null) args.push("--memory", `${params.memoryLimitMb}m`);
+  // --memory-swap โดยไม่มี --memory Docker ปฏิเสธ — ข้ามแทนการ fail ทั้ง deploy (API กันไว้อีกชั้น)
+  if (params.memorySwapMb != null && params.memoryLimitMb != null) {
+    args.push("--memory-swap", `${params.memorySwapMb}m`);
+  }
+  if (params.capDropAll) args.push("--cap-drop", "ALL");
+  if (params.noNewPrivileges) args.push("--security-opt", "no-new-privileges:true");
+  // Named volume mounts — Docker volume ต้องมีอยู่แล้วก่อน createContainer (Phase 7)
+  for (const v of params.volumes ?? []) {
+    // --mount format: type=volume,source=<name>,target=<path>[,readonly]
+    // ห้ามใช้ --volume/-v เพราะ --mount ชัดเจนกว่า และไม่สร้าง anonymous volume โดยไม่ตั้งใจ
+    const spec = `type=volume,source=${v.dockerName},target=${v.mountPath}${v.readOnly ? ",readonly" : ""}`;
+    args.push("--mount", spec);
+  }
+  // Phase 10 — publish port ออก host สำหรับ managed service ที่ผู้ใช้เลือกเปิด
+  for (const p of params.publishPorts ?? []) {
+    args.push("--publish", `${p.hostPort}:${p.containerPort}`);
+  }
+  if (params.healthCheck) {
+    const hc = params.healthCheck;
+    args.push(
+      // cmd ถูกส่งเป็น argument เดี่ยว ๆ ไม่ใช่ shell string — Docker เก็บเป็น CMD-SHELL เอง
+      // เมื่อขึ้นต้นด้วย "CMD-SHELL" (ดู healthCmd() ใน service catalog)
+      "--health-cmd",
+      hc.cmd[0] === "CMD-SHELL" ? hc.cmd.slice(1).join(" ") : hc.cmd.join(" "),
+      "--health-interval",
+      `${hc.intervalSec}s`,
+      "--health-timeout",
+      `${hc.timeoutSec}s`,
+      "--health-retries",
+      String(hc.retries),
+      "--health-start-period",
+      `${hc.startPeriodSec}s`,
+    );
+  }
+
+  assertDockerArgsSafe(args);
+
+  args.push(params.image);
+  if (params.cmd) args.push(...params.cmd);
+  return args;
+}
+
 /** credential ของ registry หนึ่งตัว (ถอดรหัสแล้ว) — ห้าม log */
 export interface RegistryAuth {
   registry: string;
@@ -197,61 +265,7 @@ export class DockerCliClient {
   }
 
   async createContainer(params: ContainerCreateParams): Promise<{ containerId: string }> {
-    assertContainerConfigSafe(params);
-
-    const args = [
-      "create",
-      "--name",
-      params.name,
-      "--network",
-      params.networkName,
-      "--restart",
-      params.restartPolicy,
-      "--pids-limit",
-      String(params.pidsLimit ?? 512),
-    ];
-    // DNS alias บน network หลัก (Phase 18) — ใส่หลัง --network เพื่ออ่านง่าย ค่าถูก validate แล้ว
-    for (const alias of params.networkAliases ?? []) args.push("--network-alias", alias);
-    for (const [k, v] of Object.entries(params.labels)) args.push("--label", `${k}=${v}`);
-    if (params.env) {
-      for (const [k, v] of Object.entries(params.env)) args.push("-e", `${k}=${v}`);
-    }
-    if (params.cpuLimit != null) args.push("--cpus", String(params.cpuLimit));
-    if (params.memoryLimitMb != null) args.push("--memory", `${params.memoryLimitMb}m`);
-    // Named volume mounts — Docker volume ต้องมีอยู่แล้วก่อน createContainer (Phase 7)
-    for (const v of params.volumes ?? []) {
-      // --mount format: type=volume,source=<name>,target=<path>[,readonly]
-      // ห้ามใช้ --volume/-v เพราะ --mount ชัดเจนกว่า และไม่สร้าง anonymous volume โดยไม่ตั้งใจ
-      const spec = `type=volume,source=${v.dockerName},target=${v.mountPath}${v.readOnly ? ",readonly" : ""}`;
-      args.push("--mount", spec);
-    }
-    // Phase 10 — publish port ออก host สำหรับ managed service ที่ผู้ใช้เลือกเปิด
-    for (const p of params.publishPorts ?? []) {
-      args.push("--publish", `${p.hostPort}:${p.containerPort}`);
-    }
-    if (params.healthCheck) {
-      const hc = params.healthCheck;
-      args.push(
-        // cmd ถูกส่งเป็น argument เดี่ยว ๆ ไม่ใช่ shell string — Docker เก็บเป็น CMD-SHELL เอง
-        // เมื่อขึ้นต้นด้วย "CMD-SHELL" (ดู healthCmd() ใน service catalog)
-        "--health-cmd",
-        hc.cmd[0] === "CMD-SHELL" ? hc.cmd.slice(1).join(" ") : hc.cmd.join(" "),
-        "--health-interval",
-        `${hc.intervalSec}s`,
-        "--health-timeout",
-        `${hc.timeoutSec}s`,
-        "--health-retries",
-        String(hc.retries),
-        "--health-start-period",
-        `${hc.startPeriodSec}s`,
-      );
-    }
-
-    assertDockerArgsSafe(args);
-
-    args.push(params.image);
-    if (params.cmd) args.push(...params.cmd);
-
+    const args = buildCreateArgs(params);
     const result = await this.exec(args);
     if (result.code !== 0) {
       throw new AppError("DOCKER_UNAVAILABLE", `docker create ล้มเหลว: ${truncate(result.stderr)}`);

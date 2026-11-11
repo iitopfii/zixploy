@@ -369,6 +369,10 @@ export async function runComposePipeline(
         ...(c.command ? { cmd: [c.command] } : {}),
         cpuLimit: c.cpuLimit,
         memoryLimitMb: c.memoryLimitMb,
+        memorySwapMb: c.memorySwapMb,
+        ...(c.pidsLimit != null ? { pidsLimit: c.pidsLimit } : {}),
+        capDropAll: c.capDropAll,
+        noNewPrivileges: c.noNewPrivileges,
         restartPolicy: c.restartPolicy,
         env: componentEnv,
         ...(volumes.length > 0

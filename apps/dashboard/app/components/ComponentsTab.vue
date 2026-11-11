@@ -41,6 +41,10 @@ interface Component {
   healthCmd: string | null;
   cpuLimit: number | null;
   memoryLimitMb: number | null;
+  memorySwapMb: number | null;
+  pidsLimit: number | null;
+  capDropAll: boolean;
+  noNewPrivileges: boolean;
   restartPolicy: string;
   position: number;
   enabled: boolean;
@@ -116,6 +120,10 @@ const blankForm = () => ({
   healthCmd: "",
   cpuLimit: "",
   memoryLimitMb: "",
+  memorySwapMb: "",
+  pidsLimit: "",
+  capDropAll: false,
+  noNewPrivileges: false,
   restartPolicy: "unless-stopped" as string,
 });
 const form = reactive(blankForm());
@@ -160,6 +168,10 @@ function openEdit(c: Component) {
     healthCheckPath: c.healthCheckPath ?? "",
     cpuLimit: c.cpuLimit != null ? String(c.cpuLimit) : "",
     memoryLimitMb: c.memoryLimitMb != null ? String(c.memoryLimitMb) : "",
+    memorySwapMb: c.memorySwapMb != null ? String(c.memorySwapMb) : "",
+    pidsLimit: c.pidsLimit != null ? String(c.pidsLimit) : "",
+    capDropAll: c.capDropAll,
+    noNewPrivileges: c.noNewPrivileges,
     restartPolicy: c.restartPolicy,
   });
   for (const d of c.dependsOn) depSelections[d.name] = d.condition;
@@ -210,6 +222,10 @@ function buildPayload() {
     healthCmd: form.healthCmd.trim() === "" ? null : form.healthCmd.trim(),
     cpuLimit: toNum(form.cpuLimit),
     memoryLimitMb: toNum(form.memoryLimitMb),
+    memorySwapMb: toNum(form.memorySwapMb),
+    pidsLimit: toNum(form.pidsLimit),
+    capDropAll: form.capDropAll,
+    noNewPrivileges: form.noNewPrivileges,
   };
 
   if (form.sourceKind === "build") {
@@ -604,6 +620,29 @@ function sourceSummary(c: Component): string {
                 <option value="always">always</option>
                 <option value="no">no</option>
               </select>
+            </label>
+            <label>
+              <span>Memory + swap MB (ไม่บังคับ)</span>
+              <input
+                v-model="form.memorySwapMb"
+                class="mono"
+                placeholder="เท่ากับ memory = ไม่ให้ swap"
+                inputmode="numeric"
+              />
+            </label>
+            <label>
+              <span>PID limit (ไม่บังคับ)</span>
+              <input v-model="form.pidsLimit" class="mono" placeholder="512" inputmode="numeric" />
+            </label>
+          </div>
+          <div class="check-row">
+            <input id="comp-cap-drop" v-model="form.capDropAll" type="checkbox" />
+            <label for="comp-cap-drop">ตัด Linux capability ทั้งหมด (<code>--cap-drop ALL</code>)</label>
+          </div>
+          <div class="check-row">
+            <input id="comp-nnp" v-model="form.noNewPrivileges" type="checkbox" />
+            <label for="comp-nnp">
+              ห้ามยกระดับสิทธิ์ใน container (<code>no-new-privileges</code>)
             </label>
           </div>
         </template>

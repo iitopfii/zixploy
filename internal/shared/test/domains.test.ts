@@ -3,7 +3,13 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { buildTraefikLabels, validateHostname } from "../src/domains";
+import {
+  buildTraefikLabels,
+  componentServiceName,
+  projectServiceName,
+  validateHostname,
+  validatePathPrefix,
+} from "../src/domains";
 
 // ---------------------------------------------------------------------------
 // validateHostname
@@ -476,5 +482,96 @@ describe("buildTraefikLabels — tlsMode", () => {
     expect(labels["traefik.http.routers.auto-example-com.tls.certresolver"]).toBe("letsencrypt");
     expect(labels["traefik.http.routers.manual-example-com.tls.certresolver"]).toBeUndefined();
     expect(labels["traefik.http.routers.manual-example-com.tls"]).toBe("true");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// path prefix + per-component service (0.1.24)
+// ---------------------------------------------------------------------------
+
+describe("validatePathPrefix", () => {
+  test("normalize ให้ปิดท้ายด้วย / เสมอ", () => {
+    expect(validatePathPrefix("/api")).toBe("/api/");
+    expect(validatePathPrefix(" /api/ ")).toBe("/api/");
+    expect(validatePathPrefix("/v1/files")).toBe("/v1/files/");
+  });
+
+  test.each([
+    ["api", "ขึ้นต้นด้วย /"],
+    ["/", "ทั้ง host"],
+    ["/a//b", "segment ว่าง"],
+    ["/a/../b", '"." หรือ ".."'],
+    ["/api?x=1", "ตัวอักษรที่ไม่รองรับ"],
+    ["/api`) || Host(`evil.com", "ตัวอักษรที่ไม่รองรับ"],
+    [`/${"a".repeat(130)}`, "ยาวเกิน 128"],
+  ])("ปฏิเสธ %p", (input, message) => {
+    expect(() => validatePathPrefix(input)).toThrow(message);
+  });
+});
+
+describe("buildTraefikLabels — path prefix", () => {
+  const api = {
+    hostname: "app.example.com",
+    pathPrefix: "/api/",
+    internalPort: 3001,
+    httpsEnabled: true,
+    redirectHttp: true,
+    redirectMode: "none" as const,
+  };
+
+  test("rule มี PathPrefix ทั้ง router https และ redirect http", () => {
+    const labels = buildTraefikLabels([api], PROJECT_ID);
+    const rules = Object.entries(labels).filter(([k]) => k.endsWith(".rule"));
+    expect(rules).toHaveLength(2);
+    for (const [, rule] of rules) {
+      expect(rule).toBe("Host(`app.example.com`) && PathPrefix(`/api/`)");
+    }
+  });
+
+  test("ชื่อ router ไม่ชนกับแถวทั้ง host และ path ต่างกันได้ชื่อต่างกัน", () => {
+    const whole = buildTraefikLabels([{ ...api, pathPrefix: null }], PROJECT_ID);
+    const p1 = buildTraefikLabels([api], PROJECT_ID);
+    const p2 = buildTraefikLabels([{ ...api, pathPrefix: "/admin/" }], PROJECT_ID);
+    const routerNames = (l: Record<string, string>) =>
+      Object.keys(l)
+        .filter((k) => k.endsWith(".rule"))
+        .map((k) => k.split(".")[3]);
+    const all = [...routerNames(whole), ...routerNames(p1), ...routerNames(p2)];
+    expect(new Set(all).size).toBe(all.length);
+    expect(routerNames(whole)).toContain("app-example-com");
+  });
+
+  test("แถว path ไม่สร้าง redirect www/root", () => {
+    const labels = buildTraefikLabels(
+      [{ ...api, redirectMode: "www_to_root" as const }],
+      PROJECT_ID,
+    );
+    expect(Object.keys(labels).some((k) => k.includes("www"))).toBe(false);
+  });
+});
+
+describe("buildTraefikLabels — serviceName", () => {
+  const domain = {
+    hostname: "app.example.com",
+    internalPort: 3000,
+    httpsEnabled: true,
+    redirectHttp: false,
+    redirectMode: "none" as const,
+  };
+
+  test("ไม่ระบุ → service ระดับ project ชื่อเดิม", () => {
+    const labels = buildTraefikLabels([domain], PROJECT_ID);
+    expect(labels["traefik.http.routers.app-example-com.service"]).toBe(
+      projectServiceName(PROJECT_ID),
+    );
+    expect(projectServiceName(PROJECT_ID)).toBe("zx-000000000001");
+  });
+
+  test("ระบุ → router และ loadbalancer ใช้ชื่อนั้น", () => {
+    const svc = componentServiceName(PROJECT_ID, "01JCOMPONENT0000000000000A9");
+    const labels = buildTraefikLabels([domain], PROJECT_ID, { serviceName: svc });
+    expect(labels["traefik.http.routers.app-example-com.service"]).toBe(svc);
+    expect(labels[`traefik.http.services.${svc}.loadbalancer.server.port`]).toBe("3000");
+    expect(svc).toBe("zx-000000000001-0000000000a9");
   });
 });

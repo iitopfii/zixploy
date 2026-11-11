@@ -150,6 +150,41 @@ export function validateHostname(raw: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Path prefix validation
+// ---------------------------------------------------------------------------
+
+/** แต่ละ segment ของ path prefix — ตัวอักษรที่ปลอดภัยใน URL path และใน Traefik rule (ไม่มี backtick) */
+const PATH_SEGMENT = /^[A-Za-z0-9._~-]+$/;
+
+/**
+ * ตรวจสอบและ normalize path prefix ของ domain (route เฉพาะ path ที่ขึ้นต้นด้วยค่านี้)
+ *
+ * คืนรูปแบบ "/a/b/" เสมอ (ปิดท้ายด้วย /) — "/api" กับ "/api/" จึงเป็นค่าเดียวกัน และไม่ match
+ * "/apikeys" โดยไม่ตั้งใจ (Traefik PathPrefix เทียบแบบ string prefix ตรง ๆ)
+ *
+ * ปฏิเสธ: ไม่ขึ้นต้นด้วย /, "/" เดี่ยว ๆ (ใช้ "ทั้ง host" แทน), segment ว่าง (//), "." / "..",
+ * ตัวอักษรนอก [A-Za-z0-9._~-] (กัน query, fragment, backtick ที่จะหลุดออกจาก rule), ยาวเกิน 128
+ */
+export function validatePathPrefix(raw: string): string {
+  const input = raw.trim();
+  if (!input.startsWith("/")) throw new Error("path prefix ต้องขึ้นต้นด้วย /");
+  const segments = input.replace(/\/$/, "").split("/").slice(1);
+  if (segments.length === 0 || segments[0] === "") {
+    throw new Error('path prefix "/" คือทั้ง host — เว้นช่องนี้ว่างแทน');
+  }
+  for (const seg of segments) {
+    if (seg === "") throw new Error("path prefix ต้องไม่มี segment ว่าง (//)");
+    if (seg === "." || seg === "..") throw new Error('path prefix ต้องไม่มี "." หรือ ".."');
+    if (!PATH_SEGMENT.test(seg)) {
+      throw new Error(`path prefix มีตัวอักษรที่ไม่รองรับ: "${seg}" (ใช้ได้เฉพาะ A-Z a-z 0-9 . _ ~ -)`);
+    }
+  }
+  const normalized = `/${segments.join("/")}/`;
+  if (normalized.length > 128) throw new Error("path prefix ยาวเกิน 128 ตัวอักษร");
+  return normalized;
+}
+
+// ---------------------------------------------------------------------------
 // Traefik label generation
 // ---------------------------------------------------------------------------
 
@@ -173,6 +208,39 @@ export interface DomainConfig {
   redirectMode: "none" | "www_to_root" | "root_to_www";
   /** ไม่ระบุ → 'letsencrypt' (พฤติกรรมเดิมก่อน M5) */
   tlsMode?: TlsMode;
+  /** ผ่าน validatePathPrefix แล้ว ("/api/") — ไม่ระบุ/null = ทั้ง host */
+  pathPrefix?: string | null;
+  /** component ที่ domain นี้ชี้ไป (compose) — null = ไม่ได้ระบุ (single mode หรือ web หลักของ compose) */
+  componentId?: string | null;
+}
+
+export interface TraefikLabelOptions {
+  /**
+   * ชื่อ Traefik service ที่ router ชี้ไป — ไม่ระบุ = ชื่อระดับ project (พฤติกรรมเดิม)
+   * compose ที่มีหลาย web component ต้องให้แต่ละตัวมี service ของตัวเอง ไม่งั้น router ของทุกตัว
+   * ชี้ไป service เดียวกันแล้ว Traefik กระจาย request ข้าม component มั่ว
+   */
+  serviceName?: string;
+}
+
+/** service name ระดับ project — ชื่อเดิมก่อนมี per-component routing (ห้ามเปลี่ยน: label ของ container ที่รันอยู่อ้างอยู่) */
+export function projectServiceName(projectId: string): string {
+  return `zx-${projectId.slice(-12).toLowerCase()}`;
+}
+
+/** service name ของ component หนึ่งตัวในโปรเจกต์ compose */
+export function componentServiceName(projectId: string, componentId: string): string {
+  return `${projectServiceName(projectId)}-${componentId.slice(-12).toLowerCase()}`;
+}
+
+/** FNV-1a 32-bit → hex 8 ตัว — ใช้ทำชื่อ router ให้ unique ต่อ path (ไม่ใช่ crypto, shared ต้องรันใน browser ได้) */
+function shortHash(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
 }
 
 /**
@@ -211,6 +279,9 @@ function routerSafeName(hostname: string): string {
  * www/root redirect (ถ้า redirectMode != 'none'):
  *   เพิ่ม router สำหรับ source domain + middleware redirectregex
  *
+ * path prefix (pathPrefix="/api/"): rule = Host(`h`) && PathPrefix(`/api/`) และชื่อ router มี hash ของ
+ * path ต่อท้าย — Traefik ให้ priority ตามความยาว rule อยู่แล้ว แถว path จึงชนะแถว "ทั้ง host" เสมอ
+ *
  * @param domains - รายการ domain ที่ enabled=true เท่านั้น
  * @param projectId - ULID — ใช้สร้าง service name ที่ unique ต่อ project
  * @returns Record<string, string> ที่ใส่ใน createContainer labels ได้ทันที
@@ -218,6 +289,7 @@ function routerSafeName(hostname: string): string {
 export function buildTraefikLabels(
   domains: DomainConfig[],
   projectId: string,
+  options: TraefikLabelOptions = {},
 ): Record<string, string> {
   if (domains.length === 0) return {};
 
@@ -227,7 +299,7 @@ export function buildTraefikLabels(
 
   // service name unique ต่อ project (ไม่ต่อ deployment — service ชี้ไปที่ port ของ container)
   // ใช้ 12 chars สุดท้ายของ projectId (ULID sortable part) เพื่อให้ unique + อ่านง่าย
-  const svcName = `zx-${projectId.slice(-12).toLowerCase()}`;
+  const svcName = options.serviceName ?? projectServiceName(projectId);
 
   /**
    * ตั้ง TLS labels ให้ router หนึ่งตัว
@@ -245,12 +317,19 @@ export function buildTraefikLabels(
   };
 
   for (const domain of domains) {
-    const name = routerSafeName(domain.hostname);
+    const path = domain.pathPrefix ?? null;
+    // แถว path ใช้ชื่อ host เดียวกับแถว "ทั้ง host" ไม่ได้ (ชื่อ router ต้อง unique ทั้ง Traefik) — เติม hash ของ path
+    const name = path
+      ? `${routerSafeName(domain.hostname).slice(0, 53)}-p${shortHash(path)}`
+      : routerSafeName(domain.hostname);
     const tlsMode: TlsMode = domain.tlsMode ?? "letsencrypt";
+    const rule = path
+      ? `Host(\`${domain.hostname}\`) && PathPrefix(\`${path}\`)`
+      : `Host(\`${domain.hostname}\`)`;
 
     if (domain.httpsEnabled) {
       // HTTPS router
-      labels[`traefik.http.routers.${name}.rule`] = `Host(\`${domain.hostname}\`)`;
+      labels[`traefik.http.routers.${name}.rule`] = rule;
       labels[`traefik.http.routers.${name}.entrypoints`] = "websecure";
       applyTls(name, tlsMode);
       labels[`traefik.http.routers.${name}.service`] = svcName;
@@ -258,7 +337,7 @@ export function buildTraefikLabels(
       // HTTP → HTTPS redirect
       if (domain.redirectHttp) {
         const mw = `${name}-https-redirect`;
-        labels[`traefik.http.routers.${name}-http.rule`] = `Host(\`${domain.hostname}\`)`;
+        labels[`traefik.http.routers.${name}-http.rule`] = rule;
         labels[`traefik.http.routers.${name}-http.entrypoints`] = "web";
         labels[`traefik.http.routers.${name}-http.middlewares`] = mw;
         labels[`traefik.http.middlewares.${mw}.redirectscheme.scheme`] = "https";
@@ -266,13 +345,13 @@ export function buildTraefikLabels(
       }
     } else {
       // HTTP only router (ไม่มี TLS)
-      labels[`traefik.http.routers.${name}.rule`] = `Host(\`${domain.hostname}\`)`;
+      labels[`traefik.http.routers.${name}.rule`] = rule;
       labels[`traefik.http.routers.${name}.entrypoints`] = "web";
       labels[`traefik.http.routers.${name}.service`] = svcName;
     }
 
-    // www ↔ root redirect (เพิ่ม router แยก + regex middleware)
-    if (domain.redirectMode === "www_to_root") {
+    // www ↔ root redirect (เพิ่ม router แยก + regex middleware) — แถว path ไม่มี (DB CHECK กันไว้)
+    if (!path && domain.redirectMode === "www_to_root") {
       // www.example.com → example.com
       const wwwHost = `www.${domain.hostname}`;
       const wwwName = routerSafeName(wwwHost);
@@ -289,7 +368,7 @@ export function buildTraefikLabels(
       labels[`traefik.http.middlewares.${mw}.redirectregex.replacement`] =
         `${domain.httpsEnabled ? "https" : "http"}://${domain.hostname}/\${1}`;
       labels[`traefik.http.middlewares.${mw}.redirectregex.permanent`] = "true";
-    } else if (domain.redirectMode === "root_to_www") {
+    } else if (!path && domain.redirectMode === "root_to_www") {
       // example.com → www.example.com
       const wwwHost = `www.${domain.hostname}`;
       const mw = `${name}-root-to-www`;

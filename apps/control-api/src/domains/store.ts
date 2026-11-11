@@ -16,6 +16,8 @@ export interface DomainRow {
   id: string;
   project_id: string;
   hostname: string;
+  path_prefix: string | null;
+  component_id: string | null;
   internal_port: number;
   https_enabled: number;
   redirect_http: number;
@@ -38,6 +40,10 @@ export interface DomainDto {
   id: string;
   projectId: string;
   hostname: string;
+  /** "/api/" = route เฉพาะ path นี้ · null = ทั้ง host */
+  pathPrefix: string | null;
+  /** component ที่รับ traffic (compose) · null = web ตัวแรกของโปรเจกต์ / single mode */
+  componentId: string | null;
   internalPort: number;
   httpsEnabled: boolean;
   redirectHttp: boolean;
@@ -60,6 +66,8 @@ function toDto(row: DomainRow): DomainDto {
     id: row.id,
     projectId: row.project_id,
     hostname: row.hostname,
+    pathPrefix: row.path_prefix,
+    componentId: row.component_id,
     internalPort: row.internal_port,
     httpsEnabled: row.https_enabled === 1,
     redirectHttp: row.redirect_http === 1,
@@ -78,7 +86,7 @@ function toDto(row: DomainRow): DomainDto {
 // ไม่ SELECT tls_cert_ciphertext/tls_key_ciphertext โดยตั้งใจ — DomainDto ไหลออก HTTP
 // การไม่ดึงมาตั้งแต่ต้นทำให้ leak โดยพลาดเป็นไปไม่ได้ (ดู tls-store.ts สำหรับ path ที่ต้องใช้จริง)
 const SELECT_ALL = `
-  id, project_id, hostname, internal_port,
+  id, project_id, hostname, path_prefix, component_id, internal_port,
   https_enabled, redirect_http, redirect_mode,
   dns_status, dns_checked_at,
   tls_mode, tls_cert_fingerprint, tls_cert_not_after,
@@ -108,6 +116,8 @@ export function getDomain(db: Database, id: string): DomainRow | null {
 
 export interface CreateDomainInput {
   hostname: string; // ต้องผ่าน validateHostname() แล้ว
+  pathPrefix?: string | null; // ต้องผ่าน validatePathPrefix() แล้ว
+  componentId?: string | null; // caller ตรวจแล้วว่าเป็น web component ของ project นี้
   internalPort: number;
   httpsEnabled?: boolean;
   redirectHttp?: boolean;
@@ -121,12 +131,14 @@ export function createDomain(db: Database, projectId: string, input: CreateDomai
   try {
     db.query(
       `INSERT INTO project_domains
-        (id, project_id, hostname, internal_port, https_enabled, redirect_http, redirect_mode, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, project_id, hostname, path_prefix, component_id, internal_port, https_enabled, redirect_http, redirect_mode, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       projectId,
       input.hostname,
+      input.pathPrefix ?? null,
+      input.componentId ?? null,
       input.internalPort,
       input.httpsEnabled !== false ? 1 : 0,
       input.redirectHttp !== false ? 1 : 0,
@@ -135,12 +147,16 @@ export function createDomain(db: Database, projectId: string, input: CreateDomai
       now,
     );
   } catch (err) {
-    // UNIQUE constraint on hostname
+    // UNIQUE (hostname, path_prefix)
     if (err instanceof Error && err.message.includes("UNIQUE")) {
       throw new AppError(
         "DOMAIN_DUPLICATE",
-        `hostname "${input.hostname}" ถูกใช้งานโดย project อื่นแล้ว`,
+        `"${input.hostname}${input.pathPrefix ?? ""}" ถูกใช้งานแล้ว`,
       );
+    }
+    // CHECK path_prefix IS NULL OR redirect_mode = 'none'
+    if (err instanceof Error && err.message.includes("CHECK")) {
+      throw new AppError("DOMAIN_INVALID", "domain ที่มี path prefix ตั้ง redirect www/root ไม่ได้");
     }
     throw err;
   }
@@ -151,6 +167,8 @@ export function createDomain(db: Database, projectId: string, input: CreateDomai
 }
 
 export interface UpdateDomainInput {
+  /** null = ย้ายกลับไป web ตัวแรก */
+  componentId?: string | null;
   internalPort?: number;
   httpsEnabled?: boolean;
   redirectHttp?: boolean;
@@ -163,13 +181,14 @@ export function updateDomain(db: Database, id: string, input: UpdateDomainInput)
   if (!row) throw new AppError("DOMAIN_NOT_FOUND", "ไม่พบ domain นี้");
 
   const fields: string[] = [];
-  const values: (string | number)[] = [];
+  const values: (string | number | null)[] = [];
 
-  const set = (col: string, val: string | number) => {
+  const set = (col: string, val: string | number | null) => {
     fields.push(`${col} = ?`);
     values.push(val);
   };
 
+  if (input.componentId !== undefined) set("component_id", input.componentId);
   if (input.internalPort !== undefined) set("internal_port", input.internalPort);
   if (input.httpsEnabled !== undefined) set("https_enabled", input.httpsEnabled ? 1 : 0);
   if (input.redirectHttp !== undefined) set("redirect_http", input.redirectHttp ? 1 : 0);
@@ -180,7 +199,14 @@ export function updateDomain(db: Database, id: string, input: UpdateDomainInput)
     const now = Date.now();
     set("updated_at", now);
     values.push(id);
-    db.query(`UPDATE project_domains SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+    try {
+      db.query(`UPDATE project_domains SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("CHECK")) {
+        throw new AppError("DOMAIN_INVALID", "domain ที่มี path prefix ตั้ง redirect www/root ไม่ได้");
+      }
+      throw err;
+    }
   }
 
   const updated = getDomain(db, id);

@@ -15,8 +15,7 @@
  * ADR-0004 start-before-stop สำหรับหลาย container: ของใหม่ทั้งชุด healthy ครบก่อน ถึงแตะของเก่า
  * partial failure = ลบ container ใหม่ "ทั้งหมด" + network ใหม่ และ **ห้ามแตะ generation เก่าเลย**
  *
- * MVP (Phase C): env เป็น project-scope (component-scoped = Phase F); ไม่ mount named volume
- * (Phase F); managed_ref = verify ว่ามี service รันอยู่ (การ inject connection env = Phase F);
+ * web หลายตัวได้ (0.1.24): domain ผูกกับ component + route ตาม path — ดู domainsFor ด้านล่าง
  * image cleanup ข้ามไปก่อน (Phase D/F) — กันลบ image ผิดตัว ปลอดภัยกว่าลบมั่ว
  *
  * ทุก dependency ฉีดเข้ามาเป็นพารามิเตอร์ (เหมือน build.ts) เพื่อ unit-test ได้โดยไม่ต้องมี Docker จริง
@@ -31,10 +30,12 @@ import {
   componentContainerName,
   componentImageName,
   componentLabels,
+  componentServiceName,
   deploymentNetworkLabels,
   deploymentNetworkName,
   isTerminal,
   PROXY_NETWORK,
+  projectServiceName,
   serviceContainerName,
 } from "@zixploy/shared";
 import { failDeployment, getDeploymentStatus, transitionDeployment } from "../db/deployment-state";
@@ -262,6 +263,17 @@ export async function runComposePipeline(
 
     const domainConfigs = loadProjectDomains(db, job.projectId);
     const compById = new Map(allComponents.map((c) => [c.id, c]));
+    // domain ที่ไม่ได้ผูก component (หรือผูกกับตัวที่ไม่ใช่ web/ปิดอยู่) ไปที่ web ตัวแรกตาม position
+    // web ตัวแรกใช้ service name ระดับ project เหมือนก่อนมี per-component routing — โปรเจกต์ที่มี web
+    // ตัวเดียวจึงได้ label ชุดเดิมเป๊ะ และช่วง start-before-stop ไม่มี router ชี้ service คนละชื่อ
+    const primaryWebId = components.find((c) => c.isWeb)?.id ?? null;
+    const webIds = new Set(components.filter((c) => c.isWeb).map((c) => c.id));
+    const domainsFor = (componentId: string) =>
+      domainConfigs.filter((d) =>
+        d.componentId && webIds.has(d.componentId)
+          ? d.componentId === componentId
+          : componentId === primaryWebId,
+      );
 
     for (const c of components) {
       const image = imageTags.get(c.id);
@@ -272,10 +284,17 @@ export async function runComposePipeline(
       });
       await docker.removeContainer(cName, { force: true });
 
-      // web component ได้ Traefik labels ของ project (MVP: web เดียว; multi-web = Phase D)
+      // web component แต่ละตัวได้ Traefik labels เฉพาะ domain ของตัวเอง + service ของตัวเอง
       const labels = {
         ...componentLabels(job.projectId, deploymentId, c.id),
-        ...(c.isWeb ? buildTraefikLabels(domainConfigs, job.projectId) : {}),
+        ...(c.isWeb
+          ? buildTraefikLabels(domainsFor(c.id), job.projectId, {
+              serviceName:
+                c.id === primaryWebId
+                  ? projectServiceName(job.projectId)
+                  : componentServiceName(job.projectId, c.id),
+            })
+          : {}),
       };
 
       // ลำดับ env (ตัวหลัง override ตัวหน้า): project-wide → managed_ref inject → component-scoped

@@ -15,6 +15,8 @@ interface DomainRow {
   redirect_http: number;
   redirect_mode: string;
   tls_mode: string;
+  path_prefix: string | null;
+  component_id: string | null;
 }
 
 /**
@@ -24,7 +26,8 @@ interface DomainRow {
 export function loadProjectDomains(db: Database, projectId: string): DomainConfig[] {
   const rows = db
     .query<DomainRow, [string]>(
-      `SELECT hostname, internal_port, https_enabled, redirect_http, redirect_mode, tls_mode
+      `SELECT hostname, internal_port, https_enabled, redirect_http, redirect_mode, tls_mode,
+              path_prefix, component_id
        FROM project_domains
        WHERE project_id = ? AND enabled = 1
        ORDER BY created_at ASC`,
@@ -39,5 +42,7 @@ export function loadProjectDomains(db: Database, projectId: string): DomainConfi
     redirectMode: row.redirect_mode as DomainConfig["redirectMode"],
     // custom → label ต้องไม่มี certresolver ไม่งั้น Traefik ขอ ACME cert ทับใบที่อัปโหลดไว้
     tlsMode: row.tls_mode as TlsMode,
+    pathPrefix: row.path_prefix,
+    componentId: row.component_id,
   }));
 }

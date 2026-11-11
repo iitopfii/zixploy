@@ -550,11 +550,17 @@ export function updateComponent(
 
 export function deleteComponent(db: Database, projectId: string, componentId: string): void {
   requireComponent(db, projectId, componentId);
-  // component_deps ที่ชี้มา/ชี้ออกถูกลบด้วย ON DELETE CASCADE ของ FK
-  db.query("DELETE FROM project_components WHERE id = ? AND project_id = ?").run(
-    componentId,
-    projectId,
-  );
+  db.transaction(() => {
+    // domain ที่ผูกไว้กลับไปใช้ web ตัวแรก (FK ไม่มี ON DELETE — ไม่ปลดก่อนจะลบ component ไม่ได้)
+    db.query(
+      "UPDATE project_domains SET component_id = NULL, updated_at = ? WHERE component_id = ?",
+    ).run(Date.now(), componentId);
+    // component_deps ที่ชี้มา/ชี้ออกถูกลบด้วย ON DELETE CASCADE ของ FK
+    db.query("DELETE FROM project_components WHERE id = ? AND project_id = ?").run(
+      componentId,
+      projectId,
+    );
+  })();
 }
 
 // ---------------------------------------------------------------------------

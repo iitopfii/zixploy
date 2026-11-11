@@ -817,6 +817,159 @@ describe("runComposePipeline — image-only compose (ไม่มี build compo
     expect(dep?.status).toBe("succeeded");
     expect(dep?.cloning_at).not.toBeNull(); // ผ่าน state cloning แม้ไม่มีอะไร clone
   });
+
+  test("payload source แบบ images (ไม่มี repo) → deploy สำเร็จ", async () => {
+    const db = makeDb();
+    const projectId = insertComposeProject(db);
+    insertComponent(db, projectId, {
+      name: "web",
+      sourceKind: "image",
+      imageRef: "nginx:1.27-alpine",
+      isWeb: true,
+      webPort: 80,
+    });
+    const deploymentId = insertDeployment(db, projectId);
+    const result = await runComposePipeline(
+      baseDeps(db, mockDocker()),
+      makeJob(projectId, deploymentId),
+      { ...GITHUB_PAYLOAD, source: { type: "images" } },
+      new AbortController().signal,
+    );
+    expect(result.outcome).toBe("done");
+  });
+});
+
+describe("runComposePipeline — หลาย web component + route ตาม path (0.1.24)", () => {
+  function insertDomain(
+    db: Db,
+    projectId: string,
+    d: { hostname: string; pathPrefix?: string; componentId?: string; port: number },
+  ): void {
+    const now = Date.now();
+    db.query(
+      `INSERT INTO project_domains
+        (id, project_id, hostname, path_prefix, component_id, internal_port, https_enabled, redirect_http, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?)`,
+    ).run(
+      ulid(),
+      projectId,
+      d.hostname,
+      d.pathPrefix ?? null,
+      d.componentId ?? null,
+      d.port,
+      now,
+      now,
+    );
+  }
+
+  function labelsOf(docker: ReturnType<typeof mockDocker>, alias: string): Record<string, string> {
+    const call = docker.calls.find(
+      (c) =>
+        c.method === "createContainer" &&
+        (c.args[0] as { networkAliases?: string[] }).networkAliases?.[0] === alias,
+    );
+    if (!call) throw new Error(`ไม่มี createContainer ของ ${alias}`);
+    return (call.args[0] as { labels: Record<string, string> }).labels;
+  }
+
+  test("แต่ละ web ได้เฉพาะ domain ของตัวเอง, web ตัวแรกใช้ service ชื่อเดิม, ตัวอื่นได้ service ของตัวเอง", async () => {
+    const db = makeDb();
+    const projectId = insertComposeProject(db);
+    const webId = insertComponent(db, projectId, {
+      name: "web",
+      sourceKind: "image",
+      imageRef: "ghcr.io/acme/web:1",
+      isWeb: true,
+      webPort: 3000,
+      position: 0,
+    });
+    const apiId = insertComponent(db, projectId, {
+      name: "api",
+      sourceKind: "image",
+      imageRef: "ghcr.io/acme/api:1",
+      isWeb: true,
+      webPort: 3001,
+      position: 1,
+    });
+    insertComponent(db, projectId, {
+      name: "worker",
+      sourceKind: "image",
+      imageRef: "ghcr.io/acme/worker:1",
+      position: 2,
+    });
+    insertDomain(db, projectId, { hostname: "app.example.com", port: 3000 }); // ไม่ผูก → web ตัวแรก
+    insertDomain(db, projectId, {
+      hostname: "app.example.com",
+      pathPrefix: "/api/",
+      componentId: apiId,
+      port: 3001,
+    });
+    insertDomain(db, projectId, { hostname: "api.example.com", componentId: apiId, port: 3001 });
+    const deploymentId = insertDeployment(db, projectId);
+    const docker = mockDocker();
+
+    const result = await runComposePipeline(
+      baseDeps(db, docker),
+      makeJob(projectId, deploymentId),
+      { ...GITHUB_PAYLOAD, source: { type: "images" } },
+      new AbortController().signal,
+    );
+    expect(result.outcome).toBe("done");
+
+    const web = labelsOf(docker, "web");
+    const api = labelsOf(docker, "api");
+    const worker = labelsOf(docker, "worker");
+    const rules = (l: Record<string, string>) =>
+      Object.entries(l)
+        .filter(([k]) => k.endsWith(".rule"))
+        .map(([, v]) => v)
+        .sort();
+
+    expect(rules(web)).toEqual(["Host(`app.example.com`)"]);
+    expect(rules(api)).toEqual([
+      "Host(`api.example.com`)",
+      "Host(`app.example.com`) && PathPrefix(`/api/`)",
+    ]);
+    expect(rules(worker)).toEqual([]);
+
+    const legacySvc = `zx-${projectId.slice(-12).toLowerCase()}`;
+    const apiSvc = `${legacySvc}-${apiId.slice(-12).toLowerCase()}`;
+    expect(web[`traefik.http.services.${legacySvc}.loadbalancer.server.port`]).toBe("3000");
+    expect(api[`traefik.http.services.${apiSvc}.loadbalancer.server.port`]).toBe("3001");
+    expect(Object.keys(api).some((k) => k.includes(`services.${legacySvc}.`))).toBe(false);
+    expect(webId).not.toBe(apiId);
+  });
+
+  test("domain ผูก component ที่ไม่ใช่ web → ตกไปที่ web ตัวแรก (ไม่หาย)", async () => {
+    const db = makeDb();
+    const projectId = insertComposeProject(db);
+    insertComponent(db, projectId, {
+      name: "web",
+      sourceKind: "image",
+      imageRef: "ghcr.io/acme/web:1",
+      isWeb: true,
+      webPort: 3000,
+    });
+    const workerId = insertComponent(db, projectId, {
+      name: "worker",
+      sourceKind: "image",
+      imageRef: "ghcr.io/acme/worker:1",
+      position: 1,
+    });
+    insertDomain(db, projectId, { hostname: "app.example.com", componentId: workerId, port: 3000 });
+    const deploymentId = insertDeployment(db, projectId);
+    const docker = mockDocker();
+
+    await runComposePipeline(
+      baseDeps(db, docker),
+      makeJob(projectId, deploymentId),
+      { ...GITHUB_PAYLOAD, source: { type: "images" } },
+      new AbortController().signal,
+    );
+    expect(labelsOf(docker, "web")["traefik.http.routers.app-example-com.rule"]).toBe(
+      "Host(`app.example.com`)",
+    );
+  });
 });
 
 describe("runComposePipeline — partial-failure teardown (ADR-0004)", () => {

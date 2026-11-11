@@ -22,6 +22,7 @@ import { githubRoutes } from "./routes/github";
 import { logRoutes } from "./routes/logs";
 import { monitoringRoutes } from "./routes/monitoring";
 import { projectRoutes } from "./routes/projects";
+import { registryRoutes } from "./routes/registries";
 import { serviceRoutes } from "./routes/services";
 import { systemRoutes } from "./routes/system";
 import { systemSettingsRoutes } from "./routes/system-settings";
@@ -91,6 +92,7 @@ export function buildApp(db: Database, options: AppOptions = {}) {
     .use(dockerInventoryRoutes(db))
     .use(containerImportRoutes(db))
     .use(updateRoutes(db))
+    .use(registryRoutes(db, masterKeys))
     .use(systemSettingsRoutes(db, settingsStore))
     .use(auditRoutes(db));
 }

@@ -16,6 +16,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadMigrations, migrateUp, migrationsDir, openDatabase } from "@zixploy/db";
 import { AppError, serviceContainerName, ulid } from "@zixploy/shared";
+import { encryptEnvelope } from "../src/github/envelope";
+import { createMasterKeys } from "../src/github/master-key";
 import type { OrchestrateDeps } from "../src/pipeline/orchestrate";
 import { runComposePipeline } from "../src/pipeline/orchestrate";
 import type { ClaimedJob } from "../src/queue";
@@ -1071,5 +1073,60 @@ describe("runComposePipeline — activate over old generation", () => {
       (c) => c.method === "removeNetwork" && String(c.args[0]).includes(prevDepId.toLowerCase()),
     );
     expect(removedOldNet).toBe(true);
+  });
+});
+
+describe("runComposePipeline — registry credential (0.1.24)", () => {
+  test("image จาก registry ที่มี credential → pullImage ได้ auth, Docker Hub ไม่ได้", async () => {
+    const db = makeDb();
+    const masterKeys = await createMasterKeys(1, { 1: new Uint8Array(32).fill(0x42) });
+    const credId = ulid();
+    const now = Date.now();
+    db.query(
+      `INSERT INTO registry_credentials (id, registry, username, password_ciphertext, created_at, updated_at)
+       VALUES (?, 'ghcr.io', 'bot', ?, ?, ?)`,
+    ).run(credId, await encryptEnvelope(masterKeys, "ghp_secret", `registry:${credId}`), now, now);
+    const projectId = insertComposeProject(db);
+    insertComponent(db, projectId, {
+      name: "api",
+      sourceKind: "image",
+      imageRef: "ghcr.io/acme/api:1.0.0",
+      isWeb: true,
+      webPort: 3001,
+    });
+    insertComponent(db, projectId, {
+      name: "proxy",
+      sourceKind: "image",
+      imageRef: "nginx:1.27-alpine",
+      position: 1,
+    });
+    const deploymentId = insertDeployment(db, projectId);
+    const docker = mockDocker();
+    const logs: string[] = [];
+    const deps = { ...baseDeps(db, docker), masterKeys, onLog: (l: string) => logs.push(l) };
+
+    const result = await runComposePipeline(
+      deps,
+      makeJob(projectId, deploymentId),
+      { ...GITHUB_PAYLOAD, source: { type: "images" } },
+      new AbortController().signal,
+    );
+    expect(result.outcome).toBe("done");
+
+    const pulls = docker.calls.filter((c) => c.method === "pullImage");
+    const byImage = new Map(pulls.map((c) => [c.args[0], c.args[2]]));
+    expect(byImage.get("ghcr.io/acme/api:1.0.0")).toMatchObject({
+      registry: "ghcr.io",
+      username: "bot",
+      password: "ghp_secret",
+    });
+    expect(byImage.get("nginx:1.27-alpine")).toBeUndefined();
+    expect(logs.some((l) => l.includes("ghp_secret"))).toBe(false);
+    const used = db
+      .query<{ last_used_at: number | null }, [string]>(
+        "SELECT last_used_at FROM registry_credentials WHERE id = ?",
+      )
+      .get(credId);
+    expect(used?.last_used_at).toBeGreaterThan(0);
   });
 });

@@ -49,6 +49,7 @@ import type { CloneParams } from "../git/clone";
 import type { MasterKeys } from "../github/master-key";
 import type { MintedToken } from "../github/token";
 import type { ClaimedJob } from "../queue";
+import { loadRegistryAuth, markRegistryUsed } from "../registries/auth";
 import {
   assertDockerfileWithinContext,
   assertWorkspaceSizeWithinLimit,
@@ -245,8 +246,13 @@ export async function runComposePipeline(
         if (!c.imageRef) {
           throw new AppError("SERVICE_PROVISION_FAILED", `component "${c.name}" ไม่มี imageRef`);
         }
-        safeLog(`[pull] component "${c.name}" → ${c.imageRef}`);
-        await docker.pullImage(c.imageRef);
+        const auth = await loadRegistryAuth(db, deps.masterKeys, c.imageRef);
+        safeLog(
+          `[pull] component "${c.name}" → ${c.imageRef}` +
+            (auth ? ` (login ${auth.registry} ด้วย ${auth.username})` : ""),
+        );
+        await docker.pullImage(c.imageRef, undefined, auth ?? undefined);
+        if (auth) markRegistryUsed(db, auth.id);
         imageTags.set(c.id, c.imageRef);
       }
     } finally {

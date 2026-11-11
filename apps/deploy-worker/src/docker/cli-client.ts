@@ -10,6 +10,9 @@
  * ทุก container create ผ่าน safety.ts denylist ก่อนเสมอ
  */
 
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { AppError } from "@zixploy/shared";
 import { assertContainerConfigSafe, assertDockerArgsSafe } from "./safety";
 import type {
@@ -66,6 +69,34 @@ async function readWithGracePeriod(stream: ReadableStream<Uint8Array> | null): P
     new Response(stream).text(),
     new Promise<string>((resolve) => setTimeout(() => resolve(""), PIPE_DRAIN_GRACE_MS)),
   ]);
+}
+
+/** credential ของ registry หนึ่งตัว (ถอดรหัสแล้ว) — ห้าม log */
+export interface RegistryAuth {
+  registry: string;
+  username: string;
+  password: string;
+}
+
+/**
+ * Docker Hub ใน config.json ต้องใช้ key แบบ legacy — "docker.io" เฉย ๆ CLI ไม่หยิบไปใช้
+ * registry อื่นใช้ host ตรง ๆ (เหมือนที่ docker login เขียน)
+ */
+function dockerConfigAuthKey(registry: string): string {
+  return registry === "docker.io" ? "https://index.docker.io/v1/" : registry;
+}
+
+/** สร้าง dir ชั่วคราว (0700) ที่มี config.json (0600) — caller ต้องลบเองใน finally */
+export function writeTempDockerConfig(auth: RegistryAuth): string {
+  const dir = mkdtempSync(join(tmpdir(), "zixploy-docker-config-"));
+  chmodSync(dir, 0o700);
+  const token = Buffer.from(`${auth.username}:${auth.password}`).toString("base64");
+  writeFileSync(
+    join(dir, "config.json"),
+    JSON.stringify({ auths: { [dockerConfigAuthKey(auth.registry)]: { auth: token } } }),
+    { mode: 0o600 },
+  );
+  return dir;
 }
 
 export class DockerCliClient {
@@ -236,16 +267,23 @@ export class DockerCliClient {
    *
    * timeout ยาวเป็นพิเศษ (ไม่ใช้ commandTimeoutMs ปกติ) เพราะเป็น network I/O ล้วน
    */
-  async pullImage(image: string, timeoutMs = 600_000): Promise<void> {
+  /**
+   * docker pull — ถ้าส่ง auth มา เขียน DOCKER_CONFIG ชั่วคราว (มีแค่ auth ของ registry นั้น) ให้ pull
+   * ครั้งนี้ครั้งเดียวแล้วลบทิ้ง แทน `docker login` ที่ค้าง credential ไว้ใน ~/.docker ของ worker
+   * (ซึ่งทุก deploy และทุก shell ใน container หยิบไปใช้ต่อได้)
+   */
+  async pullImage(image: string, timeoutMs = 600_000, auth?: RegistryAuth): Promise<void> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const configDir = auth ? writeTempDockerConfig(auth) : null;
     try {
+      const env: Record<string, string | undefined> = { ...process.env };
+      if (this.options.dockerHost) env.DOCKER_HOST = this.options.dockerHost;
+      if (configDir) env.DOCKER_CONFIG = configDir;
       const proc = Bun.spawn(["docker", "pull", image], {
         stdout: "pipe",
         stderr: "pipe",
-        env: this.options.dockerHost
-          ? { ...process.env, DOCKER_HOST: this.options.dockerHost }
-          : process.env,
+        env,
         signal: controller.signal,
       });
       const code = await proc.exited;
@@ -253,11 +291,12 @@ export class DockerCliClient {
       if (code !== 0) {
         throw new AppError(
           "SERVICE_PROVISION_FAILED",
-          `ดึง image ${image} ไม่สำเร็จ: ${truncate(stderr)}`,
+          `ดึง image ${image} ไม่สำเร็จ${auth ? ` (ใช้ credential ของ ${auth.registry})` : ""}: ${truncate(stderr)}`,
         );
       }
     } finally {
       clearTimeout(timer);
+      if (configDir) rmSync(configDir, { recursive: true, force: true });
     }
   }
 

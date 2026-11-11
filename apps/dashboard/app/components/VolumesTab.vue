@@ -5,7 +5,7 @@
  * List, create, detach, delete (with typed confirm)
  * ลบตรงๆ ไม่ได้ถ้า lifecycle='active' — ต้อง detach ก่อน
  */
-const props = defineProps<{ projectId: string; archived: boolean }>();
+const props = defineProps<{ projectId: string; archived: boolean; mode?: string }>();
 
 const api = useApi();
 
@@ -22,6 +22,8 @@ interface Volume {
   driver: string;
   /** host path เมื่อเป็น bind mount — null = Docker จัดการที่เก็บเอง */
   hostPath: string | null;
+  /** compose: component ที่ mount — null ในโปรเจกต์ compose = ไม่ถูก mount */
+  componentId: string | null;
   readOnly: boolean;
   lifecycle: "active" | "detached" | "deletion_pending" | "deleted" | "error";
   lastAttachedAt: number | null;
@@ -55,6 +57,29 @@ async function fetchVolumes() {
 
 await fetchVolumes();
 
+// compose: volume ต้องเลือกว่า mount ที่ component ไหน (ไม่มี container เดียวของทั้งโปรเจกต์)
+const isCompose = computed(() => props.mode === "compose");
+const mountableComponents = ref<Array<{ id: string; name: string }>>([]);
+
+async function fetchComponents() {
+  if (!isCompose.value) return;
+  try {
+    const { data } = await api.api.v1.projects({ id: props.projectId }).components.get();
+    mountableComponents.value = (data?.items ?? [])
+      .filter((c) => c.sourceKind !== "managed_ref")
+      .map((c) => ({ id: c.id, name: c.name }));
+  } catch {
+    // ไม่มีรายชื่อ component — ฟอร์มจะบังคับให้เลือกไม่ได้ ปุ่มสร้างถูกปิดไว้
+  }
+}
+
+await fetchComponents();
+
+function componentName(id: string | null): string {
+  if (!id) return "ไม่ได้ผูก — compose ไม่ mount";
+  return mountableComponents.value.find((c) => c.id === id)?.name ?? "component ที่ถูกลบ";
+}
+
 // ---------------------------------------------------------------------------
 // Create form
 // ---------------------------------------------------------------------------
@@ -65,6 +90,7 @@ const createForm = reactive({
   mountPath: "",
   // bind mount (optional) — ตั้งได้เฉพาะตอนสร้าง แก้ทีหลังไม่ได้ (docker volume opts เปลี่ยนไม่ได้)
   hostPath: "",
+  componentId: "",
   accessMode: "shared-safe" as "shared-safe" | "single-writer",
   readOnly: false,
 });
@@ -82,6 +108,7 @@ async function createVolume() {
       readOnly: createForm.readOnly,
       // ส่งเฉพาะเมื่อกรอก — เว้นว่าง = named volume ปกติ (Docker จัดการที่เก็บเอง)
       ...(createForm.hostPath.trim() ? { hostPath: createForm.hostPath.trim() } : {}),
+      ...(isCompose.value && createForm.componentId ? { componentId: createForm.componentId } : {}),
     });
     if (error) {
       createError.value =
@@ -204,6 +231,13 @@ function lcTone(lc: string) {
         <span>ชื่อ</span>
         <input v-model="createForm.displayName" placeholder="my-data" />
       </label>
+      <label v-if="isCompose">
+        <span>Mount ที่ component</span>
+        <select v-model="createForm.componentId">
+          <option value="" disabled>เลือก component</option>
+          <option v-for="c in mountableComponents" :key="c.id" :value="c.id">{{ c.name }}</option>
+        </select>
+      </label>
       <label>
         <span>Mount path</span>
         <input v-model="createForm.mountPath" class="mono" placeholder="/app/data" />
@@ -234,7 +268,12 @@ function lcTone(lc: string) {
       <button
         class="primary small"
         style="align-self: flex-start"
-        :disabled="creating || !createForm.displayName.trim() || !createForm.mountPath.trim()"
+        :disabled="
+          creating ||
+          !createForm.displayName.trim() ||
+          !createForm.mountPath.trim() ||
+          (isCompose && !createForm.componentId)
+        "
         @click="createVolume"
       >
         <span v-if="creating" class="spinner" />
@@ -265,6 +304,10 @@ function lcTone(lc: string) {
         </div>
 
         <dl class="kv">
+          <template v-if="isCompose">
+            <dt>Component</dt>
+            <dd>{{ componentName(v.componentId) }}</dd>
+          </template>
           <dt>Mount path</dt>
           <dd><code>{{ v.mountPath }}</code></dd>
           <!-- bind mount: บอกให้เห็นชัดว่าข้อมูลอยู่โฟลเดอร์ไหนบน host จริง -->

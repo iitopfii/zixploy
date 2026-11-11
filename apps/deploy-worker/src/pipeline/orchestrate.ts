@@ -16,6 +16,7 @@
  * partial failure = ลบ container ใหม่ "ทั้งหมด" + network ใหม่ และ **ห้ามแตะ generation เก่าเลย**
  *
  * web หลายตัวได้ (0.1.24): domain ผูกกับ component + route ตาม path — ดู domainsFor ด้านล่าง
+ * named volume ต่อ component (0.1.24): volumes.component_id — ดู loadComponentVolumes
  * image cleanup ข้ามไปก่อน (Phase D/F) — กันลบ image ผิดตัว ปลอดภัยกว่าลบมั่ว
  *
  * ทุก dependency ฉีดเข้ามาเป็นพารามิเตอร์ (เหมือน build.ts) เพื่อ unit-test ได้โดยไม่ต้องมี Docker จริง
@@ -50,6 +51,7 @@ import type { MasterKeys } from "../github/master-key";
 import type { MintedToken } from "../github/token";
 import type { ClaimedJob } from "../queue";
 import { loadRegistryAuth, markRegistryUsed } from "../registries/auth";
+import { countUnassignedActiveVolumes, loadComponentVolumes } from "../volumes/loader";
 import {
   assertDockerfileWithinContext,
   assertWorkspaceSizeWithinLimit,
@@ -281,9 +283,35 @@ export async function runComposePipeline(
           : componentId === primaryWebId,
       );
 
+    const unassignedVolumes = countUnassignedActiveVolumes(db, job.projectId);
+    if (unassignedVolumes > 0) {
+      safeLog(
+        `[volume] ⚠️ มี ${unassignedVolumes} volume ที่ไม่ได้ผูก component — compose จะไม่ mount ` +
+          "(สร้างใหม่ที่แท็บ Volumes โดยเลือก component)",
+      );
+    }
+
     for (const c of components) {
       const image = imageTags.get(c.id);
       if (!image) throw new AppError("BUILD_FAILED", `component "${c.name}" ไม่มี image`);
+
+      // named volume ของ component — สร้างแบบ idempotent ก่อน create container (เหมือน single mode)
+      // start-before-stop: container เก่าและใหม่ mount volume เดียวกันช่วงสั้น ๆ
+      const volumes = loadComponentVolumes(db, job.projectId, c.id);
+      for (const vol of volumes) {
+        if (vol.accessMode === "single-writer") {
+          safeLog(
+            `[volume] ⚠️ "${c.name}": volume '${vol.dockerName}' (${vol.mountPath}) เป็น single-writer — ` +
+              "container เก่าและใหม่อาจเขียนพร้อมกันชั่วคราวระหว่าง activation",
+          );
+        }
+        await docker.createVolume({
+          name: vol.dockerName,
+          driver: vol.driver,
+          labels: { "platform.managed": "true", "platform.volume_id": vol.id },
+          ...(Object.keys(vol.driverOpts).length > 0 ? { opts: vol.driverOpts } : {}),
+        });
+      }
       const cName = componentContainerName(job.projectId, deploymentId, c.id, {
         projectName: project.name,
         componentName: c.name,
@@ -343,6 +371,15 @@ export async function runComposePipeline(
         memoryLimitMb: c.memoryLimitMb,
         restartPolicy: c.restartPolicy,
         env: componentEnv,
+        ...(volumes.length > 0
+          ? {
+              volumes: volumes.map((v) => ({
+                dockerName: v.dockerName,
+                mountPath: v.mountPath,
+                ...(v.readOnly ? { readOnly: true } : {}),
+              })),
+            }
+          : {}),
         // Docker-native HEALTHCHECK (Phase 18 · F) — จำเป็นให้ component อื่นรอแบบ condition='healthy'
         ...(c.healthCmd
           ? {

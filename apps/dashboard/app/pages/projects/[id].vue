@@ -677,7 +677,7 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
 
         <!-- Volumes -->
         <div v-else-if="activeTab === 'volumes'" class="card">
-          <VolumesTab :project-id="id" :archived="!!project.archivedAt" />
+          <VolumesTab :project-id="id" :archived="!!project.archivedAt" :mode="project.mode" />
         </div>
       </div>
 

@@ -555,6 +555,15 @@ export function deleteComponent(db: Database, projectId: string, componentId: st
     db.query(
       "UPDATE project_domains SET component_id = NULL, updated_at = ? WHERE component_id = ?",
     ).run(Date.now(), componentId);
+    // volume ที่ mount อยู่ → detached (ข้อมูลยังอยู่ ลบหรือสร้างใหม่ให้ component อื่นได้ที่แท็บ Volumes)
+    db.query(
+      `UPDATE volumes
+       SET component_id = NULL, updated_at = ?,
+           lifecycle = CASE WHEN lifecycle = 'active' THEN 'detached' ELSE lifecycle END
+       WHERE component_id = ?`,
+    ).run(Date.now(), componentId);
+    // env ที่ตั้งเฉพาะ component นี้ไม่มีความหมายเมื่อไม่มี component แล้ว
+    db.query("DELETE FROM environment_variables WHERE component_id = ?").run(componentId);
     // component_deps ที่ชี้มา/ชี้ออกถูกลบด้วย ON DELETE CASCADE ของ FK
     db.query("DELETE FROM project_components WHERE id = ? AND project_id = ?").run(
       componentId,

@@ -199,6 +199,7 @@ function mockDocker(overrides: Partial<Record<string, unknown>> = {}) {
       return { containerId: `cid-${p.networkAliases?.[0] ?? p.name}` };
     }),
     connectNetwork: record("connectNetwork", async () => undefined),
+    createVolume: record("createVolume", async () => undefined),
     startContainer: record("startContainer", async () => undefined),
     stopContainer: record("stopContainer", async () => undefined),
     ...overrides,
@@ -1128,5 +1129,58 @@ describe("runComposePipeline — registry credential (0.1.24)", () => {
       )
       .get(credId);
     expect(used?.last_used_at).toBeGreaterThan(0);
+  });
+});
+
+describe("runComposePipeline — named volume ต่อ component (0.1.24)", () => {
+  test("component ที่มี volume → สร้าง volume + mount, ตัวอื่นไม่ได้ mount, volume ไม่ผูก component แค่เตือน", async () => {
+    const db = makeDb();
+    const projectId = insertComposeProject(db);
+    const teiId = insertComponent(db, projectId, {
+      name: "tei",
+      sourceKind: "image",
+      imageRef: "ghcr.io/huggingface/tei:1",
+      position: 1,
+    });
+    insertComponent(db, projectId, {
+      name: "web",
+      sourceKind: "image",
+      imageRef: "ghcr.io/acme/web:1",
+      isWeb: true,
+      webPort: 3000,
+    });
+    const now = Date.now();
+    const insertVolume = (componentId: string | null, mountPath: string) =>
+      db
+        .query(
+          `INSERT INTO volumes (id, project_id, display_name, docker_name, mount_path, component_id, created_at, updated_at)
+           VALUES (?, ?, 'v', ?, ?, ?, ?, ?)`,
+        )
+        .run(ulid(), projectId, `zxvol-${ulid().toLowerCase()}`, mountPath, componentId, now, now);
+    insertVolume(teiId, "/data");
+    insertVolume(null, "/legacy");
+    const deploymentId = insertDeployment(db, projectId);
+    const docker = mockDocker();
+    const logs: string[] = [];
+    const deps = { ...baseDeps(db, docker), onLog: (l: string) => logs.push(l) };
+
+    const result = await runComposePipeline(
+      deps,
+      makeJob(projectId, deploymentId),
+      { ...GITHUB_PAYLOAD, source: { type: "images" } },
+      new AbortController().signal,
+    );
+    expect(result.outcome).toBe("done");
+    expect(docker.calls.filter((c) => c.method === "createVolume")).toHaveLength(1);
+
+    const createdFor = (alias: string) =>
+      docker.calls.find(
+        (c) =>
+          c.method === "createContainer" &&
+          (c.args[0] as { networkAliases?: string[] }).networkAliases?.[0] === alias,
+      )?.args[0] as { volumes?: Array<{ mountPath: string }> };
+    expect(createdFor("tei").volumes?.map((v) => v.mountPath)).toEqual(["/data"]);
+    expect(createdFor("web").volumes).toBeUndefined();
+    expect(logs.some((l) => l.includes("ไม่ได้ผูก component"))).toBe(true);
   });
 });

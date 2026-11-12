@@ -10,6 +10,9 @@
  * ทุก container create ผ่าน safety.ts denylist ก่อนเสมอ
  */
 
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { AppError } from "@zixploy/shared";
 import { assertContainerConfigSafe, assertDockerArgsSafe } from "./safety";
 import type {
@@ -66,6 +69,102 @@ async function readWithGracePeriod(stream: ReadableStream<Uint8Array> | null): P
     new Response(stream).text(),
     new Promise<string>((resolve) => setTimeout(() => resolve(""), PIPE_DRAIN_GRACE_MS)),
   ]);
+}
+
+/**
+ * argv ของ `docker create` (ไม่รวมคำว่า docker) — แยกเป็น pure function ให้ทดสอบ flag ได้โดยไม่ต้องมี daemon
+ * ผ่าน assertDockerArgsSafe ก่อนต่อ image/cmd เสมอ (image/cmd ไม่ใช่ flag จึงอยู่หลังการตรวจ)
+ */
+export function buildCreateArgs(params: ContainerCreateParams): string[] {
+  assertContainerConfigSafe(params);
+
+  const args = [
+    "create",
+    "--name",
+    params.name,
+    "--network",
+    params.networkName,
+    "--restart",
+    params.restartPolicy,
+    "--pids-limit",
+    String(params.pidsLimit ?? 512),
+  ];
+  // DNS alias บน network หลัก (Phase 18) — ใส่หลัง --network เพื่ออ่านง่าย ค่าถูก validate แล้ว
+  for (const alias of params.networkAliases ?? []) args.push("--network-alias", alias);
+  for (const [k, v] of Object.entries(params.labels)) args.push("--label", `${k}=${v}`);
+  if (params.env) {
+    for (const [k, v] of Object.entries(params.env)) args.push("-e", `${k}=${v}`);
+  }
+  if (params.cpuLimit != null) args.push("--cpus", String(params.cpuLimit));
+  if (params.memoryLimitMb != null) args.push("--memory", `${params.memoryLimitMb}m`);
+  // --memory-swap โดยไม่มี --memory Docker ปฏิเสธ — ข้ามแทนการ fail ทั้ง deploy (API กันไว้อีกชั้น)
+  if (params.memorySwapMb != null && params.memoryLimitMb != null) {
+    args.push("--memory-swap", `${params.memorySwapMb}m`);
+  }
+  if (params.capDropAll) args.push("--cap-drop", "ALL");
+  if (params.noNewPrivileges) args.push("--security-opt", "no-new-privileges:true");
+  // Named volume mounts — Docker volume ต้องมีอยู่แล้วก่อน createContainer (Phase 7)
+  for (const v of params.volumes ?? []) {
+    // --mount format: type=volume,source=<name>,target=<path>[,readonly]
+    // ห้ามใช้ --volume/-v เพราะ --mount ชัดเจนกว่า และไม่สร้าง anonymous volume โดยไม่ตั้งใจ
+    const spec = `type=volume,source=${v.dockerName},target=${v.mountPath}${v.readOnly ? ",readonly" : ""}`;
+    args.push("--mount", spec);
+  }
+  // Phase 10 — publish port ออก host สำหรับ managed service ที่ผู้ใช้เลือกเปิด
+  for (const p of params.publishPorts ?? []) {
+    args.push("--publish", `${p.hostPort}:${p.containerPort}`);
+  }
+  if (params.healthCheck) {
+    const hc = params.healthCheck;
+    args.push(
+      // cmd ถูกส่งเป็น argument เดี่ยว ๆ ไม่ใช่ shell string — Docker เก็บเป็น CMD-SHELL เอง
+      // เมื่อขึ้นต้นด้วย "CMD-SHELL" (ดู healthCmd() ใน service catalog)
+      "--health-cmd",
+      hc.cmd[0] === "CMD-SHELL" ? hc.cmd.slice(1).join(" ") : hc.cmd.join(" "),
+      "--health-interval",
+      `${hc.intervalSec}s`,
+      "--health-timeout",
+      `${hc.timeoutSec}s`,
+      "--health-retries",
+      String(hc.retries),
+      "--health-start-period",
+      `${hc.startPeriodSec}s`,
+    );
+  }
+
+  assertDockerArgsSafe(args);
+
+  args.push(params.image);
+  if (params.cmd) args.push(...params.cmd);
+  return args;
+}
+
+/** credential ของ registry หนึ่งตัว (ถอดรหัสแล้ว) — ห้าม log */
+export interface RegistryAuth {
+  registry: string;
+  username: string;
+  password: string;
+}
+
+/**
+ * Docker Hub ใน config.json ต้องใช้ key แบบ legacy — "docker.io" เฉย ๆ CLI ไม่หยิบไปใช้
+ * registry อื่นใช้ host ตรง ๆ (เหมือนที่ docker login เขียน)
+ */
+function dockerConfigAuthKey(registry: string): string {
+  return registry === "docker.io" ? "https://index.docker.io/v1/" : registry;
+}
+
+/** สร้าง dir ชั่วคราว (0700) ที่มี config.json (0600) — caller ต้องลบเองใน finally */
+export function writeTempDockerConfig(auth: RegistryAuth): string {
+  const dir = mkdtempSync(join(tmpdir(), "zixploy-docker-config-"));
+  chmodSync(dir, 0o700);
+  const token = Buffer.from(`${auth.username}:${auth.password}`).toString("base64");
+  writeFileSync(
+    join(dir, "config.json"),
+    JSON.stringify({ auths: { [dockerConfigAuthKey(auth.registry)]: { auth: token } } }),
+    { mode: 0o600 },
+  );
+  return dir;
 }
 
 export class DockerCliClient {
@@ -166,61 +265,7 @@ export class DockerCliClient {
   }
 
   async createContainer(params: ContainerCreateParams): Promise<{ containerId: string }> {
-    assertContainerConfigSafe(params);
-
-    const args = [
-      "create",
-      "--name",
-      params.name,
-      "--network",
-      params.networkName,
-      "--restart",
-      params.restartPolicy,
-      "--pids-limit",
-      String(params.pidsLimit ?? 512),
-    ];
-    // DNS alias บน network หลัก (Phase 18) — ใส่หลัง --network เพื่ออ่านง่าย ค่าถูก validate แล้ว
-    for (const alias of params.networkAliases ?? []) args.push("--network-alias", alias);
-    for (const [k, v] of Object.entries(params.labels)) args.push("--label", `${k}=${v}`);
-    if (params.env) {
-      for (const [k, v] of Object.entries(params.env)) args.push("-e", `${k}=${v}`);
-    }
-    if (params.cpuLimit != null) args.push("--cpus", String(params.cpuLimit));
-    if (params.memoryLimitMb != null) args.push("--memory", `${params.memoryLimitMb}m`);
-    // Named volume mounts — Docker volume ต้องมีอยู่แล้วก่อน createContainer (Phase 7)
-    for (const v of params.volumes ?? []) {
-      // --mount format: type=volume,source=<name>,target=<path>[,readonly]
-      // ห้ามใช้ --volume/-v เพราะ --mount ชัดเจนกว่า และไม่สร้าง anonymous volume โดยไม่ตั้งใจ
-      const spec = `type=volume,source=${v.dockerName},target=${v.mountPath}${v.readOnly ? ",readonly" : ""}`;
-      args.push("--mount", spec);
-    }
-    // Phase 10 — publish port ออก host สำหรับ managed service ที่ผู้ใช้เลือกเปิด
-    for (const p of params.publishPorts ?? []) {
-      args.push("--publish", `${p.hostPort}:${p.containerPort}`);
-    }
-    if (params.healthCheck) {
-      const hc = params.healthCheck;
-      args.push(
-        // cmd ถูกส่งเป็น argument เดี่ยว ๆ ไม่ใช่ shell string — Docker เก็บเป็น CMD-SHELL เอง
-        // เมื่อขึ้นต้นด้วย "CMD-SHELL" (ดู healthCmd() ใน service catalog)
-        "--health-cmd",
-        hc.cmd[0] === "CMD-SHELL" ? hc.cmd.slice(1).join(" ") : hc.cmd.join(" "),
-        "--health-interval",
-        `${hc.intervalSec}s`,
-        "--health-timeout",
-        `${hc.timeoutSec}s`,
-        "--health-retries",
-        String(hc.retries),
-        "--health-start-period",
-        `${hc.startPeriodSec}s`,
-      );
-    }
-
-    assertDockerArgsSafe(args);
-
-    args.push(params.image);
-    if (params.cmd) args.push(...params.cmd);
-
+    const args = buildCreateArgs(params);
     const result = await this.exec(args);
     if (result.code !== 0) {
       throw new AppError("DOCKER_UNAVAILABLE", `docker create ล้มเหลว: ${truncate(result.stderr)}`);
@@ -236,16 +281,23 @@ export class DockerCliClient {
    *
    * timeout ยาวเป็นพิเศษ (ไม่ใช้ commandTimeoutMs ปกติ) เพราะเป็น network I/O ล้วน
    */
-  async pullImage(image: string, timeoutMs = 600_000): Promise<void> {
+  /**
+   * docker pull — ถ้าส่ง auth มา เขียน DOCKER_CONFIG ชั่วคราว (มีแค่ auth ของ registry นั้น) ให้ pull
+   * ครั้งนี้ครั้งเดียวแล้วลบทิ้ง แทน `docker login` ที่ค้าง credential ไว้ใน ~/.docker ของ worker
+   * (ซึ่งทุก deploy และทุก shell ใน container หยิบไปใช้ต่อได้)
+   */
+  async pullImage(image: string, timeoutMs = 600_000, auth?: RegistryAuth): Promise<void> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const configDir = auth ? writeTempDockerConfig(auth) : null;
     try {
+      const env: Record<string, string | undefined> = { ...process.env };
+      if (this.options.dockerHost) env.DOCKER_HOST = this.options.dockerHost;
+      if (configDir) env.DOCKER_CONFIG = configDir;
       const proc = Bun.spawn(["docker", "pull", image], {
         stdout: "pipe",
         stderr: "pipe",
-        env: this.options.dockerHost
-          ? { ...process.env, DOCKER_HOST: this.options.dockerHost }
-          : process.env,
+        env,
         signal: controller.signal,
       });
       const code = await proc.exited;
@@ -253,11 +305,12 @@ export class DockerCliClient {
       if (code !== 0) {
         throw new AppError(
           "SERVICE_PROVISION_FAILED",
-          `ดึง image ${image} ไม่สำเร็จ: ${truncate(stderr)}`,
+          `ดึง image ${image} ไม่สำเร็จ${auth ? ` (ใช้ credential ของ ${auth.registry})` : ""}: ${truncate(stderr)}`,
         );
       }
     } finally {
       clearTimeout(timer);
+      if (configDir) rmSync(configDir, { recursive: true, force: true });
     }
   }
 

@@ -553,3 +553,117 @@ describe("POST /projects/:id/volumes/:volumeId/inspect", () => {
     expect(res.status).toBe(404);
   });
 });
+
+// ---------------------------------------------------------------------------
+// componentId (compose, 0.1.24)
+// ---------------------------------------------------------------------------
+
+describe("POST /projects/:id/volumes — componentId", () => {
+  function insertComponent(
+    db: Awaited<ReturnType<typeof setup>>["db"],
+    projectId: string,
+    name: string,
+    sourceKind: "image" | "managed_ref" = "image",
+  ): string {
+    const id = ulid();
+    const now = Date.now();
+    db.query(
+      `INSERT INTO project_components (id, project_id, name, role, source_kind, image_ref, created_at, updated_at)
+       VALUES (?, ?, ?, 'app', ?, ?, ?, ?)`,
+    ).run(
+      id,
+      projectId,
+      name,
+      sourceKind,
+      sourceKind === "image" ? "ghcr.io/acme/x:1" : null,
+      now,
+      now,
+    );
+    return id;
+  }
+
+  const create = (
+    request: Awaited<ReturnType<typeof setup>>["request"],
+    projectId: string,
+    body: Record<string, unknown>,
+  ) =>
+    request(`/api/v1/projects/${projectId}/volumes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  test("ผูก component ได้ และ mount path เดียวกันซ้ำได้ถ้าคนละ component", async () => {
+    const { db, projectId, request } = await setup();
+    const tei = insertComponent(db, projectId, "tei");
+    const ocr = insertComponent(db, projectId, "ocr");
+    const a = await create(request, projectId, {
+      displayName: "tei",
+      mountPath: "/data",
+      componentId: tei,
+    });
+    expect(a.status).toBe(200);
+    expect((await json(a)).volume.componentId).toBe(tei);
+    const b = await create(request, projectId, {
+      displayName: "ocr",
+      mountPath: "/data",
+      componentId: ocr,
+    });
+    expect(b.status).toBe(200);
+    const dup = await create(request, projectId, {
+      displayName: "x",
+      mountPath: "/data",
+      componentId: tei,
+    });
+    expect(dup.status).toBe(409);
+  });
+
+  test("component แบบ managed_ref หรือของ project อื่น → ปฏิเสธ", async () => {
+    const { db, projectId, request } = await setup();
+    const ref = insertComponent(db, projectId, "pg", "managed_ref");
+    expect(
+      (await create(request, projectId, { displayName: "x", mountPath: "/d", componentId: ref }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await create(request, projectId, { displayName: "x", mountPath: "/d", componentId: ulid() }))
+        .status,
+    ).toBe(404);
+  });
+
+  test("ลบ component → volume เป็น detached (ข้อมูลไม่หาย) และ env เฉพาะ component ถูกลบ", async () => {
+    const { db, projectId, request } = await setup();
+    const tei = insertComponent(db, projectId, "tei");
+    const vol = (
+      await json(
+        await create(request, projectId, {
+          displayName: "tei",
+          mountPath: "/data",
+          componentId: tei,
+        }),
+      )
+    ).volume;
+    const now = Date.now();
+    db.query(
+      `INSERT INTO environment_variables (id, project_id, key, value_ciphertext, is_secret, scope, enabled, version, component_id, created_at, updated_at)
+       VALUES (?, ?, 'MODEL', ?, 0, 'runtime', 1, 1, ?, ?, ?)`,
+    ).run(ulid(), projectId, new Uint8Array([1]), tei, now, now);
+
+    const res = await request(`/api/v1/projects/${projectId}/components/${tei}`, {
+      method: "DELETE",
+    });
+    expect(res.status).toBeLessThan(300);
+    const row = db
+      .query<{ lifecycle: string; component_id: string | null }, [string]>(
+        "SELECT lifecycle, component_id FROM volumes WHERE id = ?",
+      )
+      .get(vol.id);
+    expect(row).toEqual({ lifecycle: "detached", component_id: null });
+    const envCount = db
+      .query<{ n: number }, [string]>(
+        "SELECT count(*) AS n FROM environment_variables WHERE project_id = ?",
+      )
+      .get(projectId);
+    expect(envCount?.n).toBe(0);
+  });
+});

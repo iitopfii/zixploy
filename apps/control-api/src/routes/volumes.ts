@@ -56,6 +56,7 @@ const volumeSchema = t.Object({
   driverOpts: t.Record(t.String(), t.String()),
   // host path เมื่อเป็น bind mount (derive จาก driverOpts.device) — null = Docker จัดการที่เก็บเอง
   hostPath: t.Nullable(t.String()),
+  componentId: t.Nullable(t.String()),
   readOnly: t.Boolean(),
   lifecycle: lifecycleSchema,
   lastAttachedAt: t.Nullable(t.Number()),
@@ -74,6 +75,29 @@ function requireProject(db: Database, id: string): void {
     .query<{ id: string }, [string]>("SELECT id FROM projects WHERE id = ? AND archived_at IS NULL")
     .get(id);
   if (!row) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+}
+
+/** volume ของ compose ต้องผูกกับ component ที่รันเป็น container ของโปรเจกต์นี้ (managed_ref ไม่มี container) */
+function requireMountableComponent(db: Database, projectId: string, componentId: string): void {
+  const row = isUlid(componentId)
+    ? db
+        .query<{ source_kind: string }, [string, string]>(
+          "SELECT source_kind FROM project_components WHERE id = ? AND project_id = ?",
+        )
+        .get(componentId, projectId)
+    : null;
+  if (!row) {
+    throw new AppError("COMPONENT_NOT_FOUND", "ไม่พบ component นี้ในโปรเจกต์", {
+      field: "componentId",
+    });
+  }
+  if (row.source_kind === "managed_ref") {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      "component แบบ managed database ไม่มี container ให้ mount — จัดการ volume ที่หน้า Databases",
+      { field: "componentId" },
+    );
+  }
 }
 
 function requireVolume(db: Database, volumeId: string, projectId: string) {
@@ -110,6 +134,7 @@ export function volumeRoutes(db: Database) {
         `${API_PREFIX}/projects/:id/volumes`,
         ({ params, body }) => {
           requireProject(db, params.id);
+          if (body.componentId) requireMountableComponent(db, params.id, body.componentId);
           const vol = createVolume(db, params.id, {
             displayName: body.displayName,
             mountPath: body.mountPath,
@@ -117,6 +142,7 @@ export function volumeRoutes(db: Database) {
             ...(body.driver !== undefined ? { driver: body.driver } : {}),
             ...(body.readOnly !== undefined ? { readOnly: body.readOnly } : {}),
             ...(body.hostPath !== undefined ? { hostPath: body.hostPath } : {}),
+            ...(body.componentId ? { componentId: body.componentId } : {}),
           });
           return { volume: vol };
         },
@@ -129,6 +155,8 @@ export function volumeRoutes(db: Database) {
             readOnly: t.Optional(t.Boolean()),
             // bind mount ตั้งได้เฉพาะตอนสร้าง — PATCH ไม่รับ hostPath (docker volume opts เปลี่ยนไม่ได้)
             hostPath: t.Optional(t.String({ maxLength: 4096 })),
+            // compose: component ที่ mount — ตั้งได้เฉพาะตอนสร้าง (ย้ายข้าม component = ลบแล้วสร้างใหม่)
+            componentId: t.Optional(t.Nullable(t.String())),
           }),
           response: t.Object({ volume: volumeSchema }),
         },

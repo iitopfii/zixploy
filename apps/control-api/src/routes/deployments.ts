@@ -155,13 +155,14 @@ interface ProjectSourceRow {
   repo_full_name: string | null;
   branch: string | null;
   dockerfile_content: string | null;
+  mode: string;
 }
 
 function loadProjectForDeploy(db: Database, id: string): ProjectSourceRow {
   if (!isUlid(id)) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
   const row = db
     .query<ProjectSourceRow, [string]>(
-      `SELECT id, archived_at, source_type, installation_id, repo_id, repo_full_name, branch, dockerfile_content
+      `SELECT id, archived_at, source_type, installation_id, repo_id, repo_full_name, branch, dockerfile_content, mode
        FROM projects WHERE id = ?`,
     )
     .get(id);
@@ -206,6 +207,30 @@ function assertProjectHasSource(
       },
     );
   }
+}
+
+/**
+ * โปรเจกต์ compose ที่ไม่มี build component (ทุกตัวเป็น image/managed_ref) ไม่ต้องมี repo หรือ Dockerfile
+ * — commitSha สังเคราะห์จาก image ref ของทุก component เพื่อให้ประวัติ deploy แยกได้ว่าชุด image เปลี่ยนเมื่อไร
+ * คืน null = ต้องใช้ source ปกติของ project (single mode หรือมี build component)
+ */
+function resolveImageOnlySource(
+  db: Database,
+  project: ProjectSourceRow,
+): { commitSha: string; source: DeployJobSource } | null {
+  if (project.mode !== "compose") return null;
+  const rows = db
+    .query<{ name: string; source_kind: string; image_ref: string | null }, [string]>(
+      "SELECT name, source_kind, image_ref FROM project_components WHERE project_id = ? AND enabled = 1 ORDER BY name",
+    )
+    .all(project.id);
+  if (rows.length === 0 || rows.some((r) => r.source_kind === "build")) return null;
+  const images = rows.filter((r) => r.source_kind === "image");
+  if (images.length === 0) return null;
+  const digest = createHash("sha256")
+    .update(images.map((r) => `${r.name}=${r.image_ref ?? ""}`).join("\n"))
+    .digest("hex");
+  return { commitSha: digest, source: { type: "images" } };
 }
 
 /** สร้าง DeployJobSource + commitSha ตาม source_type ปัจจุบันของ project — ใช้ทั้งใน /deploy และ /redeploy */
@@ -296,8 +321,15 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
       async ({ params, set, request, requireSession }) => {
         const session = requireSession();
         const project = loadProjectForDeploy(db, params.id);
-        assertProjectHasSource(project);
-        const { commitSha, source } = await resolveBuildSource(db, registry, project);
+        const imageOnly = resolveImageOnlySource(db, project);
+        if (!imageOnly) assertProjectHasSource(project);
+        const { commitSha, source } =
+          imageOnly ??
+          (await resolveBuildSource(
+            db,
+            registry,
+            project as GitHubSourcedProject | DockerfileSourcedProject,
+          ));
 
         const payload: DeployJobPayload = {
           kind: "build",
@@ -335,7 +367,8 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
       ({ params, set, request, requireSession }) => {
         const session = requireSession();
         const project = loadProjectForDeploy(db, params.id);
-        assertProjectHasSource(project);
+        const imageOnly = resolveImageOnlySource(db, project);
+        if (!imageOnly) assertProjectHasSource(project);
 
         const last = db
           .query<
@@ -351,22 +384,24 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
 
         // source แบบ dockerfile-paste ไม่มี "commit เก่า" ให้ reuse เหมือน GitHub — redeploy คือ build
         // เนื้อหาปัจจุบันของ project ซ้ำ (ปกติเหมือนเดิมเป๊ะ เว้นแต่เพิ่งแก้ไขที่ Source tab)
-        const { commitSha, source } =
-          project.source_type === "dockerfile"
+        const sourced = project as GitHubSourcedProject | DockerfileSourcedProject;
+        const { commitSha, source } = imageOnly
+          ? imageOnly
+          : sourced.source_type === "dockerfile"
             ? {
-                commitSha: dockerfileContentHash(project.dockerfile_content),
+                commitSha: dockerfileContentHash(sourced.dockerfile_content),
                 source: {
                   type: "dockerfile" as const,
-                  dockerfileContent: project.dockerfile_content,
+                  dockerfileContent: sourced.dockerfile_content,
                 },
               }
             : {
                 commitSha: last.commit_sha,
                 source: {
                   type: "github" as const,
-                  installationId: loadInstallationForProject(db, project.installation_id)
+                  installationId: loadInstallationForProject(db, sourced.installation_id)
                     .installationId,
-                  repoFullName: project.repo_full_name,
+                  repoFullName: sourced.repo_full_name,
                 },
               };
 

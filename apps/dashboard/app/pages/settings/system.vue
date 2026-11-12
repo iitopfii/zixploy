@@ -68,7 +68,7 @@ async function copyIp(ip: string) {
   <div class="stack-lg">
     <header>
       <h1>ตั้งค่าระบบ</h1>
-      <p class="muted">domain ของ dashboard และข้อมูลเครือข่ายของเครื่อง</p>
+      <p class="muted">domain ของ dashboard, ข้อมูลเครือข่ายของเครื่อง และ credential ของ container registry</p>
     </header>
 
     <section class="card stack">
@@ -125,6 +125,8 @@ async function copyIp(ip: string) {
         </span>
       </p>
     </section>
+
+    <RegistriesSection />
   </div>
 </template>
 

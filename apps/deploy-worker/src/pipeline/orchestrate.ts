@@ -15,8 +15,8 @@
  * ADR-0004 start-before-stop สำหรับหลาย container: ของใหม่ทั้งชุด healthy ครบก่อน ถึงแตะของเก่า
  * partial failure = ลบ container ใหม่ "ทั้งหมด" + network ใหม่ และ **ห้ามแตะ generation เก่าเลย**
  *
- * MVP (Phase C): env เป็น project-scope (component-scoped = Phase F); ไม่ mount named volume
- * (Phase F); managed_ref = verify ว่ามี service รันอยู่ (การ inject connection env = Phase F);
+ * web หลายตัวได้ (0.1.24): domain ผูกกับ component + route ตาม path — ดู domainsFor ด้านล่าง
+ * named volume ต่อ component (0.1.24): volumes.component_id — ดู loadComponentVolumes
  * image cleanup ข้ามไปก่อน (Phase D/F) — กันลบ image ผิดตัว ปลอดภัยกว่าลบมั่ว
  *
  * ทุก dependency ฉีดเข้ามาเป็นพารามิเตอร์ (เหมือน build.ts) เพื่อ unit-test ได้โดยไม่ต้องมี Docker จริง
@@ -31,10 +31,12 @@ import {
   componentContainerName,
   componentImageName,
   componentLabels,
+  componentServiceName,
   deploymentNetworkLabels,
   deploymentNetworkName,
   isTerminal,
   PROXY_NETWORK,
+  projectServiceName,
   serviceContainerName,
 } from "@zixploy/shared";
 import { failDeployment, getDeploymentStatus, transitionDeployment } from "../db/deployment-state";
@@ -48,6 +50,8 @@ import type { CloneParams } from "../git/clone";
 import type { MasterKeys } from "../github/master-key";
 import type { MintedToken } from "../github/token";
 import type { ClaimedJob } from "../queue";
+import { loadRegistryAuth, markRegistryUsed } from "../registries/auth";
+import { countUnassignedActiveVolumes, loadComponentVolumes } from "../volumes/loader";
 import {
   assertDockerfileWithinContext,
   assertWorkspaceSizeWithinLimit,
@@ -244,8 +248,13 @@ export async function runComposePipeline(
         if (!c.imageRef) {
           throw new AppError("SERVICE_PROVISION_FAILED", `component "${c.name}" ไม่มี imageRef`);
         }
-        safeLog(`[pull] component "${c.name}" → ${c.imageRef}`);
-        await docker.pullImage(c.imageRef);
+        const auth = await loadRegistryAuth(db, deps.masterKeys, c.imageRef);
+        safeLog(
+          `[pull] component "${c.name}" → ${c.imageRef}` +
+            (auth ? ` (login ${auth.registry} ด้วย ${auth.username})` : ""),
+        );
+        await docker.pullImage(c.imageRef, undefined, auth ?? undefined);
+        if (auth) markRegistryUsed(db, auth.id);
         imageTags.set(c.id, c.imageRef);
       }
     } finally {
@@ -262,20 +271,64 @@ export async function runComposePipeline(
 
     const domainConfigs = loadProjectDomains(db, job.projectId);
     const compById = new Map(allComponents.map((c) => [c.id, c]));
+    // domain ที่ไม่ได้ผูก component (หรือผูกกับตัวที่ไม่ใช่ web/ปิดอยู่) ไปที่ web ตัวแรกตาม position
+    // web ตัวแรกใช้ service name ระดับ project เหมือนก่อนมี per-component routing — โปรเจกต์ที่มี web
+    // ตัวเดียวจึงได้ label ชุดเดิมเป๊ะ และช่วง start-before-stop ไม่มี router ชี้ service คนละชื่อ
+    const primaryWebId = components.find((c) => c.isWeb)?.id ?? null;
+    const webIds = new Set(components.filter((c) => c.isWeb).map((c) => c.id));
+    const domainsFor = (componentId: string) =>
+      domainConfigs.filter((d) =>
+        d.componentId && webIds.has(d.componentId)
+          ? d.componentId === componentId
+          : componentId === primaryWebId,
+      );
+
+    const unassignedVolumes = countUnassignedActiveVolumes(db, job.projectId);
+    if (unassignedVolumes > 0) {
+      safeLog(
+        `[volume] ⚠️ มี ${unassignedVolumes} volume ที่ไม่ได้ผูก component — compose จะไม่ mount ` +
+          "(สร้างใหม่ที่แท็บ Volumes โดยเลือก component)",
+      );
+    }
 
     for (const c of components) {
       const image = imageTags.get(c.id);
       if (!image) throw new AppError("BUILD_FAILED", `component "${c.name}" ไม่มี image`);
+
+      // named volume ของ component — สร้างแบบ idempotent ก่อน create container (เหมือน single mode)
+      // start-before-stop: container เก่าและใหม่ mount volume เดียวกันช่วงสั้น ๆ
+      const volumes = loadComponentVolumes(db, job.projectId, c.id);
+      for (const vol of volumes) {
+        if (vol.accessMode === "single-writer") {
+          safeLog(
+            `[volume] ⚠️ "${c.name}": volume '${vol.dockerName}' (${vol.mountPath}) เป็น single-writer — ` +
+              "container เก่าและใหม่อาจเขียนพร้อมกันชั่วคราวระหว่าง activation",
+          );
+        }
+        await docker.createVolume({
+          name: vol.dockerName,
+          driver: vol.driver,
+          labels: { "platform.managed": "true", "platform.volume_id": vol.id },
+          ...(Object.keys(vol.driverOpts).length > 0 ? { opts: vol.driverOpts } : {}),
+        });
+      }
       const cName = componentContainerName(job.projectId, deploymentId, c.id, {
         projectName: project.name,
         componentName: c.name,
       });
       await docker.removeContainer(cName, { force: true });
 
-      // web component ได้ Traefik labels ของ project (MVP: web เดียว; multi-web = Phase D)
+      // web component แต่ละตัวได้ Traefik labels เฉพาะ domain ของตัวเอง + service ของตัวเอง
       const labels = {
         ...componentLabels(job.projectId, deploymentId, c.id),
-        ...(c.isWeb ? buildTraefikLabels(domainConfigs, job.projectId) : {}),
+        ...(c.isWeb
+          ? buildTraefikLabels(domainsFor(c.id), job.projectId, {
+              serviceName:
+                c.id === primaryWebId
+                  ? projectServiceName(job.projectId)
+                  : componentServiceName(job.projectId, c.id),
+            })
+          : {}),
       };
 
       // ลำดับ env (ตัวหลัง override ตัวหน้า): project-wide → managed_ref inject → component-scoped
@@ -316,8 +369,21 @@ export async function runComposePipeline(
         ...(c.command ? { cmd: [c.command] } : {}),
         cpuLimit: c.cpuLimit,
         memoryLimitMb: c.memoryLimitMb,
+        memorySwapMb: c.memorySwapMb,
+        ...(c.pidsLimit != null ? { pidsLimit: c.pidsLimit } : {}),
+        capDropAll: c.capDropAll,
+        noNewPrivileges: c.noNewPrivileges,
         restartPolicy: c.restartPolicy,
         env: componentEnv,
+        ...(volumes.length > 0
+          ? {
+              volumes: volumes.map((v) => ({
+                dockerName: v.dockerName,
+                mountPath: v.mountPath,
+                ...(v.readOnly ? { readOnly: true } : {}),
+              })),
+            }
+          : {}),
         // Docker-native HEALTHCHECK (Phase 18 · F) — จำเป็นให้ component อื่นรอแบบ condition='healthy'
         ...(c.healthCmd
           ? {

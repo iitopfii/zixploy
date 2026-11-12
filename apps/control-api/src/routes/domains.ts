@@ -18,7 +18,14 @@
  */
 
 import type { Database } from "bun:sqlite";
-import { API_PREFIX, AppError, isUlid, MAX_PEM_BYTES, validateHostname } from "@zixploy/shared";
+import {
+  API_PREFIX,
+  AppError,
+  isUlid,
+  MAX_PEM_BYTES,
+  validateHostname,
+  validatePathPrefix,
+} from "@zixploy/shared";
 import { Elysia, t } from "elysia";
 import type { MasterKeys } from "../crypto/master-key";
 import { checkDns, loadConfiguredIps } from "../domains/dns-check";
@@ -70,6 +77,8 @@ const domainSchema = t.Object({
   id: t.String(),
   projectId: t.String(),
   hostname: t.String(),
+  pathPrefix: t.Nullable(t.String()),
+  componentId: t.Nullable(t.String()),
   internalPort: t.Number(),
   httpsEnabled: t.Boolean(),
   redirectHttp: t.Boolean(),
@@ -93,6 +102,10 @@ const uploadCertificateBody = t.Object({
 
 const createBody = t.Object({
   hostname: t.String({ minLength: 1, maxLength: 253 }),
+  /** "/api" หรือ "/api/" → normalize เป็น "/api/" · ไม่ส่ง = ทั้ง host (แก้ทีหลังไม่ได้ — ลบแล้วสร้างใหม่) */
+  pathPrefix: t.Optional(t.Nullable(t.String({ maxLength: 128 }))),
+  /** web component ของโปรเจกต์ compose ที่รับ traffic · ไม่ส่ง = web ตัวแรก */
+  componentId: t.Optional(t.Nullable(t.String())),
   internalPort: t.Integer({ minimum: 1, maximum: 65535 }),
   httpsEnabled: t.Optional(t.Boolean()),
   redirectHttp: t.Optional(t.Boolean()),
@@ -100,6 +113,7 @@ const createBody = t.Object({
 });
 
 const updateBody = t.Object({
+  componentId: t.Optional(t.Nullable(t.String())),
   internalPort: t.Optional(t.Integer({ minimum: 1, maximum: 65535 })),
   httpsEnabled: t.Optional(t.Boolean()),
   redirectHttp: t.Optional(t.Boolean()),
@@ -130,6 +144,27 @@ function requireDomainBelongsToProject(
     throw new AppError("DOMAIN_NOT_FOUND", "ไม่พบ domain นี้");
   }
   return row;
+}
+
+/**
+ * component ที่ domain ชี้ไปต้องเป็น web component ที่รันเป็น container ของโปรเจกต์เดียวกัน
+ * (managed_ref ไม่มี container · non-web ไม่ได้ join proxy network — Traefik เข้าไม่ถึง)
+ */
+function requireWebComponent(db: Database, projectId: string, componentId: string): void {
+  const row = isUlid(componentId)
+    ? db
+        .query<{ is_web: number; source_kind: string }, [string, string]>(
+          "SELECT is_web, source_kind FROM project_components WHERE id = ? AND project_id = ?",
+        )
+        .get(componentId, projectId)
+    : null;
+  if (!row)
+    throw new AppError("VALIDATION_ERROR", "ไม่พบ component นี้ในโปรเจกต์", { field: "componentId" });
+  if (row.is_web !== 1 || row.source_kind === "managed_ref") {
+    throw new AppError("VALIDATION_ERROR", "domain ชี้ได้เฉพาะ web component", {
+      field: "componentId",
+    });
+  }
 }
 
 /** อ่าน DomainDto กลับหลัง mutation — store คืน Row จึงต้องผ่าน listDomains ที่ map เป็น DTO */
@@ -182,8 +217,23 @@ export function domainRoutes(db: Database, masterKeys: MasterKeys | null = null)
             );
           }
 
+          let pathPrefix: string | null = null;
+          if (body.pathPrefix) {
+            try {
+              pathPrefix = validatePathPrefix(body.pathPrefix);
+            } catch (err) {
+              throw new AppError(
+                "DOMAIN_INVALID",
+                err instanceof Error ? err.message : "path prefix ไม่ถูกต้อง",
+              );
+            }
+          }
+          if (body.componentId) requireWebComponent(db, params.id, body.componentId);
+
           const domain = createDomain(db, params.id, {
             hostname,
+            pathPrefix,
+            componentId: body.componentId ?? null,
             internalPort: body.internalPort,
             ...(body.httpsEnabled !== undefined ? { httpsEnabled: body.httpsEnabled } : {}),
             ...(body.redirectHttp !== undefined ? { redirectHttp: body.redirectHttp } : {}),
@@ -201,6 +251,7 @@ export function domainRoutes(db: Database, masterKeys: MasterKeys | null = null)
         async ({ params, body }) => {
           requireProject(db, params.id);
           requireDomainBelongsToProject(db, params.domainId, params.id);
+          if (body.componentId) requireWebComponent(db, params.id, body.componentId);
           const updated = updateDomain(db, params.domainId, body);
           // enabled toggle เปลี่ยนว่า cert ควรอยู่บน disk หรือไม่ — disabled domain
           // ที่ยังมี cert ค้างจะทำให้ Traefik ตอบ SNI นั้นได้ทั้งที่ไม่มี router

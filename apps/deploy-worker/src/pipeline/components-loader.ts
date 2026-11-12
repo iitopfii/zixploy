@@ -29,6 +29,10 @@ export interface DeployComponent {
   healthCheckRetries: number;
   cpuLimit: number | null;
   memoryLimitMb: number | null;
+  memorySwapMb: number | null;
+  pidsLimit: number | null;
+  capDropAll: boolean;
+  noNewPrivileges: boolean;
   restartPolicy: "no" | "on-failure" | "always" | "unless-stopped";
   position: number;
   /** ชื่อ component ที่ตัวนี้ขึ้นกับ (resolved จาก component_deps) + เงื่อนไข */
@@ -56,6 +60,10 @@ interface ComponentRow {
   health_check_retries: number;
   cpu_limit: number | null;
   memory_limit_mb: number | null;
+  memory_swap_mb: number | null;
+  pids_limit: number | null;
+  cap_drop_all: number;
+  no_new_privileges: number;
   restart_policy: string;
   position: number;
 }
@@ -67,7 +75,8 @@ export function loadDeployComponents(db: Database, projectId: string): DeployCom
       `SELECT id, name, role, source_kind, dockerfile_path, build_context, target_stage, image_ref,
               managed_service_id, command, internal_port, is_web, web_port, health_check_path,
               health_cmd, health_check_interval_sec, health_check_timeout_sec, health_check_retries,
-              cpu_limit, memory_limit_mb, restart_policy, position
+              cpu_limit, memory_limit_mb, memory_swap_mb, pids_limit, cap_drop_all, no_new_privileges,
+              restart_policy, position
          FROM project_components
         WHERE project_id = ? AND enabled = 1
         ORDER BY position, created_at`,
@@ -107,6 +116,10 @@ export function loadDeployComponents(db: Database, projectId: string): DeployCom
     healthCheckRetries: r.health_check_retries,
     cpuLimit: r.cpu_limit,
     memoryLimitMb: r.memory_limit_mb,
+    memorySwapMb: r.memory_swap_mb,
+    pidsLimit: r.pids_limit,
+    capDropAll: r.cap_drop_all === 1,
+    noNewPrivileges: r.no_new_privileges === 1,
     restartPolicy: r.restart_policy as DeployComponent["restartPolicy"],
     position: r.position,
     dependsOn: depMap.get(r.id) ?? [],

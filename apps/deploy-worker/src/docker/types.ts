@@ -14,6 +14,12 @@ export interface ContainerCreateParams {
   memoryLimitMb?: number | null;
   /** ป้องกัน fork bomb — default 512 ถ้าไม่ระบุ (threat-model.md) */
   pidsLimit?: number;
+  /** --memory-swap (MB, รวม RAM) — ใช้ได้เมื่อมี memoryLimitMb เท่านั้น (Docker บังคับ) */
+  memorySwapMb?: number | null;
+  /** --cap-drop ALL — ตัด Linux capability ทั้งหมด (ลดสิทธิ์เท่านั้น cap-add ยังถูกห้าม) */
+  capDropAll?: boolean;
+  /** --security-opt no-new-privileges:true — process ใน container ยกระดับสิทธิ์ผ่าน setuid ไม่ได้ */
+  noNewPrivileges?: boolean;
   restartPolicy: "no" | "on-failure" | "always" | "unless-stopped";
   networkName: string;
   /**

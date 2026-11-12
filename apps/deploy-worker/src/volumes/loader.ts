@@ -41,6 +41,56 @@ export function parseDriverOpts(raw: string): Record<string, string> {
  * โหลด volumes ที่ lifecycle = 'active' ของ project เรียงตาม created_at
  * เฉพาะ active — detached/deletion_pending/deleted ไม่ mount
  */
+interface VolumeRowForMount {
+  id: string;
+  docker_name: string;
+  mount_path: string;
+  access_mode: string;
+  driver: string;
+  driver_opts: string;
+  read_only: number;
+}
+
+function toVolumeConfig(r: VolumeRowForMount): VolumeConfig {
+  return {
+    id: r.id,
+    dockerName: r.docker_name,
+    mountPath: r.mount_path,
+    accessMode: r.access_mode as VolumeConfig["accessMode"],
+    driver: r.driver,
+    driverOpts: parseDriverOpts(r.driver_opts),
+    readOnly: r.read_only === 1,
+  };
+}
+
+/** active volume ของ component หนึ่งตัวในโปรเจกต์ compose (0.1.24) */
+export function loadComponentVolumes(
+  db: Database,
+  projectId: string,
+  componentId: string,
+): VolumeConfig[] {
+  return db
+    .query<VolumeRowForMount, [string, string]>(
+      `SELECT id, docker_name, mount_path, access_mode, driver, driver_opts, read_only
+       FROM volumes
+       WHERE project_id = ? AND component_id = ? AND lifecycle = 'active'
+       ORDER BY created_at`,
+    )
+    .all(projectId, componentId)
+    .map(toVolumeConfig);
+}
+
+/** volume ที่ active แต่ไม่ได้ผูก component — compose ไม่รู้จะ mount ที่ไหน (มักค้างจากก่อน promote) */
+export function countUnassignedActiveVolumes(db: Database, projectId: string): number {
+  return (
+    db
+      .query<{ n: number }, [string]>(
+        "SELECT count(*) AS n FROM volumes WHERE project_id = ? AND component_id IS NULL AND lifecycle = 'active'",
+      )
+      .get(projectId)?.n ?? 0
+  );
+}
+
 export function loadActiveVolumes(db: Database, projectId: string): VolumeConfig[] {
   return db
     .query<

@@ -36,6 +36,8 @@ export interface VolumeDto {
   driverOpts: Record<string, string>;
   /** host path เมื่อเป็น bind mount (derive จาก driverOpts.device) — null = Docker จัดการที่เก็บเอง */
   hostPath: string | null;
+  /** compose: component ที่ mount volume นี้ · null = single mode (ทั้งโปรเจกต์มี container เดียว) */
+  componentId: string | null;
   readOnly: boolean;
   lifecycle: "active" | "detached" | "deletion_pending" | "deleted" | "error";
   lastAttachedAt: number | null;
@@ -58,6 +60,7 @@ interface VolumeRow {
   lifecycle: string;
   last_attached_at: number | null;
   last_error: string | null;
+  component_id: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -81,6 +84,7 @@ function toDto(row: VolumeRow): VolumeDto {
     driver: row.driver,
     driverOpts,
     hostPath: isBind ? (driverOpts.device ?? null) : null,
+    componentId: row.component_id,
     readOnly: row.read_only === 1,
     lifecycle: row.lifecycle as VolumeDto["lifecycle"],
     lastAttachedAt: row.last_attached_at,
@@ -94,7 +98,7 @@ export function listVolumes(db: Database, projectId: string): VolumeDto[] {
   return db
     .query<VolumeRow, [string]>(
       `SELECT id, project_id, display_name, docker_name, mount_path, access_mode, driver,
-              driver_opts, read_only, lifecycle, last_attached_at, last_error, created_at, updated_at
+              driver_opts, read_only, lifecycle, last_attached_at, last_error, component_id, created_at, updated_at
        FROM volumes
        WHERE project_id = ? AND lifecycle != 'deleted'
        ORDER BY created_at`,
@@ -107,7 +111,7 @@ export function getVolume(db: Database, volumeId: string): VolumeDto | null {
   const row = db
     .query<VolumeRow, [string]>(
       `SELECT id, project_id, display_name, docker_name, mount_path, access_mode, driver,
-              driver_opts, read_only, lifecycle, last_attached_at, last_error, created_at, updated_at
+              driver_opts, read_only, lifecycle, last_attached_at, last_error, component_id, created_at, updated_at
        FROM volumes WHERE id = ?`,
     )
     .get(volumeId);
@@ -125,6 +129,8 @@ export interface CreateVolumeParams {
    * หลังสร้าง — updateVolume จึงห้ามรับ field นี้) ไม่ระบุ = Docker จัดการที่เก็บเอง
    */
   hostPath?: string;
+  /** compose: component ที่จะ mount — caller ตรวจแล้วว่าเป็นของ project นี้และรันเป็น container */
+  componentId?: string | null;
 }
 
 export function createVolume(
@@ -171,16 +177,19 @@ export function createVolume(
   }
 
   // ตรวจ duplicate mount path ใน project เดียวกัน (active volumes เท่านั้น)
+  // compose: container แต่ละ component แยกกัน — mount path ซ้ำได้ถ้าคนละ component
+  const componentId = params.componentId ?? null;
   const dup = db
-    .query<{ id: string }, [string, string]>(
+    .query<{ id: string }, [string, string, string]>(
       `SELECT id FROM volumes
-       WHERE project_id = ? AND mount_path = ? AND lifecycle = 'active'`,
+       WHERE project_id = ? AND mount_path = ? AND lifecycle = 'active'
+         AND ifnull(component_id, '') = ?`,
     )
-    .get(projectId, params.mountPath);
+    .get(projectId, params.mountPath, componentId ?? "");
   if (dup) {
     throw new AppError(
       "VOLUME_DUPLICATE_MOUNT",
-      `mount path '${params.mountPath}' มี active volume อยู่แล้วใน project นี้`,
+      `mount path '${params.mountPath}' มี active volume อยู่แล้วใน${componentId ? " component" : " project"} นี้`,
       { mountPath: params.mountPath },
     );
   }
@@ -192,8 +201,8 @@ export function createVolume(
   db.query(
     `INSERT INTO volumes
        (id, project_id, display_name, docker_name, mount_path, access_mode, driver,
-        driver_opts, read_only, lifecycle, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+        driver_opts, read_only, lifecycle, component_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
   ).run(
     id,
     projectId,
@@ -204,6 +213,7 @@ export function createVolume(
     driver,
     driverOpts,
     params.readOnly ? 1 : 0,
+    componentId,
     now,
     now,
   );
@@ -244,11 +254,12 @@ export function updateVolume(
     // ตรวจ duplicate (ยกเว้น volume ตัวเอง)
     if (params.mountPath !== vol.mountPath) {
       const dup = db
-        .query<{ id: string }, [string, string]>(
+        .query<{ id: string }, [string, string, string]>(
           `SELECT id FROM volumes
-           WHERE project_id = ? AND mount_path = ? AND lifecycle = 'active'`,
+           WHERE project_id = ? AND mount_path = ? AND lifecycle = 'active'
+             AND ifnull(component_id, '') = ?`,
         )
-        .get(projectId, params.mountPath);
+        .get(projectId, params.mountPath, vol.componentId ?? "");
       if (dup) {
         throw new AppError(
           "VOLUME_DUPLICATE_MOUNT",

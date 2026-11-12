@@ -46,6 +46,10 @@ export interface ComponentRow {
   health_cmd: string | null;
   cpu_limit: number | null;
   memory_limit_mb: number | null;
+  memory_swap_mb: number | null;
+  pids_limit: number | null;
+  cap_drop_all: number;
+  no_new_privileges: number;
   restart_policy: string;
   position: number;
   enabled: number;
@@ -79,6 +83,14 @@ export interface ComponentDto {
   healthCmd: string | null;
   cpuLimit: number | null;
   memoryLimitMb: number | null;
+  /** --memory-swap (MB รวม RAM) — null = ค่าเริ่มต้นของ Docker */
+  memorySwapMb: number | null;
+  /** --pids-limit — null = 512 */
+  pidsLimit: number | null;
+  /** --cap-drop ALL */
+  capDropAll: boolean;
+  /** --security-opt no-new-privileges:true */
+  noNewPrivileges: boolean;
   restartPolicy: string;
   position: number;
   enabled: boolean;
@@ -104,6 +116,10 @@ export interface ComponentInput {
   healthCmd?: string | null;
   cpuLimit?: number | null;
   memoryLimitMb?: number | null;
+  memorySwapMb?: number | null;
+  pidsLimit?: number | null;
+  capDropAll?: boolean;
+  noNewPrivileges?: boolean;
   restartPolicy?: string;
   /** อ้าง component อื่นด้วย "ชื่อ" (เหมือน compose) — resolve เป็น id ภายใน */
   dependsOn?: Array<{ name: string; condition?: DepCondition }>;
@@ -113,7 +129,8 @@ const SELECT_ALL = `
   id, project_id, name, role, source_kind, dockerfile_path, build_context, target_stage,
   image_ref, managed_service_id, command, internal_port, is_web, web_port, exposed_port,
   health_check_path, health_check_interval_sec, health_check_timeout_sec, health_check_retries,
-  health_cmd, cpu_limit, memory_limit_mb, restart_policy, position, enabled, created_at, updated_at
+  health_cmd, cpu_limit, memory_limit_mb, memory_swap_mb, pids_limit, cap_drop_all, no_new_privileges,
+  restart_policy, position, enabled, created_at, updated_at
 `;
 
 // ---------------------------------------------------------------------------
@@ -170,6 +187,10 @@ export function toDto(row: ComponentRow, deps: ComponentDep[]): ComponentDto {
     healthCmd: row.health_cmd,
     cpuLimit: row.cpu_limit,
     memoryLimitMb: row.memory_limit_mb,
+    memorySwapMb: row.memory_swap_mb,
+    pidsLimit: row.pids_limit,
+    capDropAll: row.cap_drop_all === 1,
+    noNewPrivileges: row.no_new_privileges === 1,
     restartPolicy: row.restart_policy,
     position: row.position,
     enabled: row.enabled === 1,
@@ -297,6 +318,26 @@ function validateInput(db: Database, input: ComponentInput): void {
       field: "memoryLimitMb",
     });
   }
+  // Docker: --memory-swap ใช้ได้เมื่อมี --memory และต้องไม่น้อยกว่า (ค่าเป็น RAM+swap รวมกัน)
+  if (input.memorySwapMb != null) {
+    if (input.memoryLimitMb == null) {
+      throw new AppError("COMPONENT_INVALID", "ตั้ง memorySwapMb ได้เมื่อมี memoryLimitMb แล้วเท่านั้น", {
+        field: "memorySwapMb",
+      });
+    }
+    if (input.memorySwapMb < input.memoryLimitMb) {
+      throw new AppError(
+        "COMPONENT_INVALID",
+        "memorySwapMb คือ RAM + swap รวมกัน — ต้องไม่น้อยกว่า memoryLimitMb (เท่ากัน = ไม่ให้ swap)",
+        { field: "memorySwapMb" },
+      );
+    }
+  }
+  if (input.pidsLimit != null && (input.pidsLimit < 16 || input.pidsLimit > 32768)) {
+    throw new AppError("COMPONENT_INVALID", "pidsLimit ต้องอยู่ระหว่าง 16–32768", {
+      field: "pidsLimit",
+    });
+  }
   if (input.restartPolicy != null && !RESTART_POLICIES.has(input.restartPolicy)) {
     throw new AppError("COMPONENT_INVALID", "restartPolicy ไม่ถูกต้อง", { field: "restartPolicy" });
   }
@@ -409,8 +450,9 @@ export function createComponent(
       `INSERT INTO project_components
          (id, project_id, name, role, source_kind, dockerfile_path, build_context, target_stage,
           image_ref, managed_service_id, command, internal_port, is_web, web_port,
-          health_check_path, health_cmd, cpu_limit, memory_limit_mb, restart_policy, position, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          health_check_path, health_cmd, cpu_limit, memory_limit_mb, memory_swap_mb, pids_limit,
+          cap_drop_all, no_new_privileges, restart_policy, position, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       projectId,
@@ -430,6 +472,10 @@ export function createComponent(
       input.healthCmd ?? null,
       input.cpuLimit ?? null,
       input.memoryLimitMb ?? null,
+      input.memorySwapMb ?? null,
+      input.pidsLimit ?? null,
+      input.capDropAll ? 1 : 0,
+      input.noNewPrivileges ? 1 : 0,
       input.restartPolicy ?? "unless-stopped",
       nextPos,
       now,
@@ -463,6 +509,10 @@ export interface ComponentUpdate {
   healthCmd?: string | null;
   cpuLimit?: number | null;
   memoryLimitMb?: number | null;
+  memorySwapMb?: number | null;
+  pidsLimit?: number | null;
+  capDropAll?: boolean;
+  noNewPrivileges?: boolean;
   restartPolicy?: string;
   enabled?: boolean;
   dockerfilePath?: string | null;
@@ -498,6 +548,8 @@ export function updateComponent(
     healthCmd: update.healthCmd ?? row.health_cmd,
     cpuLimit: update.cpuLimit ?? row.cpu_limit,
     memoryLimitMb: update.memoryLimitMb ?? row.memory_limit_mb,
+    memorySwapMb: update.memorySwapMb !== undefined ? update.memorySwapMb : row.memory_swap_mb,
+    pidsLimit: update.pidsLimit !== undefined ? update.pidsLimit : row.pids_limit,
     restartPolicy: update.restartPolicy ?? row.restart_policy,
   };
   validateInput(db, merged);
@@ -518,6 +570,11 @@ export function updateComponent(
   if (update.healthCmd !== undefined) set("health_cmd", update.healthCmd);
   if (update.cpuLimit !== undefined) set("cpu_limit", update.cpuLimit);
   if (update.memoryLimitMb !== undefined) set("memory_limit_mb", update.memoryLimitMb);
+  if (update.memorySwapMb !== undefined) set("memory_swap_mb", update.memorySwapMb);
+  if (update.pidsLimit !== undefined) set("pids_limit", update.pidsLimit);
+  if (update.capDropAll !== undefined) set("cap_drop_all", update.capDropAll ? 1 : 0);
+  if (update.noNewPrivileges !== undefined)
+    set("no_new_privileges", update.noNewPrivileges ? 1 : 0);
   if (update.restartPolicy !== undefined) set("restart_policy", update.restartPolicy);
   if (update.enabled !== undefined) set("enabled", update.enabled ? 1 : 0);
   if (update.dockerfilePath !== undefined) set("dockerfile_path", update.dockerfilePath);
@@ -550,11 +607,26 @@ export function updateComponent(
 
 export function deleteComponent(db: Database, projectId: string, componentId: string): void {
   requireComponent(db, projectId, componentId);
-  // component_deps ที่ชี้มา/ชี้ออกถูกลบด้วย ON DELETE CASCADE ของ FK
-  db.query("DELETE FROM project_components WHERE id = ? AND project_id = ?").run(
-    componentId,
-    projectId,
-  );
+  db.transaction(() => {
+    // domain ที่ผูกไว้กลับไปใช้ web ตัวแรก (FK ไม่มี ON DELETE — ไม่ปลดก่อนจะลบ component ไม่ได้)
+    db.query(
+      "UPDATE project_domains SET component_id = NULL, updated_at = ? WHERE component_id = ?",
+    ).run(Date.now(), componentId);
+    // volume ที่ mount อยู่ → detached (ข้อมูลยังอยู่ ลบหรือสร้างใหม่ให้ component อื่นได้ที่แท็บ Volumes)
+    db.query(
+      `UPDATE volumes
+       SET component_id = NULL, updated_at = ?,
+           lifecycle = CASE WHEN lifecycle = 'active' THEN 'detached' ELSE lifecycle END
+       WHERE component_id = ?`,
+    ).run(Date.now(), componentId);
+    // env ที่ตั้งเฉพาะ component นี้ไม่มีความหมายเมื่อไม่มี component แล้ว
+    db.query("DELETE FROM environment_variables WHERE component_id = ?").run(componentId);
+    // component_deps ที่ชี้มา/ชี้ออกถูกลบด้วย ON DELETE CASCADE ของ FK
+    db.query("DELETE FROM project_components WHERE id = ? AND project_id = ?").run(
+      componentId,
+      projectId,
+    );
+  })();
 }
 
 // ---------------------------------------------------------------------------

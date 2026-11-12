@@ -422,3 +422,138 @@ describe("POST /projects/:id/domains/:domainId/check", () => {
     expect(res.status).toBe(404);
   });
 });
+
+// ---------------------------------------------------------------------------
+// path prefix + componentId (0.1.24)
+// ---------------------------------------------------------------------------
+
+function insertComponent(
+  db: ReturnType<typeof openDatabase>,
+  projectId: string,
+  name: string,
+  opts: { isWeb: boolean },
+): string {
+  const id = ulid();
+  const now = Date.now();
+  db.query(
+    `INSERT INTO project_components
+      (id, project_id, name, role, source_kind, image_ref, is_web, web_port, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'image', 'ghcr.io/acme/x:1', ?, ?, ?, ?)`,
+  ).run(id, projectId, name, opts.isWeb ? "web" : "worker", opts.isWeb ? 1 : 0, 3001, now, now);
+  return id;
+}
+
+describe("POST /projects/:id/domains — path prefix + componentId", () => {
+  test("host เดียวกันมีแถวทั้ง host และแถว path ได้ — path ถูก normalize", async () => {
+    const { app, db, projectId, cookie, csrf } = await setup();
+    const apiId = insertComponent(db, projectId, "api", { isWeb: true });
+    const whole = await createDomain(app, projectId, cookie, csrf, {
+      hostname: "app.example.com",
+      internalPort: 3000,
+    });
+    expect(whole.status).toBe(201);
+    const path = await createDomain(app, projectId, cookie, csrf, {
+      hostname: "app.example.com",
+      pathPrefix: "/api",
+      componentId: apiId,
+      internalPort: 3001,
+    });
+    expect(path.status).toBe(201);
+    const body = await json(path);
+    expect(body.pathPrefix).toBe("/api/");
+    expect(body.componentId).toBe(apiId);
+    expect((await json(whole)).pathPrefix).toBeNull();
+  });
+
+  test("host + path ซ้ำ → 409 DOMAIN_DUPLICATE", async () => {
+    const { app, projectId, cookie, csrf } = await setup();
+    const body = { hostname: "app.example.com", pathPrefix: "/api/", internalPort: 3001 };
+    expect((await createDomain(app, projectId, cookie, csrf, body)).status).toBe(201);
+    const dup = await createDomain(app, projectId, cookie, csrf, { ...body, pathPrefix: "/api" });
+    expect(dup.status).toBe(409);
+  });
+
+  test("path prefix ผิดรูปแบบ → 422 DOMAIN_INVALID", async () => {
+    const { app, projectId, cookie, csrf } = await setup();
+    const res = await createDomain(app, projectId, cookie, csrf, {
+      hostname: "app.example.com",
+      pathPrefix: "/api`) || Host(`evil.com",
+      internalPort: 3001,
+    });
+    expect(res.status).toBe(422);
+  });
+
+  test("path prefix + redirect www → 422 DOMAIN_INVALID", async () => {
+    const { app, projectId, cookie, csrf } = await setup();
+    const res = await createDomain(app, projectId, cookie, csrf, {
+      hostname: "app.example.com",
+      pathPrefix: "/api/",
+      redirectMode: "www_to_root",
+      internalPort: 3001,
+    });
+    expect(res.status).toBe(422);
+  });
+
+  test("componentId ที่ไม่ใช่ web หรือเป็นของ project อื่น → 400", async () => {
+    const { app, db, projectId, cookie, csrf } = await setup();
+    const workerId = insertComponent(db, projectId, "worker", { isWeb: false });
+    const notWeb = await createDomain(app, projectId, cookie, csrf, {
+      hostname: "a.example.com",
+      componentId: workerId,
+      internalPort: 3001,
+    });
+    expect(notWeb.status).toBe(400);
+    const foreign = await createDomain(app, projectId, cookie, csrf, {
+      hostname: "b.example.com",
+      componentId: ulid(),
+      internalPort: 3001,
+    });
+    expect(foreign.status).toBe(400);
+  });
+
+  test("PATCH ย้าย component ได้ และ null = กลับไป web ตัวแรก", async () => {
+    const { app, db, projectId, cookie, csrf } = await setup();
+    const apiId = insertComponent(db, projectId, "api", { isWeb: true });
+    const created = await json(
+      await createDomain(app, projectId, cookie, csrf, {
+        hostname: "api.example.com",
+        internalPort: 3001,
+      }),
+    );
+    const patch = (componentId: string | null) =>
+      app.handle(
+        new Request(`http://localhost/api/v1/projects/${projectId}/domains/${created.id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json", cookie, "x-csrf-token": csrf },
+          body: JSON.stringify({ componentId }),
+        }),
+      );
+    expect((await json(await patch(apiId))).componentId).toBe(apiId);
+    expect((await json(await patch(null))).componentId).toBeNull();
+  });
+
+  test("ลบ component → domain ที่ผูกไว้ถูกปลดเป็น null (ไม่ติด FK)", async () => {
+    const { app, db, projectId, cookie, csrf } = await setup();
+    const apiId = insertComponent(db, projectId, "api", { isWeb: true });
+    const created = await json(
+      await createDomain(app, projectId, cookie, csrf, {
+        hostname: "api.example.com",
+        componentId: apiId,
+        internalPort: 3001,
+      }),
+    );
+    const res = await app.handle(
+      new Request(`http://localhost/api/v1/projects/${projectId}/components/${apiId}`, {
+        method: "DELETE",
+        headers: { cookie, "x-csrf-token": csrf },
+      }),
+    );
+    expect(res.status).toBeLessThan(300);
+    const row = db
+      .query<{ component_id: string | null }, [string]>(
+        "SELECT component_id FROM project_domains WHERE id = ?",
+      )
+      .get(created.id);
+    expect(row?.component_id).toBeNull();
+  });
+});

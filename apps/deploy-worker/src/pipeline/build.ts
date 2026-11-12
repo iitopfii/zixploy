@@ -166,6 +166,12 @@ export async function runBuildOrRollbackPipeline(
             signal: deployTimeout.signal,
             onLog: safeLog,
           });
+        } else if (payload.source.type === "images") {
+          // control-api สร้าง source นี้ให้เฉพาะโปรเจกต์ compose (ไปทาง runComposePipeline) — มาถึงนี่ = ข้อมูลเพี้ยน
+          throw new AppError(
+            "WORKSPACE_ERROR",
+            "source แบบ images ใช้ได้กับโปรเจกต์ compose เท่านั้น — ตั้ง source ที่ Source tab ก่อน",
+          );
         } else {
           // dockerfile-paste source (Phase 13) — ไม่มี git clone เลย เขียนเนื้อหาที่ผู้ใช้วางเอง
           // ลง buildContextDir ตรง ๆ; dockerfilePath ถูกบังคับเป็น 'Dockerfile' และ buildContext

@@ -657,7 +657,7 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
 
         <!-- Domains -->
         <div v-else-if="activeTab === 'domains'" class="card">
-          <DomainsTab :project-id="id" :archived="!!project.archivedAt" />
+          <DomainsTab :project-id="id" :archived="!!project.archivedAt" :mode="project.mode" />
         </div>
 
         <!-- Components -->
@@ -677,7 +677,7 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
 
         <!-- Volumes -->
         <div v-else-if="activeTab === 'volumes'" class="card">
-          <VolumesTab :project-id="id" :archived="!!project.archivedAt" />
+          <VolumesTab :project-id="id" :archived="!!project.archivedAt" :mode="project.mode" />
         </div>
       </div>
 

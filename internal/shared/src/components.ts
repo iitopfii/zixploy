@@ -63,3 +63,44 @@ export function validateImageRef(ref: string): { ok: boolean; reason?: string } 
   }
   return { ok: true };
 }
+
+/** host ที่ Docker ใช้แทน Docker Hub — ref ที่ไม่ระบุ registry (เช่น "nginx:1.27") ไปที่นี่ */
+export const DOCKER_HUB_REGISTRY = "docker.io";
+
+/**
+ * registry host ของ image ref ตามกฎเดียวกับ Docker: ส่วนแรกก่อน "/" นับเป็น host ก็ต่อเมื่อมี "."
+ * หรือ ":" หรือเป็น "localhost" — ไม่งั้นเป็น namespace บน Docker Hub ("library/nginx", "acme/app")
+ */
+export function imageRegistry(ref: string): string {
+  const slash = ref.indexOf("/");
+  if (slash === -1) return DOCKER_HUB_REGISTRY;
+  const first = ref.slice(0, slash).toLowerCase();
+  if (first !== "localhost" && !first.includes(".") && !first.includes(":")) {
+    return DOCKER_HUB_REGISTRY;
+  }
+  return first === "index.docker.io" || first === "registry-1.docker.io"
+    ? DOCKER_HUB_REGISTRY
+    : first;
+}
+
+/**
+ * ตรวจ + normalize registry host ที่ผู้ใช้กรอก — รับ "ghcr.io", "https://ghcr.io/", "registry.local:5000"
+ * คืน host lowercase (ไม่มี scheme/path) · alias ของ Docker Hub ทุกแบบกลายเป็น "docker.io"
+ */
+export function normalizeRegistryHost(raw: string): string {
+  let host = raw.trim().toLowerCase();
+  host = host.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  if (
+    host === "index.docker.io" ||
+    host === "registry-1.docker.io" ||
+    host.startsWith("index.docker.io/")
+  ) {
+    return DOCKER_HUB_REGISTRY;
+  }
+  if (
+    !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]{1,5})?$/.test(host)
+  ) {
+    throw new Error("registry ต้องเป็น host เช่น ghcr.io หรือ registry.example.com:5000 (ไม่มี path)");
+  }
+  return host;
+}

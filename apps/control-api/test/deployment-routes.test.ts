@@ -292,6 +292,119 @@ describe("POST /api/v1/projects/:id/redeploy", () => {
   });
 });
 
+// === โปรเจกต์ compose ที่มีแต่ image component — deploy ได้โดยไม่ต้องมี repo/Dockerfile ===
+function insertComponent(
+  db: ReturnType<typeof openDatabase>,
+  projectId: string,
+  c: { name: string; sourceKind: "build" | "image"; imageRef?: string; isWeb?: boolean },
+) {
+  const now = Date.now();
+  db.query(
+    `INSERT INTO project_components
+      (id, project_id, name, role, source_kind, image_ref, is_web, web_port, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    ulid(),
+    projectId,
+    c.name,
+    c.isWeb ? "web" : "worker",
+    c.sourceKind,
+    c.imageRef ?? null,
+    c.isWeb ? 1 : 0,
+    c.isWeb ? 3000 : null,
+    now,
+    now,
+  );
+}
+
+function insertImageOnlyComposeProject(db: ReturnType<typeof openDatabase>) {
+  const projectId = insertBareProject(db, "image-only");
+  db.query("UPDATE projects SET mode = 'compose' WHERE id = ?").run(projectId);
+  insertComponent(db, projectId, {
+    name: "web",
+    sourceKind: "image",
+    imageRef: "ghcr.io/acme/web:1.0.0",
+    isWeb: true,
+  });
+  insertComponent(db, projectId, {
+    name: "worker",
+    sourceKind: "image",
+    imageRef: "ghcr.io/acme/worker:1.0.0",
+  });
+  return projectId;
+}
+
+describe("deploy โปรเจกต์ compose แบบ image ล้วน", () => {
+  const deploy = (app: ReturnType<typeof buildApp>, projectId: string, path: string, h: Headers) =>
+    app.handle(
+      new Request(`http://localhost/api/v1/projects/${projectId}/${path}`, {
+        method: "POST",
+        headers: h,
+      }),
+    );
+
+  test("ไม่มี repo/Dockerfile → 201 และ payload.source เป็น images", async () => {
+    const { app, db, cookie, csrf } = await setup();
+    const projectId = insertImageOnlyComposeProject(db);
+    const res = await deploy(
+      app,
+      projectId,
+      "deploy",
+      new Headers({ cookie, "x-csrf-token": csrf }),
+    );
+    expect(res.status).toBe(201);
+    const body = await json(res);
+    expect(body.commitSha).toMatch(/^[0-9a-f]{64}$/);
+    const job = db
+      .query<{ payload: string }, [string]>(
+        "SELECT payload FROM deploy_jobs WHERE deployment_id = ?",
+      )
+      .get(body.id);
+    expect(JSON.parse(job?.payload ?? "{}").source).toEqual({ type: "images" });
+  });
+
+  test("commitSha เปลี่ยนตาม image ref", async () => {
+    const { app, db, cookie, csrf } = await setup();
+    const projectId = insertImageOnlyComposeProject(db);
+    const headers = new Headers({ cookie, "x-csrf-token": csrf });
+    const first = await json(await deploy(app, projectId, "deploy", headers));
+    db.query("UPDATE deployments SET status = 'succeeded' WHERE id = ?").run(first.id);
+    db.query("UPDATE deploy_jobs SET status = 'done' WHERE deployment_id = ?").run(first.id);
+    db.query(
+      "UPDATE project_components SET image_ref = 'ghcr.io/acme/web:1.0.1' WHERE project_id = ? AND name = 'web'",
+    ).run(projectId);
+    const second = await json(await deploy(app, projectId, "redeploy", headers));
+    expect(second.commitSha).toMatch(/^[0-9a-f]{64}$/);
+    expect(second.commitSha).not.toBe(first.commitSha);
+  });
+
+  test("มี build component → ยังต้องมี source ตามเดิม (400)", async () => {
+    const { app, db, cookie, csrf } = await setup();
+    const projectId = insertImageOnlyComposeProject(db);
+    insertComponent(db, projectId, { name: "api", sourceKind: "build" });
+    const res = await deploy(
+      app,
+      projectId,
+      "deploy",
+      new Headers({ cookie, "x-csrf-token": csrf }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("single mode ไม่ได้รับผลกระทบ — ไม่มี source ยัง 400", async () => {
+    const { app, db, cookie, csrf } = await setup();
+    const projectId = insertBareProject(db);
+    insertComponent(db, projectId, { name: "web", sourceKind: "image", imageRef: "nginx:1.27" });
+    const res = await deploy(
+      app,
+      projectId,
+      "deploy",
+      new Headers({ cookie, "x-csrf-token": csrf }),
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
 // === POST /projects/:id/restart, /stop ===
 describe("POST /api/v1/projects/:id/restart", () => {
   test("ไม่มี succeeded deployment → 400", async () => {

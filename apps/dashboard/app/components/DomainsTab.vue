@@ -10,7 +10,7 @@
  * โดยเฉพาะ DNS ที่ผู้ใช้ต้องไปตั้งค่าที่ registrar ซึ่งอยู่นอกระบบเรา — ถ้าบอกแค่ว่า
  * "mismatch" ผู้ใช้ไม่รู้ว่าต้องสร้าง record อะไร ชี้ไปที่ IP ไหน
  */
-const props = defineProps<{ projectId: string; archived: boolean }>();
+const props = defineProps<{ projectId: string; archived: boolean; mode?: string }>();
 
 const api = useApi();
 
@@ -21,6 +21,8 @@ const api = useApi();
 interface Domain {
   id: string;
   hostname: string;
+  pathPrefix: string | null;
+  componentId: string | null;
   internalPort: number;
   httpsEnabled: boolean;
   redirectHttp: boolean;
@@ -74,12 +76,52 @@ async function fetchDomains() {
 await fetchDomains();
 
 // ---------------------------------------------------------------------------
+// Web components (compose) — domain เลือกได้ว่าจะส่ง traffic ไป component ไหน
+// ---------------------------------------------------------------------------
+
+interface WebComponent {
+  id: string;
+  name: string;
+  webPort: number | null;
+}
+
+const isCompose = computed(() => props.mode === "compose");
+const webComponents = ref<WebComponent[]>([]);
+
+async function fetchWebComponents() {
+  if (!isCompose.value) return;
+  try {
+    const { data } = await api.api.v1.projects({ id: props.projectId }).components.get();
+    const list = (data?.items ?? []) as Array<
+      WebComponent & { isWeb: boolean; sourceKind: string }
+    >;
+    webComponents.value = list
+      .filter((c) => c.isWeb && c.sourceKind !== "managed_ref")
+      .map(({ id, name, webPort }) => ({ id, name, webPort }));
+  } catch {
+    // ไม่มีรายชื่อ component ก็ยังเพิ่ม domain แบบเดิมได้ (ไปที่ web ตัวแรก)
+  }
+}
+
+await fetchWebComponents();
+
+/** ชื่อ component ที่ domain ชี้ไป — null = web ตัวแรก (ค่าเริ่มต้นของ worker) */
+function componentLabel(d: Domain): string {
+  const target = d.componentId
+    ? webComponents.value.find((c) => c.id === d.componentId)
+    : webComponents.value[0];
+  return target ? target.name : "web ตัวแรก";
+}
+
+// ---------------------------------------------------------------------------
 // Add form
 // ---------------------------------------------------------------------------
 
 const showAdd = ref(false);
 const addForm = reactive({
   hostname: "",
+  pathPrefix: "",
+  componentId: "",
   internalPort: 3000,
   httpsEnabled: true,
   redirectHttp: true,
@@ -123,6 +165,8 @@ async function addDomain() {
   try {
     const { error } = await api.api.v1.projects({ id: props.projectId }).domains.post({
       hostname: addForm.hostname.trim(),
+      ...(addForm.pathPrefix.trim() ? { pathPrefix: addForm.pathPrefix.trim() } : {}),
+      ...(addForm.componentId ? { componentId: addForm.componentId } : {}),
       internalPort: addForm.internalPort,
       httpsEnabled: addForm.httpsEnabled,
       redirectHttp: addForm.redirectHttp,
@@ -133,6 +177,7 @@ async function addDomain() {
     }
     showAdd.value = false;
     addForm.hostname = "";
+    addForm.pathPrefix = "";
     await fetchDomains();
   } catch {
     addError.value = "ติดต่อ API ไม่ได้";
@@ -146,7 +191,12 @@ async function addDomain() {
 // ---------------------------------------------------------------------------
 
 const editPanelId = ref<string | null>(null);
-const editForm = reactive({ httpsEnabled: true, redirectHttp: true, externalProxy: false });
+const editForm = reactive({
+  httpsEnabled: true,
+  redirectHttp: true,
+  externalProxy: false,
+  componentId: "",
+});
 const editError = ref("");
 const editSaving = ref(false);
 
@@ -158,6 +208,7 @@ function toggleEditPanel(d: Domain) {
   editPanelId.value = d.id;
   editForm.httpsEnabled = d.httpsEnabled;
   editForm.redirectHttp = d.redirectHttp;
+  editForm.componentId = d.componentId ?? "";
   // อนุมานสถานะติ๊กจากค่าเดิม: ปิดทั้ง HTTPS และ redirect = ท่าเดียวกับโหมด proxy ภายนอก
   editForm.externalProxy = !d.httpsEnabled && !d.redirectHttp;
   editError.value = "";
@@ -175,6 +226,7 @@ async function saveHttpsSettings(domainId: string) {
         // ปิด HTTPS แล้ว redirect ไม่มีความหมาย — ส่ง false ไปด้วยให้ค่าใน DB สอดคล้อง
         // กับที่ผู้ใช้เห็น (และให้การอนุมานติ๊ก proxy ภายนอกรอบหน้าไม่เพี้ยน)
         redirectHttp: editForm.httpsEnabled ? editForm.redirectHttp : false,
+        ...(isCompose.value ? { componentId: editForm.componentId || null } : {}),
       });
     if (error) {
       editError.value = errMessage(error, "บันทึกไม่สำเร็จ");
@@ -478,6 +530,27 @@ async function copyIp(ip: string) {
         <span>Hostname</span>
         <input v-model="addForm.hostname" placeholder="app.example.com" @keydown.enter="addDomain" />
       </label>
+      <label>
+        <span>Path prefix <span class="muted tiny">(ไม่บังคับ — เว้นว่าง = ทั้ง host)</span></span>
+        <input v-model="addForm.pathPrefix" placeholder="/api/" class="mono" />
+      </label>
+      <p v-if="addForm.pathPrefix.trim()" class="muted tiny">
+        เฉพาะ request ที่ path ขึ้นต้นด้วยค่านี้ — ชนะแถว "ทั้ง host" ของ hostname เดียวกันเสมอ
+      </p>
+      <label v-if="isCompose && webComponents.length > 0">
+        <span>ส่ง traffic ไปที่ component</span>
+        <select
+          v-model="addForm.componentId"
+          @change="
+            addForm.internalPort =
+              webComponents.find((c) => c.id === addForm.componentId)?.webPort ??
+              addForm.internalPort
+          "
+        >
+          <option value="">web ตัวแรก ({{ webComponents[0]?.name }})</option>
+          <option v-for="c in webComponents" :key="c.id" :value="c.id">{{ c.name }}</option>
+        </select>
+      </label>
       <label class="short-field">
         <span>Port ของ container</span>
         <input v-model.number="addForm.internalPort" type="number" min="1" max="65535" />
@@ -552,8 +625,9 @@ async function copyIp(ip: string) {
         <!-- Header: hostname + badges -->
         <div class="card-head">
           <div class="title-line">
-            <strong class="hostname truncate">{{ d.hostname }}</strong>
+            <strong class="hostname truncate">{{ d.hostname }}<span v-if="d.pathPrefix" class="mono">{{ d.pathPrefix }}</span></strong>
             <span class="muted small mono">:{{ d.internalPort }}</span>
+            <span v-if="isCompose" class="muted small">→ {{ componentLabel(d) }}</span>
           </div>
           <div class="badges">
             <span v-if="d.httpsEnabled" class="badge tone-ok">
@@ -701,6 +775,13 @@ async function copyIp(ip: string) {
 
         <!-- inline แก้ไข HTTPS/redirect — field เดิมของ PATCH ไม่มี field ใหม่ -->
         <div v-if="editPanelId === d.id" class="inset stack edit-panel">
+          <label v-if="isCompose && webComponents.length > 0">
+            <span>ส่ง traffic ไปที่ component</span>
+            <select v-model="editForm.componentId">
+              <option value="">web ตัวแรก ({{ webComponents[0]?.name }})</option>
+              <option v-for="c in webComponents" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
+          </label>
           <div class="form-checks">
             <div class="check-row">
               <input

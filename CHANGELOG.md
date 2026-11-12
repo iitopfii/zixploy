@@ -9,6 +9,35 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.1.24] — 2026-11-12
+
+### Added
+- **โปรเจกต์ compose ที่ใช้แต่ image สำเร็จรูป deploy ได้โดยไม่ต้องผูก repo** — เดิมต้องตั้ง
+  GitHub source ก่อนถึงจะกด deploy ได้ แม้ทุก component จะดึง image จาก registry อยู่แล้ว ·
+  ตอนนี้ถ้าไม่มี component ที่ต้อง build ก็ deploy/redeploy ได้ทันที และเปลี่ยน tag ของ image
+  ก็นับเป็นรอบใหม่
+- **domain ต่อ component และแยกตาม path** — ผูก domain เข้ากับ web component ตัวไหนก็ได้ และตั้ง
+  path prefix ได้ เช่น `app.example.com` → web, `app.example.com/api/` → api · โปรเจกต์เดียวมี
+  web component หลายตัวได้แล้ว (redirect www/root ใช้กับแถวที่มี path ไม่ได้)
+- **login private registry** — เพิ่ม credential ของ registry (เช่น `ghcr.io`) ได้ที่หน้า
+  Settings → System · รหัสผ่านเข้ารหัสเก็บ และ worker ใช้เฉพาะตอน pull image แล้วลบทิ้ง
+  ไม่ `docker login` ค้างไว้บนเครื่อง
+- **volume ต่อ component ในโปรเจกต์ compose** — เลือกได้ว่า volume จะ mount เข้า component ไหน
+  ข้อมูลอยู่ข้ามรอบ deploy (เช่น cache ของโมเดล)
+- **hardening ต่อ component** — ตั้ง `cap-drop ALL`, `no-new-privileges`, memory swap และ
+  pids limit ได้จากหน้า Components
+
+### Fixed
+- **ลบ component ที่มี domain, volume หรือตัวแปรผูกอยู่ไม่ได้** — ตอนนี้ลบได้ โดย domain ย้ายไป
+  web component ตัวแรก, volume ถูกปลดออกแต่ข้อมูลยังอยู่ และตัวแปรเฉพาะ component ถูกลบตาม
+
+### Changed
+- migration 0030–0032 · 0030 สร้างตาราง domain ใหม่โดยคงข้อมูลเดิมครบ (รวม cert ที่อัปโหลดเอง)
+  ถ้า rollback จะทิ้งเฉพาะ domain ที่มี path · โปรเจกต์ single และ compose ที่มี web ตัวเดียว
+  ได้ Traefik label ชุดเดิม ไม่ต้อง deploy ใหม่
+
+---
+
 ## [0.1.23] — 2026-10-27
 
 ### Added

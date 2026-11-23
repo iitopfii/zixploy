@@ -666,6 +666,7 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
             :project-id="id"
             :archived="!!project.archivedAt"
             :mode="project.mode"
+            :installations="activeInstallations"
             @changed="refresh()"
           />
         </div>

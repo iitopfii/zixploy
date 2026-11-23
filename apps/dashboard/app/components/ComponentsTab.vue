@@ -6,9 +6,20 @@
  * โปรเจกต์เป็น mode='compose' เมื่อพร้อม (มี ≥1 component + ≥1 web) — deploy ครั้งถัดไปจะวิ่ง
  * multi-container orchestrator แทน pipeline เดิม
  *
+ * build component เลือก repo/branch ของตัวเองได้ (0.1.25) — โปรเจกต์ที่โค้ดอยู่หลาย repo (เช่น backend กับ
+ * frontend) อยู่ในโปรเจกต์เดียว คุยกันผ่านชื่อ component บน network ภายในได้เหมือน compose
+ *
  * ADR-0002: หน้านี้แค่เขียน config ผ่าน API — worker เป็นฝ่ายเอาไปสร้าง container จริง
  */
-const props = defineProps<{ projectId: string; archived: boolean; mode: "single" | "compose" }>();
+import type { PickedRepo, PickerInstallation } from "./RepositoryPicker.vue";
+
+const props = defineProps<{
+  projectId: string;
+  archived: boolean;
+  mode: "single" | "compose";
+  /** GitHub installation ที่ active — ใช้เลือก repo ของ build component */
+  installations?: PickerInstallation[];
+}>();
 const emit = defineEmits<{ changed: [] }>();
 
 const api = useApi();
@@ -31,6 +42,7 @@ interface Component {
   dockerfilePath: string | null;
   buildContext: string | null;
   targetStage: string | null;
+  gitSource: GitSource | null;
   imageRef: string | null;
   managedServiceId: string | null;
   command: string | null;
@@ -49,6 +61,12 @@ interface Component {
   position: number;
   enabled: boolean;
   dependsOn: ComponentDep[];
+}
+
+interface GitSource {
+  installationId: number;
+  repoFullName: string;
+  branch: string;
 }
 
 interface ServiceOption {
@@ -110,6 +128,8 @@ const blankForm = () => ({
   dockerfilePath: "Dockerfile",
   buildContext: ".",
   targetStage: "",
+  /** null = build จาก repo ของ project */
+  gitSource: null as GitSource | null,
   imageRef: "",
   managedServiceId: "",
   command: "",
@@ -158,6 +178,7 @@ function openEdit(c: Component) {
     dockerfilePath: c.dockerfilePath ?? "Dockerfile",
     buildContext: c.buildContext ?? ".",
     targetStage: c.targetStage ?? "",
+    gitSource: c.gitSource ? { ...c.gitSource } : null,
     imageRef: c.imageRef ?? "",
     managedServiceId: c.managedServiceId ?? "",
     command: c.command ?? "",
@@ -181,7 +202,25 @@ function openEdit(c: Component) {
 function closeForm() {
   formMode.value = null;
   editingId.value = null;
+  pickingRepo.value = false;
   resetForm();
+}
+
+/** กำลังเลือก repo ของ component (เปิด RepositoryPicker) */
+const pickingRepo = ref(false);
+
+function onRepoPicked(picked: PickedRepo) {
+  form.gitSource = {
+    installationId: picked.installationId,
+    repoFullName: picked.repoFullName,
+    branch: picked.branch,
+  };
+  pickingRepo.value = false;
+}
+
+function useProjectRepo() {
+  form.gitSource = null;
+  pickingRepo.value = false;
 }
 
 function toggleDep(name: string, checked: boolean) {
@@ -234,6 +273,7 @@ function buildPayload() {
       dockerfilePath: form.dockerfilePath.trim() || "Dockerfile",
       buildContext: form.buildContext.trim() || ".",
       targetStage: form.targetStage.trim() === "" ? null : form.targetStage.trim(),
+      gitSource: form.gitSource,
     };
   }
   // image
@@ -369,8 +409,10 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 
 function sourceSummary(c: Component): string {
-  if (c.sourceKind === "build")
-    return `${c.buildContext ?? "."} · ${c.dockerfilePath ?? "Dockerfile"}`;
+  if (c.sourceKind === "build") {
+    const path = `${c.buildContext ?? "."} · ${c.dockerfilePath ?? "Dockerfile"}`;
+    return c.gitSource ? `${c.gitSource.repoFullName}@${c.gitSource.branch} · ${path}` : path;
+  }
   if (c.sourceKind === "image") return c.imageRef ?? "—";
   const svc = services.value.find((s) => s.id === c.managedServiceId);
   return svc ? `${svc.name} (${svc.type})` : "managed database";
@@ -525,6 +567,39 @@ function sourceSummary(c: Component): string {
           </select>
           <small v-if="formMode === 'edit'" class="muted">เปลี่ยนที่มาไม่ได้หลังสร้าง — ลบแล้วสร้างใหม่</small>
         </label>
+
+        <!-- build: repo ของ component (ไม่ตั้ง = repo ของ project) -->
+        <div v-if="form.sourceKind === 'build'" class="repo-source">
+          <span class="repo-label">Repository</span>
+          <div class="repo-row">
+            <span v-if="form.gitSource" class="mono">
+              {{ form.gitSource.repoFullName }} @ {{ form.gitSource.branch }}
+            </span>
+            <span v-else class="muted">ใช้ repo ของ project</span>
+            <button
+              type="button"
+              class="secondary small"
+              :disabled="!installations || installations.length === 0"
+              @click="pickingRepo = !pickingRepo"
+            >
+              {{ pickingRepo ? "ยกเลิก" : form.gitSource ? "เปลี่ยน repo" : "ใช้ repo อื่น" }}
+            </button>
+            <button v-if="form.gitSource" type="button" class="secondary small" @click="useProjectRepo">
+              กลับไปใช้ repo ของ project
+            </button>
+          </div>
+          <small v-if="!installations || installations.length === 0" class="muted">
+            ต้องเชื่อม GitHub App ก่อนถึงเลือก repo อื่นได้
+          </small>
+          <small v-else class="muted">
+            deploy จะ build commit ล่าสุดของ branch นี้ · redeploy ใช้ commit เดิม
+          </small>
+          <RepositoryPicker
+            v-if="pickingRepo && installations && installations.length > 0"
+            :installations="installations"
+            @pick="onRepoPicked"
+          />
+        </div>
 
         <!-- build fields -->
         <div v-if="form.sourceKind === 'build'" class="form-grid">
@@ -776,6 +851,21 @@ function sourceSummary(c: Component): string {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: var(--s-3);
+}
+.repo-source {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.repo-label {
+  font-size: var(--t-sm);
+  font-weight: 500;
+}
+.repo-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
 }
 .field-label {
   font-size: var(--t-xs);

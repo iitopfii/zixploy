@@ -15,6 +15,8 @@ export interface DeployComponent {
   dockerfilePath: string | null;
   buildContext: string | null;
   targetStage: string | null;
+  /** repo/branch ของตัวเอง (0.1.25) — null = build จาก clone ของ project */
+  gitSource: { installationRowId: string; repoFullName: string; branch: string } | null;
   imageRef: string | null;
   managedServiceId: string | null;
   command: string | null;
@@ -66,6 +68,9 @@ interface ComponentRow {
   no_new_privileges: number;
   restart_policy: string;
   position: number;
+  repo_installation_id: string | null;
+  repo_full_name: string | null;
+  repo_branch: string | null;
 }
 
 /** component ทั้งหมดที่ enabled ของโปรเจกต์ พร้อม dependency (เรียงตาม position) */
@@ -76,7 +81,7 @@ export function loadDeployComponents(db: Database, projectId: string): DeployCom
               managed_service_id, command, internal_port, is_web, web_port, health_check_path,
               health_cmd, health_check_interval_sec, health_check_timeout_sec, health_check_retries,
               cpu_limit, memory_limit_mb, memory_swap_mb, pids_limit, cap_drop_all, no_new_privileges,
-              restart_policy, position
+              restart_policy, position, repo_installation_id, repo_full_name, repo_branch
          FROM project_components
         WHERE project_id = ? AND enabled = 1
         ORDER BY position, created_at`,
@@ -103,6 +108,14 @@ export function loadDeployComponents(db: Database, projectId: string): DeployCom
     dockerfilePath: r.dockerfile_path,
     buildContext: r.build_context,
     targetStage: r.target_stage,
+    gitSource:
+      r.repo_installation_id && r.repo_full_name && r.repo_branch
+        ? {
+            installationRowId: r.repo_installation_id,
+            repoFullName: r.repo_full_name,
+            branch: r.repo_branch,
+          }
+        : null,
     imageRef: r.image_ref,
     managedServiceId: r.managed_service_id,
     command: r.command,

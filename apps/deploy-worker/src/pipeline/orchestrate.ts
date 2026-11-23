@@ -6,7 +6,7 @@
  *   cloning → building → starting → health_checking → activating → succeeded
  *
  * แต่ละ state ทำงานของหลาย component พร้อมกันภายใน:
- *   cloning   — clone repo ครั้งเดียว (ถ้ามี build component)
+ *   cloning   — clone repo ของ project ครั้งเดียว + repo ของ component ที่ตั้ง repo แยก (0.1.25)
  *   building  — build ทุก build-component + pull ทุก image-component
  *   starting  — สร้าง per-deployment network + สร้าง container ทุกตัว (มี DNS alias)
  *   health_checking — start ตามลำดับ topological + gate ตัวที่ต้อง healthy ก่อนไปตัวถัดไป
@@ -17,12 +17,15 @@
  *
  * web หลายตัวได้ (0.1.24): domain ผูกกับ component + route ตาม path — ดู domainsFor ด้านล่าง
  * named volume ต่อ component (0.1.24): volumes.component_id — ดู loadComponentVolumes
+ * build arg/secret ต่อ component (0.1.25): env scope build/both ของ project + ของ component (component ชนะ)
  * image cleanup ข้ามไปก่อน (Phase D/F) — กันลบ image ผิดตัว ปลอดภัยกว่าลบมั่ว
  *
  * ทุก dependency ฉีดเข้ามาเป็นพารามิเตอร์ (เหมือน build.ts) เพื่อ unit-test ได้โดยไม่ต้องมี Docker จริง
  */
 
 import type { Database } from "bun:sqlite";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   AppError,
@@ -41,12 +44,12 @@ import {
 } from "@zixploy/shared";
 import { failDeployment, getDeploymentStatus, transitionDeployment } from "../db/deployment-state";
 import { loadProjectConfig, setProjectStatus } from "../db/project-config";
-import type { BuildImageParams, BuildImageResult } from "../docker/buildkit";
+import type { BuildImageParams, BuildImageResult, BuildSecret } from "../docker/buildkit";
 import type { DockerCliClient } from "../docker/cli-client";
 import { loadProjectDomains } from "../domains/loader";
-import { injectComponentEnv, injectEnvVars } from "../env/inject";
+import { type EnvInjection, injectComponentEnv, injectEnvVars } from "../env/inject";
 import { buildRedactFn } from "../env/redaction";
-import type { CloneParams } from "../git/clone";
+import type { CloneParams, ResolveBranchParams } from "../git/clone";
 import type { MasterKeys } from "../github/master-key";
 import type { MintedToken } from "../github/token";
 import type { ClaimedJob } from "../queue";
@@ -80,6 +83,8 @@ export interface OrchestrateDeps {
     installationId: number,
   ) => Promise<MintedToken>;
   cloneCommit: (params: CloneParams) => Promise<void>;
+  /** branch → commit ล่าสุด ของ component ที่มี repo ของตัวเอง (0.1.25) */
+  resolveBranchHead: (params: ResolveBranchParams) => Promise<string>;
   buildImage: (params: BuildImageParams) => Promise<BuildImageResult>;
   waitForHealthy: (params: HealthCheckParams) => Promise<void>;
   /** รอ Docker-native health ของ dependency ที่ระบุ condition='healthy' (Phase 18 · F) */
@@ -116,6 +121,44 @@ function healthPort(c: DeployComponent): number | null {
   return c.isWeb ? c.webPort : null;
 }
 
+/** github_installations.id (ULID ภายใน) → installation ID ตัวเลขของ GitHub — ต้อง active */
+function installationNumber(db: Database, rowId: string, componentName: string): number {
+  const row = db
+    .query<{ installation_id: number; status: string }, [string]>(
+      "SELECT installation_id, status FROM github_installations WHERE id = ?",
+    )
+    .get(rowId);
+  if (row?.status !== "active") {
+    throw new AppError(
+      "CLONE_FAILED",
+      `GitHub installation ของ repo ที่ component "${componentName}" ใช้ไม่พร้อม (ไม่พบหรือไม่ active)`,
+    );
+  }
+  return row.installation_id;
+}
+
+/** build arg + secret ของ component: project-wide ก่อน แล้ว component-scoped ทับ key เดียวกัน */
+export function mergeBuildEnv(
+  base: EnvInjection,
+  scoped: EnvInjection | undefined,
+): { buildArgs: Record<string, string>; secrets: Array<{ key: string; value: string }> } {
+  const secretMap = new Map<string, string>();
+  for (const s of base.buildSecretValues) secretMap.set(s.key, s.value);
+  const buildArgs = { ...base.buildArgs };
+  for (const s of scoped?.buildSecretValues ?? []) {
+    secretMap.set(s.key, s.value);
+    delete buildArgs[s.key];
+  }
+  for (const [k, v] of Object.entries(scoped?.buildArgs ?? {})) {
+    buildArgs[k] = v;
+    secretMap.delete(k);
+  }
+  return {
+    buildArgs,
+    secrets: [...secretMap].map(([key, value]) => ({ key, value })),
+  };
+}
+
 export async function runComposePipeline(
   deps: OrchestrateDeps,
   job: ClaimedJob,
@@ -147,7 +190,8 @@ export async function runComposePipeline(
   }
 
   const buildComps = components.filter((c) => c.sourceKind === "build");
-  if (buildComps.length > 0 && payload.source.type !== "github") {
+  const projectSourced = buildComps.filter((c) => !c.gitSource);
+  if (projectSourced.length > 0 && payload.source.type !== "github") {
     failDeployment(
       db,
       deploymentId,
@@ -163,7 +207,19 @@ export async function runComposePipeline(
 
   try {
     const envInject = await injectEnvVars(db, deps.masterKeys, job.projectId, onLog);
-    const redactFn = buildRedactFn(envInject.secretValues);
+    // env เฉพาะ component โหลดครั้งเดียวก่อน clone — ใช้ทั้ง build arg/secret, runtime env และ redact log
+    // ของ build (secret ของ component ต้องไม่หลุดใน build log เหมือนของ project)
+    const scopedEnv = new Map<string, EnvInjection>();
+    for (const c of components) {
+      scopedEnv.set(
+        c.id,
+        await injectComponentEnv(db, deps.masterKeys, job.projectId, c.id, onLog),
+      );
+    }
+    const redactFn = buildRedactFn([
+      ...envInject.secretValues,
+      ...[...scopedEnv.values()].flatMap((s) => s.secretValues),
+    ]);
     const safeLog = (line: string) => onLog(redactFn(line));
 
     // Fail-loud เหมือน single-container pipeline (build.ts): env ตั้งไว้แต่ฉีดไม่ได้เลย = ตัดจบ
@@ -196,27 +252,90 @@ export async function runComposePipeline(
 
     const imageTags = new Map<string, string>();
 
-    // ── cloning: clone repo ครั้งเดียว (ผ่าน state นี้เสมอ แม้ image-only ที่ไม่มีอะไร clone) ──
+    // ── cloning: repo ของ project ครั้งเดียว + repo ของ component ที่ตั้งแยก (repo@commit ซ้ำ clone ครั้งเดียว)
+    // ผ่าน state นี้เสมอ แม้ image-only ที่ไม่มีอะไร clone · แต่ละ repo อยู่ใน sub-dir ของ workspace
+    // ไม่ซ้อนกัน — build context ของ repo หนึ่งจึงไม่มีไฟล์ของอีก repo ปน
     transitionDeployment(db, deploymentId, "cloning");
     let workspaceDir: string | null = null;
+    let secretDir: string | null = null;
+    /** component id → root ของ checkout ที่ build */
+    const checkoutOf = new Map<string, string>();
+    /** commit ที่ build ของ component ที่มี repo ของตัวเอง */
+    const componentCommits: Record<string, string> = {};
     try {
-      if (buildComps.length > 0 && payload.source.type === "github") {
+      if (buildComps.length > 0) {
         const ws = createWorkspace(deploymentId, ".");
         workspaceDir = ws.workspaceDir;
-        const token = await deps.mintInstallationToken(
-          db,
-          deps.masterKeys,
-          payload.source.installationId,
-        );
-        await deps.cloneCommit({
-          repoFullName: payload.source.repoFullName,
-          commitSha: payload.commitSha,
-          token: token.token,
-          destDir: workspaceDir,
-          timeoutMs: Math.floor(project.deployTimeoutSec * 1000 * 0.3),
-          signal: deployTimeout.signal,
-          onLog: safeLog,
-        });
+        const cloneMs = Math.floor(project.deployTimeoutSec * 1000 * 0.3);
+
+        if (projectSourced.length > 0 && payload.source.type === "github") {
+          const dir = join(workspaceDir, "project");
+          const token = await deps.mintInstallationToken(
+            db,
+            deps.masterKeys,
+            payload.source.installationId,
+          );
+          await deps.cloneCommit({
+            repoFullName: payload.source.repoFullName,
+            commitSha: payload.commitSha,
+            token: token.token,
+            destDir: dir,
+            timeoutMs: cloneMs,
+            signal: deployTimeout.signal,
+            onLog: safeLog,
+          });
+          for (const c of projectSourced) checkoutOf.set(c.id, dir);
+        }
+
+        const checkouts = new Map<string, string>();
+        for (const c of buildComps) {
+          if (!c.gitSource) continue;
+          const src = c.gitSource;
+          const token = await deps.mintInstallationToken(
+            db,
+            deps.masterKeys,
+            installationNumber(db, src.installationRowId, c.name),
+          );
+          const pinned = payload.componentCommits?.[c.id];
+          const sha =
+            pinned && /^[0-9a-f]{40}$/.test(pinned)
+              ? pinned
+              : await deps.resolveBranchHead({
+                  repoFullName: src.repoFullName,
+                  branch: src.branch,
+                  token: token.token,
+                  timeoutMs: cloneMs,
+                  signal: deployTimeout.signal,
+                });
+          componentCommits[c.id] = sha;
+          safeLog(
+            `[source] component "${c.name}" → ${src.repoFullName}@${src.branch} ${sha.slice(0, 7)}` +
+              (pinned === sha ? " (commit เดิมของ deployment ก่อน)" : ""),
+          );
+          const key = `${src.repoFullName.toLowerCase()}@${sha}`;
+          let dir = checkouts.get(key);
+          if (!dir) {
+            dir = join(workspaceDir, `repo-${checkouts.size + 1}`);
+            await deps.cloneCommit({
+              repoFullName: src.repoFullName,
+              commitSha: sha,
+              token: token.token,
+              destDir: dir,
+              timeoutMs: cloneMs,
+              signal: deployTimeout.signal,
+              onLog: safeLog,
+            });
+            checkouts.set(key, dir);
+          }
+          checkoutOf.set(c.id, dir);
+        }
+        if (Object.keys(componentCommits).length > 0) {
+          db.query("UPDATE deployments SET component_commits = ?, updated_at = ? WHERE id = ?").run(
+            JSON.stringify(componentCommits),
+            Date.now(),
+            deploymentId,
+          );
+        }
         assertWorkspaceSizeWithinLimit(workspaceDir, BUILD_SANDBOX_LIMITS.workspaceMaxMb);
       }
 
@@ -225,18 +344,38 @@ export async function runComposePipeline(
       if (workspaceDir) {
         const perBuildMs = Math.floor((project.deployTimeoutSec * 1000 * 0.7) / buildComps.length);
         for (const c of buildComps) {
-          const contextDir = join(workspaceDir, c.buildContext ?? ".");
+          const root = checkoutOf.get(c.id);
+          if (!root) {
+            throw new AppError("WORKSPACE_ERROR", `component "${c.name}" ไม่มี source ให้ build`);
+          }
+          const contextDir = join(root, c.buildContext ?? ".");
           const dockerfilePath = c.dockerfilePath ?? "Dockerfile";
           assertDockerfileWithinContext(contextDir, dockerfilePath);
-          const tag = componentImageName(job.projectId, c.id, payload.commitSha, deploymentId);
+          const sha = componentCommits[c.id] ?? payload.commitSha;
+          const tag = componentImageName(job.projectId, c.id, sha, deploymentId);
           safeLog(`[build] component "${c.name}" → ${tag}`);
+
+          // secret → --secret เป็นไฟล์ 0600 เท่านั้น ห้ามใช้ --build-arg (threat-model.md, เหมือน build.ts)
+          const { buildArgs, secrets } = mergeBuildEnv(envInject, scopedEnv.get(c.id));
+          const buildSecrets: BuildSecret[] = [];
+          if (secrets.length > 0) {
+            secretDir ??= join(tmpdir(), `zixploy-build-secrets-${deploymentId}`);
+            const dir = join(secretDir, c.id);
+            mkdirSync(dir, { recursive: true });
+            for (const { key, value } of secrets) {
+              const filePath = join(dir, key);
+              writeFileSync(filePath, value, { mode: 0o600 });
+              buildSecrets.push({ id: key, sourcePath: filePath });
+            }
+          }
           await deps.buildImage({
             contextDir,
             dockerfilePath,
             tag,
             target: c.targetStage,
             labels: componentLabels(job.projectId, deploymentId, c.id),
-            buildArgs: envInject.buildArgs,
+            buildArgs,
+            ...(buildSecrets.length > 0 ? { secrets: buildSecrets } : {}),
             timeoutMs: perBuildMs,
             signal: deployTimeout.signal,
             onLog: safeLog,
@@ -258,6 +397,14 @@ export async function runComposePipeline(
         imageTags.set(c.id, c.imageRef);
       }
     } finally {
+      // ลบไฟล์ secret ก่อน (ข้อมูล sensitive) แล้วค่อยลบ workspace
+      if (secretDir) {
+        try {
+          rmSync(secretDir, { recursive: true, force: true });
+        } catch {
+          // Windows อาจปล่อย handle ช้า — ปล่อยให้ OS เก็บกวาด
+        }
+      }
       if (workspaceDir) removeWorkspace(deploymentId);
     }
 
@@ -343,7 +490,9 @@ export async function runComposePipeline(
         componentEnv = { ...componentEnv, ...refEnv };
       }
       // component-scoped env override ทับสุด (ผู้ใช้ตั้งเองเจาะจง component นี้)
-      const scoped = await injectComponentEnv(db, deps.masterKeys, job.projectId, c.id, onLog);
+      const scoped =
+        scopedEnv.get(c.id) ??
+        (await injectComponentEnv(db, deps.masterKeys, job.projectId, c.id, onLog));
       if (scoped.definedCount > 0 && scoped.failedKeys.length === scoped.definedCount) {
         throw new AppError(
           "ENV_INJECTION_FAILED",

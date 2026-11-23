@@ -15,6 +15,8 @@ import {
   type ComponentSourceKind,
   type DepCondition,
   isComponentName,
+  isGitBranchName,
+  isRepoFullName,
   ulid,
   validateImageRef,
 } from "@zixploy/shared";
@@ -53,8 +55,21 @@ export interface ComponentRow {
   restart_policy: string;
   position: number;
   enabled: number;
+  repo_installation_id: string | null;
+  /** github_installations.installation_id (ตัวเลขของ GitHub) — join มาใน SELECT_ALL */
+  repo_installation_number: number | null;
+  repo_full_name: string | null;
+  repo_branch: string | null;
   created_at: number;
   updated_at: number;
+}
+
+/** repo/branch ของ build component เอง — null = ใช้ source ของ project */
+export interface ComponentGitSource {
+  /** GitHub installation ID (ตัวเลข) เหมือน body ของ PUT /projects/:id/source */
+  installationId: number;
+  repoFullName: string;
+  branch: string;
 }
 
 export interface ComponentDep {
@@ -72,6 +87,8 @@ export interface ComponentDto {
   dockerfilePath: string | null;
   buildContext: string | null;
   targetStage: string | null;
+  /** repo/branch ของตัวเอง (build เท่านั้น) — null = build จาก repo ของ project */
+  gitSource: ComponentGitSource | null;
   imageRef: string | null;
   managedServiceId: string | null;
   command: string | null;
@@ -106,6 +123,7 @@ export interface ComponentInput {
   dockerfilePath?: string | null;
   buildContext?: string | null;
   targetStage?: string | null;
+  gitSource?: ComponentGitSource | null;
   imageRef?: string | null;
   managedServiceId?: string | null;
   command?: string | null;
@@ -130,7 +148,10 @@ const SELECT_ALL = `
   image_ref, managed_service_id, command, internal_port, is_web, web_port, exposed_port,
   health_check_path, health_check_interval_sec, health_check_timeout_sec, health_check_retries,
   health_cmd, cpu_limit, memory_limit_mb, memory_swap_mb, pids_limit, cap_drop_all, no_new_privileges,
-  restart_policy, position, enabled, created_at, updated_at
+  restart_policy, position, enabled, repo_installation_id, repo_full_name, repo_branch,
+  (SELECT gi.installation_id FROM github_installations gi WHERE gi.id = repo_installation_id)
+    AS repo_installation_number,
+  created_at, updated_at
 `;
 
 // ---------------------------------------------------------------------------
@@ -177,6 +198,14 @@ export function toDto(row: ComponentRow, deps: ComponentDep[]): ComponentDto {
     dockerfilePath: row.dockerfile_path,
     buildContext: row.build_context,
     targetStage: row.target_stage,
+    gitSource:
+      row.repo_full_name && row.repo_branch && row.repo_installation_number != null
+        ? {
+            installationId: row.repo_installation_number,
+            repoFullName: row.repo_full_name,
+            branch: row.repo_branch,
+          }
+        : null,
     imageRef: row.image_ref,
     managedServiceId: row.managed_service_id,
     command: row.command,
@@ -247,6 +276,20 @@ function validatePort(value: number | null | undefined, field: string): void {
   }
 }
 
+/** รูปแบบ owner/repo + ชื่อ branch — route เรียกก่อนถาม GitHub เพื่อให้ input ผิดรูปได้ 422 ทันที */
+export function assertGitSourceFormat(source: ComponentGitSource): void {
+  if (!isRepoFullName(source.repoFullName)) {
+    throw new AppError("COMPONENT_INVALID", "repository ต้องอยู่ในรูป owner/repo", {
+      field: "gitSource.repoFullName",
+    });
+  }
+  if (!isGitBranchName(source.branch)) {
+    throw new AppError("COMPONENT_INVALID", "ชื่อ branch ไม่ถูกต้อง", {
+      field: "gitSource.branch",
+    });
+  }
+}
+
 /** ตรวจ field ตาม source_kind + web + limits — โยน COMPONENT_INVALID เมื่อผิด */
 function validateInput(db: Database, input: ComponentInput): void {
   if (!isComponentName(input.name)) {
@@ -285,6 +328,14 @@ function validateInput(db: Database, input: ComponentInput): void {
     }
   }
   // source_kind='build' ไม่มี field บังคับ (dockerfile_path/build_context มี default)
+  if (input.gitSource) {
+    if (input.sourceKind !== "build") {
+      throw new AppError("COMPONENT_INVALID", "ตั้ง repo แยกได้เฉพาะ component แบบ build", {
+        field: "gitSource",
+      });
+    }
+    assertGitSourceFormat(input.gitSource);
+  }
 
   if (input.isWeb && input.webPort == null) {
     throw new AppError("COMPONENT_INVALID", "component ที่เป็น web ต้องระบุ webPort", {
@@ -341,6 +392,28 @@ function validateInput(db: Database, input: ComponentInput): void {
   if (input.restartPolicy != null && !RESTART_POLICIES.has(input.restartPolicy)) {
     throw new AppError("COMPONENT_INVALID", "restartPolicy ไม่ถูกต้อง", { field: "restartPolicy" });
   }
+}
+
+/**
+ * GitHub installation (ตัวเลข) → github_installations.id ภายใน — ต้องมีและ active
+ * เก็บ ULID ภายในแบบเดียวกับ projects.installation_id เพื่อให้ uninstall/reinstall ตามแถวเดียวกัน
+ */
+function resolveInstallationRowId(db: Database, installationId: number): string {
+  const row = db
+    .query<{ id: string; status: string }, [number]>(
+      "SELECT id, status FROM github_installations WHERE installation_id = ?",
+    )
+    .get(installationId);
+  if (!row) {
+    throw new AppError("INSTALLATION_NOT_FOUND", "ไม่พบ GitHub installation นี้ในระบบ");
+  }
+  if (row.status !== "active") {
+    throw new AppError(
+      "GITHUB_UNAVAILABLE",
+      "GitHub installation ไม่ได้ active — reinstall หรือ unsuspend ก่อน",
+    );
+  }
+  return row.id;
 }
 
 // ---------------------------------------------------------------------------
@@ -435,6 +508,9 @@ export function createComponent(
   input: ComponentInput,
 ): ComponentDto {
   validateInput(db, input);
+  const repoInstallationRowId = input.gitSource
+    ? resolveInstallationRowId(db, input.gitSource.installationId)
+    : null;
 
   const id = ulid();
   const now = Date.now();
@@ -451,8 +527,9 @@ export function createComponent(
          (id, project_id, name, role, source_kind, dockerfile_path, build_context, target_stage,
           image_ref, managed_service_id, command, internal_port, is_web, web_port,
           health_check_path, health_cmd, cpu_limit, memory_limit_mb, memory_swap_mb, pids_limit,
-          cap_drop_all, no_new_privileges, restart_policy, position, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          cap_drop_all, no_new_privileges, restart_policy, position,
+          repo_installation_id, repo_full_name, repo_branch, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       projectId,
@@ -478,6 +555,9 @@ export function createComponent(
       input.noNewPrivileges ? 1 : 0,
       input.restartPolicy ?? "unless-stopped",
       nextPos,
+      repoInstallationRowId,
+      input.gitSource?.repoFullName ?? null,
+      input.gitSource?.branch ?? null,
       now,
       now,
     );
@@ -518,6 +598,8 @@ export interface ComponentUpdate {
   dockerfilePath?: string | null;
   buildContext?: string | null;
   targetStage?: string | null;
+  /** undefined = ไม่แตะ · null = กลับไปใช้ repo ของ project */
+  gitSource?: ComponentGitSource | null;
   imageRef?: string | null;
   dependsOn?: Array<{ name: string; condition?: DepCondition }>;
 }
@@ -538,6 +620,7 @@ export function updateComponent(
     dockerfilePath: update.dockerfilePath ?? row.dockerfile_path,
     buildContext: update.buildContext ?? row.build_context,
     targetStage: update.targetStage ?? row.target_stage,
+    gitSource: update.gitSource !== undefined ? update.gitSource : null,
     imageRef: update.imageRef ?? row.image_ref,
     managedServiceId: row.managed_service_id,
     command: update.command ?? row.command,
@@ -581,6 +664,14 @@ export function updateComponent(
   if (update.buildContext !== undefined) set("build_context", update.buildContext);
   if (update.targetStage !== undefined) set("target_stage", update.targetStage);
   if (update.imageRef !== undefined) set("image_ref", update.imageRef);
+  if (update.gitSource !== undefined) {
+    set(
+      "repo_installation_id",
+      update.gitSource ? resolveInstallationRowId(db, update.gitSource.installationId) : null,
+    );
+    set("repo_full_name", update.gitSource?.repoFullName ?? null);
+    set("repo_branch", update.gitSource?.branch ?? null);
+  }
 
   if (fields.length > 0) {
     set("updated_at", Date.now());

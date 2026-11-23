@@ -11,7 +11,7 @@ import { AppError } from "@zixploy/shared";
 import { loadProjectMode } from "../db/project-config";
 import { buildImage } from "../docker/buildkit";
 import type { DockerCliClient } from "../docker/cli-client";
-import { cloneCommit } from "../git/clone";
+import { cloneCommit, resolveBranchHead } from "../git/clone";
 import type { MasterKeys } from "../github/master-key";
 import { mintInstallationToken } from "../github/token";
 import { checkDiskPressure } from "../logs/retention";
@@ -73,6 +73,7 @@ export function createDispatcher(deps: DispatchDeps): ProcessJobFn {
             masterKeys: deps.masterKeys,
             mintInstallationToken,
             cloneCommit,
+            resolveBranchHead,
             buildImage,
             waitForHealthy,
             waitForContainerHealthy,

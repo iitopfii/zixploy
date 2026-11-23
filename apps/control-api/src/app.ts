@@ -86,7 +86,7 @@ export function buildApp(db: Database, options: AppOptions = {}) {
     .use(logRoutes(db))
     .use(volumeRoutes(db))
     .use(serviceRoutes(db, masterKeys))
-    .use(componentRoutes(db))
+    .use(componentRoutes(db, registry))
     .use(terminalRoutes(db, options.terminal))
     .use(monitoringRoutes(db))
     .use(dockerInventoryRoutes(db))

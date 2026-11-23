@@ -7,6 +7,8 @@
  *   DELETE /api/v1/projects/:id/components/:componentId    — ลบ
  *   POST   /api/v1/projects/:id/compose/promote            — เปลี่ยนโปรเจกต์เป็น mode='compose'
  *
+ * build component ตั้ง repo/branch ของตัวเองได้ (gitSource, 0.1.25) — ตรวจกับ GitHub ก่อนบันทึก
+ *
  * ADR-0002: control-api ไม่แตะ Docker — แค่เขียนแถว project_components/component_deps ให้
  * worker orchestrator เอาไป deploy จริง (Phase C) · ของเดิม (mode='single') ไม่เกี่ยวข้องเลย
  */
@@ -14,8 +16,11 @@
 import type { Database } from "bun:sqlite";
 import { API_PREFIX, AppError, isUlid } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
+import type { GitHubAppRegistry } from "../github/registry";
 import { authPlugin, requireAuthenticated } from "../plugins/auth";
 import {
+  assertGitSourceFormat,
+  type ComponentGitSource,
   createComponent,
   deleteComponent,
   listComponents,
@@ -42,6 +47,11 @@ const restartSchema = t.Union([
   t.Literal("always"),
   t.Literal("unless-stopped"),
 ]);
+const gitSourceSchema = t.Object({
+  installationId: t.Number({ description: "GitHub installation ID (numeric)" }),
+  repoFullName: t.String({ minLength: 3, maxLength: 200 }),
+  branch: t.String({ minLength: 1, maxLength: 255 }),
+});
 const dependsOnSchema = t.Array(
   t.Object({
     name: t.String({ minLength: 1, maxLength: 31 }),
@@ -58,6 +68,7 @@ const componentSchema = t.Object({
   dockerfilePath: t.Nullable(t.String()),
   buildContext: t.Nullable(t.String()),
   targetStage: t.Nullable(t.String()),
+  gitSource: t.Nullable(gitSourceSchema),
   imageRef: t.Nullable(t.String()),
   managedServiceId: t.Nullable(t.String()),
   command: t.Nullable(t.String()),
@@ -93,6 +104,7 @@ const createBody = t.Object({
   dockerfilePath: t.Optional(t.Nullable(t.String({ maxLength: 255 }))),
   buildContext: t.Optional(t.Nullable(t.String({ maxLength: 255 }))),
   targetStage: t.Optional(t.Nullable(t.String({ maxLength: 128 }))),
+  gitSource: t.Optional(t.Nullable(gitSourceSchema)),
   imageRef: t.Optional(t.Nullable(t.String({ maxLength: 255 }))),
   managedServiceId: t.Optional(t.Nullable(t.String())),
   command: t.Optional(t.Nullable(t.String({ maxLength: 4096 }))),
@@ -131,9 +143,29 @@ const updateBody = t.Object({
   dockerfilePath: t.Optional(t.Nullable(t.String({ maxLength: 255 }))),
   buildContext: t.Optional(t.Nullable(t.String({ maxLength: 255 }))),
   targetStage: t.Optional(t.Nullable(t.String({ maxLength: 128 }))),
+  gitSource: t.Optional(t.Nullable(gitSourceSchema)),
   imageRef: t.Optional(t.Nullable(t.String({ maxLength: 255 }))),
   dependsOn: t.Optional(dependsOnSchema),
 });
+
+/**
+ * ตรวจว่า installation เข้าถึง repo และ branch นี้ได้จริงก่อนบันทึก — พิมพ์ผิดรู้ตอนตั้งค่า ไม่ใช่ตอน deploy
+ * ไม่มี registry (tests บางชุด) = ข้าม ตรวจรูปแบบที่ store อย่างเดียว
+ */
+async function verifyGitSource(
+  registry: GitHubAppRegistry | undefined,
+  source: ComponentGitSource | null | undefined,
+): Promise<void> {
+  if (!source) return;
+  assertGitSourceFormat(source);
+  if (!registry) return;
+  const service = await registry.getServiceForInstallation(source.installationId);
+  if (!service) {
+    throw new AppError("GITHUB_UNAVAILABLE", "GitHub App ของ installation นี้ไม่พร้อมใช้งาน");
+  }
+  await service.validateRepo(source.installationId, source.repoFullName);
+  await service.validateBranch(source.installationId, source.repoFullName, source.branch);
+}
 
 function requireProject(db: Database, projectId: string): void {
   if (!isUlid(projectId)) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
@@ -143,7 +175,7 @@ function requireProject(db: Database, projectId: string): void {
   if (!row) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
 }
 
-export function componentRoutes(db: Database) {
+export function componentRoutes(db: Database, registry?: GitHubAppRegistry) {
   return new Elysia({ prefix: API_PREFIX })
     .use(authPlugin(db))
     .guard({ beforeHandle: requireAuthenticated })
@@ -159,8 +191,9 @@ export function componentRoutes(db: Database) {
 
     .post(
       "/projects/:id/components",
-      ({ params, body, set }) => {
+      async ({ params, body, set }) => {
         requireProject(db, params.id);
+        await verifyGitSource(registry, body.gitSource);
         const created = createComponent(db, params.id, body);
         set.status = 201;
         return created;
@@ -170,10 +203,11 @@ export function componentRoutes(db: Database) {
 
     .patch(
       "/projects/:id/components/:componentId",
-      ({ params, body }) => {
+      async ({ params, body }) => {
         requireProject(db, params.id);
         if (!isUlid(params.componentId))
           throw new AppError("COMPONENT_NOT_FOUND", "ไม่พบ component นี้");
+        await verifyGitSource(registry, body.gitSource);
         return updateComponent(db, params.id, params.componentId, body);
       },
       { body: updateBody, response: componentSchema },

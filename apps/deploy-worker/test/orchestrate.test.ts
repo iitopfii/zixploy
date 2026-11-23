@@ -11,7 +11,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadMigrations, migrateUp, migrationsDir, openDatabase } from "@zixploy/db";
@@ -34,6 +34,7 @@ afterEach(() => {
 
 /** เขียน Dockerfile จริงลง destDir ให้ assertDockerfileWithinContext ผ่าน (build components ใช้ context '.') */
 async function fakeCloneCommit(params: { destDir: string }): Promise<void> {
+  mkdirSync(params.destDir, { recursive: true });
   writeFileSync(join(params.destDir, "Dockerfile"), "FROM scratch\n");
 }
 
@@ -224,6 +225,7 @@ function baseDeps(db: Db, docker: ReturnType<typeof mockDocker>): OrchestrateDep
     masterKeys: null,
     mintInstallationToken: async () => ({ token: "test-token", expiresAt: new Date() }),
     cloneCommit: fakeCloneCommit,
+    resolveBranchHead: async () => "c".repeat(40),
     buildImage: async () => ({ imageId: "sha256:abc", digest: "sha256:abc" }),
     waitForHealthy: async () => undefined,
     waitForContainerHealthy: async () => "healthy" as const,

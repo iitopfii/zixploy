@@ -104,3 +104,28 @@ export function normalizeRegistryHost(raw: string): string {
   }
   return host;
 }
+
+// ---------------------------------------------------------------------------
+// repo/branch ต่อ build component (0.1.25)
+// ---------------------------------------------------------------------------
+
+/** owner/repo ของ GitHub — owner: ตัวอักษร ตัวเลข '-' · repo: เพิ่ม '.' '_' ได้ */
+const REPO_FULL_NAME_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/;
+
+export function isRepoFullName(value: string): boolean {
+  return REPO_FULL_NAME_RE.test(value) && !value.endsWith("/.") && !value.endsWith("/..");
+}
+
+/**
+ * ชื่อ branch ที่ส่งเข้า argv ของ git ได้ปลอดภัย — ตามกฎ git check-ref-format แบบเข้มกว่าเล็กน้อย
+ * ห้ามขึ้นต้นด้วย '-' (จะกลายเป็น flag), ห้ามช่องว่าง/control char, ห้าม '..' และอักขระพิเศษของ ref
+ */
+export function isGitBranchName(value: string): boolean {
+  if (value.length === 0 || value.length > 255) return false;
+  if (value.startsWith("-") || value.startsWith("/") || value.endsWith("/")) return false;
+  if (value.endsWith(".") || value.endsWith(".lock") || value === "@") return false;
+  if (value.includes("..") || value.includes("//") || value.includes("@{")) return false;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: กัน control char ใน argv โดยเจตนา
+  if (/[\x00-\x20\x7f~^:?*[\\]/.test(value)) return false;
+  return value.split("/").every((part) => part.length > 0 && !part.startsWith("."));
+}

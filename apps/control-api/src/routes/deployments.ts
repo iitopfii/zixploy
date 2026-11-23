@@ -55,6 +55,7 @@ interface DeploymentRow {
   starting_at: number | null;
   health_checking_at: number | null;
   activating_at: number | null;
+  component_commits: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -62,7 +63,7 @@ interface DeploymentRow {
 const SELECT_COLUMNS = `id, project_id, status, trigger, commit_sha, commit_message, commit_author,
   image_tag, image_digest, container_id, failure_code, failure_message,
   queued_at, started_at, finished_at, cloning_at, building_at, starting_at, health_checking_at, activating_at,
-  created_at, updated_at`;
+  component_commits, created_at, updated_at`;
 
 /** ผลของการลบ — skipped บอกเหตุผลรายตัวเพื่อให้ UI อธิบายได้ว่าทำไมบางอันยังอยู่ */
 const deleteResultSchema = t.Object({
@@ -106,6 +107,8 @@ const deploymentSchema = t.Object({
   startingAt: t.Nullable(t.Number()),
   healthCheckingAt: t.Nullable(t.Number()),
   activatingAt: t.Nullable(t.Number()),
+  /** commit ที่ build จริงของ component ที่มี repo ของตัวเอง ({componentId: sha}) */
+  componentCommits: t.Nullable(t.Record(t.String(), t.String())),
   createdAt: t.Number(),
   updatedAt: t.Number(),
 });
@@ -132,9 +135,24 @@ function toDeployment(row: DeploymentRow) {
     startingAt: row.starting_at,
     healthCheckingAt: row.health_checking_at,
     activatingAt: row.activating_at,
+    componentCommits: parseComponentCommits(row.component_commits),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+/** JSON ใน deployments.component_commits → map · ค่าผิดรูป (ไม่ควรเกิด, มี CHECK json_valid) = null */
+function parseComponentCommits(raw: string | null): Record<string, string> | null {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed)) if (typeof v === "string") out[k] = v;
+    return Object.keys(out).length > 0 ? out : null;
+  } catch {
+    return null;
+  }
 }
 
 function loadDeployment(db: Database, id: string): DeploymentRow {
@@ -372,10 +390,15 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
 
         const last = db
           .query<
-            { commit_sha: string; commit_message: string | null; commit_author: string | null },
+            {
+              commit_sha: string;
+              commit_message: string | null;
+              commit_author: string | null;
+              component_commits: string | null;
+            },
             [string]
           >(
-            "SELECT commit_sha, commit_message, commit_author FROM deployments WHERE project_id = ? ORDER BY created_at DESC LIMIT 1",
+            "SELECT commit_sha, commit_message, commit_author, component_commits FROM deployments WHERE project_id = ? ORDER BY created_at DESC LIMIT 1",
           )
           .get(params.id);
         if (!last) {
@@ -405,6 +428,9 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
                 },
               };
 
+        // component ที่มี repo ของตัวเอง: ปัก commit เดิมด้วย — redeploy ต้องได้โค้ดชุดเดิมทุก repo
+        const componentCommits =
+          source.type === "github" ? parseComponentCommits(last.component_commits) : null;
         const payload: DeployJobPayload = {
           kind: "build",
           trigger: "redeploy",
@@ -412,6 +438,7 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
           commitMessage: last.commit_message,
           commitAuthor: last.commit_author,
           source,
+          ...(componentCommits ? { componentCommits } : {}),
         };
         const { deploymentId } = enqueueManualJob(db, {
           projectId: params.id,

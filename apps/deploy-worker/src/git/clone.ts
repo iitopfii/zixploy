@@ -139,3 +139,62 @@ export async function cloneCommit(params: CloneParams): Promise<void> {
     clearTimeout(timer);
   }
 }
+
+export interface ResolveBranchParams {
+  repoFullName: string;
+  branch: string;
+  token: string;
+  timeoutMs: number;
+  signal: AbortSignal;
+  /** ฉีดสำหรับเทสต์ — override remote URL (local bare repo) */
+  remoteUrl?: string;
+}
+
+/**
+ * branch → commit SHA ล่าสุดด้วย `git ls-remote` (0.1.25) — ใช้กับ build component ที่มี repo ของตัวเอง
+ * ไม่ต้องมี GitHub API client ใน worker · ใช้ token และการ redact แบบเดียวกับ cloneCommit
+ * branch ถูก validate ที่ control-api (isGitBranchName) แล้ว และส่งเป็น refs/heads/<branch> เต็ม
+ * จึงไม่มีทางกลายเป็น flag ของ git
+ */
+export async function resolveBranchHead(params: ResolveBranchParams): Promise<string> {
+  const { repoFullName, branch, token, timeoutMs, signal } = params;
+  const url = params.remoteUrl ?? `https://x-access-token:${token}@github.com/${repoFullName}.git`;
+  const timeoutController = new AbortController();
+  const timer = setTimeout(() => timeoutController.abort(), timeoutMs);
+  const combinedSignal = AbortSignal.any([signal, timeoutController.signal]);
+  try {
+    const proc = Bun.spawn(
+      ["git", "-c", "credential.helper=", "ls-remote", "--exit-code", url, `refs/heads/${branch}`],
+      {
+        stdout: "pipe",
+        stderr: "pipe",
+        signal: combinedSignal,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "echo" },
+      },
+    );
+    const [stdoutText, stderrText] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    const code = await proc.exited;
+    if (code === 2) {
+      throw new AppError("CLONE_FAILED", `ไม่พบ branch "${branch}" ใน ${repoFullName}`);
+    }
+    if (code !== 0) {
+      if (timeoutController.signal.aborted) {
+        throw new AppError("CLONE_FAILED", `git ls-remote ${repoFullName} timeout`);
+      }
+      throw new AppError(
+        "CLONE_FAILED",
+        `git ls-remote ${repoFullName} ล้มเหลว: ${truncate(redactString(stderrText))}`,
+      );
+    }
+    const sha = stdoutText.trim().split(/\s+/)[0] ?? "";
+    if (!/^[0-9a-f]{40}$/.test(sha)) {
+      throw new AppError("CLONE_FAILED", `git ls-remote ${repoFullName} คืนค่าที่ไม่ใช่ commit SHA`);
+    }
+    return sha;
+  } finally {
+    clearTimeout(timer);
+  }
+}

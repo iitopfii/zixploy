@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AppError } from "@zixploy/shared";
-import { cloneCommit } from "../src/git/clone";
+import { cloneCommit, resolveBranchHead } from "../src/git/clone";
 
 const dirs: string[] = [];
 function tempDir() {
@@ -158,5 +158,35 @@ describe("cloneCommit", () => {
     expect(fullLog).not.toContain(secretToken);
     // error message ของ AppError เองก็ต้องไม่มี token (stderr ผ่าน redactString ก่อนใส่ error message)
     expect((caught as AppError).message).not.toContain(secretToken);
+  });
+});
+
+describe("resolveBranchHead (0.1.25)", () => {
+  test("คืน commit ล่าสุดของ branch", async () => {
+    const { bareDir, commitSha } = await makeSourceRepoWithCommit();
+    const sha = await resolveBranchHead({
+      repoFullName: "unused/unused",
+      branch: "main",
+      token: "test-token",
+      timeoutMs: 15_000,
+      signal: new AbortController().signal,
+      remoteUrl: bareDir,
+    });
+    expect(sha).toBe(commitSha);
+  });
+
+  test("branch ไม่มี → CLONE_FAILED บอกชื่อ branch", async () => {
+    const { bareDir } = await makeSourceRepoWithCommit();
+    const err = await resolveBranchHead({
+      repoFullName: "acme/web",
+      branch: "nope",
+      token: "test-token",
+      timeoutMs: 15_000,
+      signal: new AbortController().signal,
+      remoteUrl: bareDir,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AppError);
+    expect((err as AppError).code).toBe("CLONE_FAILED");
+    expect((err as AppError).message).toContain("nope");
   });
 });

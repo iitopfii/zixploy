@@ -30,6 +30,11 @@ export type DeployJobPayload =
       commitMessage: string | null;
       commitAuthor: string | null;
       source: DeployJobSource;
+      /**
+       * commit ที่ปักไว้ของ component ที่มี repo ของตัวเอง ({componentId: sha}) — redeploy ส่งมาเพื่อ build
+       * commit เดิมเป๊ะ · ตัวที่ไม่มีในนี้ worker resolve branch → commit ล่าสุดเอง (0.1.25)
+       */
+      componentCommits?: Record<string, string>;
     }
   | { kind: "rollback"; targetDeploymentId: string; imageTag: string; imageDigest: string }
   | { kind: "restart" }

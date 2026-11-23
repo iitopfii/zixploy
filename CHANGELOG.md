@@ -9,6 +9,28 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.1.25] — 2026-11-24
+
+### Added
+- **build component ดึงโค้ดจาก repo/branch ของตัวเองได้** — โปรเจกต์ compose เดียวรวม service
+  จากหลาย repo ได้ (เช่น backend กับ frontend) และยังเรียกกันด้วยชื่อ component ผ่าน network
+  ภายในเหมือนเดิม · เลือก repo/branch ได้ในแท็บ Components ระบบตรวจกับ GitHub ก่อนบันทึก ·
+  deploy ใช้ commit ล่าสุดของ branch ส่วน redeploy ใช้ commit เดิมของแต่ละ component
+- **build arg / build secret ต่อ component ในโปรเจกต์ compose** — ตัวแปร scope build ของ
+  component ทับของโปรเจกต์ · secret ส่งผ่าน `--secret` (เช่น `NPM_TOKEN` สำหรับ package
+  private) และถูกปิดในล็อก
+
+### Fixed
+- **compose mode ทิ้ง build secret ไปเงียบ ๆ** — เดิม secret ของโปรเจกต์ไม่ถูกส่งตอน build
+  component ทำให้ build ที่ต้องใช้ secret ล้ม
+
+### Changed
+- migration 0033 เพิ่มคอลัมน์ repo/branch ของ component และ commit ต่อ component ของ deployment
+  (rollback ได้ ข้อมูลเดิมไม่เปลี่ยน)
+
+### Known limits
+- webhook auto-deploy ยังทำงานเฉพาะ push เข้า repo หลักของโปรเจกต์
+
 ## [0.1.24] — 2026-11-12
 
 ### Added

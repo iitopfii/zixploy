@@ -38,6 +38,7 @@ import {
   deploymentNetworkLabels,
   deploymentNetworkName,
   isTerminal,
+  linkNetworkDockerName,
   PROXY_NETWORK,
   projectServiceName,
   serviceContainerName,
@@ -117,6 +118,30 @@ interface CreatedContainer {
  * probe ไม่ถึง (การ health-gate non-web ต้องใช้ Docker-native healthcheck = Phase F) — คืน null
  * ให้ข้าม HTTP gate แล้ว start ต่อได้เลย (topological order ยังการันตีลำดับ dependency อยู่)
  */
+/**
+ * ชื่อ component ของ project นี้ที่ชนกับ project อื่นใน link network เดียวกัน (0.1.26)
+ * บน network ร่วม ชื่อ component คือ DNS alias — ชนกันแล้ว Docker จะ round-robin ไปทั้งสอง project
+ */
+export function findLinkNameClashes(
+  db: Database,
+  projectId: string,
+  linkNetwork: string,
+  names: string[],
+): { name: string; projectName: string }[] {
+  if (names.length === 0) return [];
+  const placeholders = names.map(() => "?").join(", ");
+  return db
+    .query<{ name: string; project_name: string }, string[]>(
+      `SELECT c.name, p.name AS project_name
+         FROM project_components c JOIN projects p ON p.id = c.project_id
+        WHERE p.link_network = ? AND p.id != ? AND p.archived_at IS NULL
+          AND c.source_kind != 'managed_ref' AND c.name IN (${placeholders})
+        ORDER BY c.name`,
+    )
+    .all(linkNetwork, projectId, ...names)
+    .map((r) => ({ name: r.name, projectName: r.project_name }));
+}
+
 function healthPort(c: DeployComponent): number | null {
   return c.isWeb ? c.webPort : null;
 }
@@ -416,6 +441,28 @@ export async function runComposePipeline(
     await docker.ensureNetwork(networkName, deploymentNetworkLabels(job.projectId, deploymentId));
     await docker.ensureNetwork(PROXY_NETWORK);
 
+    // link network (0.1.26) — network ร่วมกับ project อื่นที่ตั้งชื่อ link เดียวกัน · ไม่ลบตอน teardown
+    // (project อื่นยังใช้อยู่) · container ใหม่ถูกลบเมื่อ deploy ล้ม = หลุดจาก network เอง
+    let linkNet: string | null = null;
+    if (project.linkNetwork) {
+      const clashes = findLinkNameClashes(
+        db,
+        job.projectId,
+        project.linkNetwork,
+        components.map((c) => c.name),
+      );
+      if (clashes.length > 0) {
+        throw new AppError(
+          "WORKSPACE_ERROR",
+          `ชื่อ component ซ้ำกับ project อื่นใน link "${project.linkNetwork}": ` +
+            `${clashes.map((c) => `"${c.name}" (${c.projectName})`).join(", ")} — เปลี่ยนชื่อก่อน deploy`,
+        );
+      }
+      linkNet = linkNetworkDockerName(project.linkNetwork);
+      await docker.ensureNetwork(linkNet, { "platform.link": project.linkNetwork });
+      safeLog(`[network] ต่อ link network "${project.linkNetwork}" (${linkNet})`);
+    }
+
     const domainConfigs = loadProjectDomains(db, job.projectId);
     const compById = new Map(allComponents.map((c) => [c.id, c]));
     // domain ที่ไม่ได้ผูก component (หรือผูกกับตัวที่ไม่ใช่ web/ปิดอยู่) ไปที่ web ตัวแรกตาม position
@@ -548,6 +595,8 @@ export async function runComposePipeline(
       });
       // join proxy: web (สำหรับ Traefik) หรือ component ที่ต้องต่อ managed database
       if (needsProxy) await docker.connectNetwork(PROXY_NETWORK, containerId);
+      // link network: project อื่นใน link เดียวกันเรียก component นี้ด้วยชื่อ component
+      if (linkNet) await docker.connectNetwork(linkNet, containerId, { aliases: [c.name] });
       created.push({ component: c, containerId, imageTag: image });
     }
 

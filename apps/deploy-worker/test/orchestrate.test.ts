@@ -1186,3 +1186,110 @@ describe("runComposePipeline — named volume ต่อ component (0.1.24)", () 
     expect(logs.some((l) => l.includes("ไม่ได้ผูก component"))).toBe(true);
   });
 });
+
+describe("runComposePipeline — link network (0.1.26)", () => {
+  function setLink(db: Db, projectId: string, link: string | null) {
+    db.query("UPDATE projects SET link_network = ? WHERE id = ?").run(link, projectId);
+  }
+
+  test("project ที่ตั้ง link → สร้าง network zx-link-<ชื่อ> และต่อทุก component ด้วย alias = ชื่อ component", async () => {
+    const db = makeDb();
+    const projectId = insertComposeProject(db);
+    setLink(db, projectId, "sealand");
+    insertComponent(db, projectId, {
+      name: "web",
+      sourceKind: "build",
+      isWeb: true,
+      webPort: 3000,
+    });
+    insertComponent(db, projectId, { name: "worker", sourceKind: "build", position: 1 });
+    const deploymentId = insertDeployment(db, projectId);
+    const docker = mockDocker();
+
+    const result = await runComposePipeline(
+      baseDeps(db, docker),
+      makeJob(projectId, deploymentId),
+      GITHUB_PAYLOAD,
+      new AbortController().signal,
+    );
+
+    expect(result.outcome).toBe("done");
+    const ensured = docker.calls.find(
+      (c) => c.method === "ensureNetwork" && c.args[0] === "zx-link-sealand",
+    );
+    expect(ensured?.args[1]).toEqual({ "platform.link": "sealand" });
+    const linked = docker.calls
+      .filter((c) => c.method === "connectNetwork" && c.args[0] === "zx-link-sealand")
+      .map((c) => [c.args[1], c.args[2]]);
+    expect(linked).toEqual([
+      ["cid-web", { aliases: ["web"] }],
+      ["cid-worker", { aliases: ["worker"] }],
+    ]);
+    // network ร่วมไม่ถูกลบ
+    expect(
+      docker.calls.some((c) => c.method === "removeNetwork" && c.args[0] === "zx-link-sealand"),
+    ).toBe(false);
+  });
+
+  test("ไม่ตั้ง link → ไม่แตะ network zx-link-*", async () => {
+    const db = makeDb();
+    const projectId = insertComposeProject(db);
+    insertComponent(db, projectId, {
+      name: "web",
+      sourceKind: "build",
+      isWeb: true,
+      webPort: 3000,
+    });
+    const deploymentId = insertDeployment(db, projectId);
+    const docker = mockDocker();
+
+    await runComposePipeline(
+      baseDeps(db, docker),
+      makeJob(projectId, deploymentId),
+      GITHUB_PAYLOAD,
+      new AbortController().signal,
+    );
+
+    expect(
+      docker.calls.some(
+        (c) =>
+          (c.method === "ensureNetwork" || c.method === "connectNetwork") &&
+          String(c.args[0]).startsWith("zx-link-"),
+      ),
+    ).toBe(false);
+  });
+
+  test("ชื่อ component ชนกับ project อื่นใน link เดียวกัน → fail ก่อนสร้าง container", async () => {
+    const db = makeDb();
+    const projectId = insertComposeProject(db);
+    setLink(db, projectId, "sealand");
+    insertComponent(db, projectId, {
+      name: "web",
+      sourceKind: "build",
+      isWeb: true,
+      webPort: 3000,
+    });
+    const other = insertComposeProject(db);
+    setLink(db, other, "sealand");
+    insertComponent(db, other, { name: "web", sourceKind: "image", imageRef: "nginx:1" });
+    const deploymentId = insertDeployment(db, projectId);
+    const docker = mockDocker();
+
+    const result = await runComposePipeline(
+      baseDeps(db, docker),
+      makeJob(projectId, deploymentId),
+      GITHUB_PAYLOAD,
+      new AbortController().signal,
+    );
+
+    expect(result.outcome).toBe("failed");
+    const dep = db
+      .query<{ failure_code: string | null; failure_message: string | null }, [string]>(
+        "SELECT failure_code, failure_message FROM deployments WHERE id = ?",
+      )
+      .get(deploymentId);
+    expect(dep?.failure_code).toBe("WORKSPACE_ERROR");
+    expect(dep?.failure_message).toContain('"web"');
+    expect(docker.calls.some((c) => c.method === "createContainer")).toBe(false);
+  });
+});

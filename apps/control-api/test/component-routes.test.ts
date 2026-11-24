@@ -516,3 +516,87 @@ describe("component hardening fields (0.1.24)", () => {
     expect(noMem.status).toBe(422);
   });
 });
+
+describe("component health check settings + command (0.1.27)", () => {
+  const tei = { name: "tei", sourceKind: "image", imageRef: "ghcr.io/acme/tei:1.0.0" };
+
+  test("ค่าเริ่มต้น interval 5 / timeout 30 / retries 3", async () => {
+    const { app, cookie, csrf, projectId } = await setup();
+    const body = await json(
+      await post(app, `/api/v1/projects/${projectId}/components`, cookie, csrf, tei),
+    );
+    expect(body).toMatchObject({
+      healthCheckIntervalSec: 5,
+      healthCheckTimeoutSec: 30,
+      healthCheckRetries: 3,
+    });
+  });
+
+  test("ตั้งตอนสร้างและแก้ทีหลังได้ — field ที่ไม่ส่งคงค่าเดิม", async () => {
+    const { app, cookie, csrf, projectId } = await setup();
+    const res = await post(app, `/api/v1/projects/${projectId}/components`, cookie, csrf, {
+      ...tei,
+      healthCheckIntervalSec: 10,
+      healthCheckRetries: 60,
+    });
+    expect(res.status).toBe(201);
+    const created = await json(res);
+    expect(created).toMatchObject({
+      healthCheckIntervalSec: 10,
+      healthCheckTimeoutSec: 30,
+      healthCheckRetries: 60,
+    });
+    const updated = await json(
+      await patch(app, `/api/v1/projects/${projectId}/components/${created.id}`, cookie, csrf, {
+        healthCheckTimeoutSec: 5,
+      }),
+    );
+    expect(updated).toMatchObject({
+      healthCheckIntervalSec: 10,
+      healthCheckTimeoutSec: 5,
+      healthCheckRetries: 60,
+    });
+  });
+
+  test("ค่านอกช่วง/ไม่ใช่จำนวนเต็ม → ปฏิเสธ", async () => {
+    const { app, cookie, csrf, projectId } = await setup();
+    for (const bad of [
+      { healthCheckRetries: 0 },
+      { healthCheckRetries: 361 },
+      { healthCheckIntervalSec: 0 },
+      { healthCheckTimeoutSec: 301 },
+      { healthCheckRetries: 2.5 },
+    ]) {
+      const res = await post(app, `/api/v1/projects/${projectId}/components`, cookie, csrf, {
+        ...tei,
+        ...bad,
+      });
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(res.status).toBeLessThan(500);
+    }
+  });
+
+  test("command ที่ quote ไม่ปิด → ปฏิเสธพร้อม field command", async () => {
+    const { app, cookie, csrf, projectId } = await setup();
+    const res = await post(app, `/api/v1/projects/${projectId}/components`, cookie, csrf, {
+      ...tei,
+      command: 'sh -c "exec server',
+    });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+    const body = await json(res);
+    expect(body.error.code).toBe("COMPONENT_INVALID");
+    expect(body.error.details.field).toBe("command");
+  });
+
+  test("command หลาย argument เก็บได้ตามที่พิมพ์", async () => {
+    const { app, cookie, csrf, projectId } = await setup();
+    const body = await json(
+      await post(app, `/api/v1/projects/${projectId}/components`, cookie, csrf, {
+        ...tei,
+        command: "--model-id=BAAI/bge-m3 --auto-truncate",
+      }),
+    );
+    expect(body.command).toBe("--model-id=BAAI/bge-m3 --auto-truncate");
+  });
+});

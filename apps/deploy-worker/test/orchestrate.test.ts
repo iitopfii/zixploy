@@ -515,6 +515,52 @@ describe("runComposePipeline — condition: healthy gating (Phase F)", () => {
     expect(waited).toEqual([serviceContainerName(serviceId)]);
   });
 
+  test("command หลาย argument → createContainer ได้ cmd แยกเป็น argv (ไม่ใช่ string เดียว)", async () => {
+    const db = makeDb();
+    const projectId = insertComposeProject(db);
+    insertComponent(db, projectId, {
+      name: "web",
+      sourceKind: "build",
+      isWeb: true,
+      webPort: 3000,
+      position: 0,
+    });
+    const teiId = insertComponent(db, projectId, {
+      name: "tei",
+      sourceKind: "image",
+      imageRef: "ghcr.io/acme/tei:1.0.0",
+      position: 1,
+    });
+    db.query("UPDATE project_components SET command = ? WHERE id = ?").run(
+      `--model-id=BAAI/bge-m3 --max-batch-tokens=1024 --name "my model"`,
+      teiId,
+    );
+    const deploymentId = insertDeployment(db, projectId);
+    const docker = mockDocker();
+
+    await runComposePipeline(
+      baseDeps(db, docker),
+      makeJob(projectId, deploymentId),
+      GITHUB_PAYLOAD,
+      new AbortController().signal,
+    );
+
+    const create = (alias: string) =>
+      docker.calls.find(
+        (c) =>
+          c.method === "createContainer" &&
+          (c.args[0] as { networkAliases?: string[] }).networkAliases?.[0] === alias,
+      )?.args[0] as { cmd?: string[] };
+    expect(create("tei").cmd).toEqual([
+      "--model-id=BAAI/bge-m3",
+      "--max-batch-tokens=1024",
+      "--name",
+      "my model",
+    ]);
+    // component ที่ไม่ตั้ง command → ไม่ส่ง cmd (ใช้ CMD ของ image)
+    expect(create("web").cmd).toBeUndefined();
+  });
+
   test("component ที่ตั้ง healthCmd → createContainer ได้ Docker HEALTHCHECK (CMD-SHELL)", async () => {
     const db = makeDb();
     const projectId = insertComposeProject(db);

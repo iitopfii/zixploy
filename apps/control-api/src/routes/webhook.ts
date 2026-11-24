@@ -197,7 +197,7 @@ export function webhookRoutes(db: Database, registry: GitHubAppRegistry) {
       // --- 7. Process event ---
       try {
         if (eventName === "push") {
-          await handlePush(db, payload as PushEventPayload, deliveryId);
+          await handlePush(db, payload as PushEventPayload, deliveryId, registry);
         } else if (eventName === "installation") {
           await handleInstallation(db, payload as InstallationEventPayload, registry, params.appId);
         } else if (eventName === "installation_repositories") {
@@ -246,6 +246,7 @@ async function handlePush(
   db: Database,
   payload: PushEventPayload,
   deliveryId: string,
+  registry: GitHubAppRegistry,
 ): Promise<void> {
   // branch ถูกลบ → ไม่ deploy
   if (payload.deleted) return;
@@ -284,7 +285,33 @@ async function handlePush(
     )
     .all(installationId, repoId, branch);
 
-  if (projects.length === 0) return;
+  // compose project ที่มี build component ชี้ repo/branch นี้ (gitSource ต่อ component, 0.1.25)
+  // — push เข้า repo ของ component ต้อง deploy project ด้วย ไม่ใช่เฉพาะ repo หลักของ project
+  const directIds = new Set(projects.map((p) => p.id));
+  const componentProjects = db
+    .query<ComponentPushProjectRow, [number, string, string]>(
+      `SELECT DISTINCT p.id, p.repo_full_name, p.branch, pgi.installation_id AS project_installation_id
+       FROM project_components c
+       JOIN projects p ON p.id = c.project_id
+       JOIN github_installations cgi ON cgi.id = c.repo_installation_id
+       JOIN github_installations pgi ON pgi.id = p.installation_id
+       WHERE cgi.installation_id = ?
+         AND c.repo_full_name = ? COLLATE NOCASE
+         AND c.repo_branch = ?
+         AND c.source_kind = 'build'
+         AND c.enabled = 1
+         AND p.mode = 'compose'
+         AND p.source_type = 'github'
+         AND p.repo_full_name IS NOT NULL
+         AND p.branch IS NOT NULL
+         AND p.auto_deploy = 1
+         AND p.archived_at IS NULL
+         AND pgi.status = 'active'`,
+    )
+    .all(installationId, payload.repository.full_name, branch)
+    .filter((p) => !directIds.has(p.id));
+
+  if (projects.length === 0 && componentProjects.length === 0) return;
 
   const commitMessage = payload.head_commit?.message
     ? payload.head_commit.message.split("\n")[0]?.slice(0, 500)
@@ -348,6 +375,85 @@ async function handlePush(
       });
     }
   }
+
+  // push เข้า repo ของ component: commit ของ deployment ต้องเป็นของ repo หลักของ project
+  // (worker checkout repo หลักด้วย commitSha นี้ และดึง branch tip ของแต่ละ component เอง)
+  // จึงถาม GitHub หา head ของ branch หลักก่อน — หาไม่ได้ = ข้าม project นั้น ไม่ทำให้ webhook ล้ม
+  const componentCommitMessage =
+    `[${payload.repository.full_name}@${branch}] ${commitMessage ?? commitSha.slice(0, 7)}`.slice(
+      0,
+      500,
+    );
+  for (const project of componentProjects) {
+    let projectCommitSha: string;
+    try {
+      const service = await registry.getServiceForInstallation(project.project_installation_id);
+      if (!service) throw new Error("GitHub App ของ installation ไม่พร้อมใช้งาน");
+      const head = await service.validateBranch(
+        project.project_installation_id,
+        project.repo_full_name,
+        project.branch,
+      );
+      projectCommitSha = head.commitSha;
+    } catch (err) {
+      log.warn("component push: หา head ของ repo หลักไม่ได้ — ข้าม auto-deploy", {
+        projectId: project.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      continue;
+    }
+
+    const intentId = ulid();
+    const intentResult = db
+      .query(
+        `INSERT OR IGNORE INTO deploy_intents
+          (id, project_id, installation_id, repo_id, branch, commit_sha, commit_message, commit_author, delivery_id, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+      )
+      .run(
+        intentId,
+        project.id,
+        installationId,
+        repoId,
+        branch,
+        commitSha,
+        componentCommitMessage,
+        commitAuthor,
+        deliveryId,
+        now,
+        now,
+      );
+    if (intentResult.changes === 0) continue;
+
+    const { deploymentId, coalesced } = enqueuePushDeploy(db, {
+      projectId: project.id,
+      installationId: project.project_installation_id,
+      repoFullName: project.repo_full_name,
+      commitSha: projectCommitSha,
+      commitMessage: componentCommitMessage,
+      commitAuthor,
+    });
+    db.query("UPDATE deploy_intents SET status = 'picked_up', updated_at = ? WHERE id = ?").run(
+      Date.now(),
+      intentId,
+    );
+    log.info("deploy job enqueued from component push", {
+      intentId,
+      projectId: project.id,
+      componentRepo: payload.repository.full_name,
+      branch,
+      deploymentId,
+      coalesced,
+    });
+  }
+}
+
+interface ComponentPushProjectRow {
+  id: string;
+  repo_full_name: string;
+  branch: string;
+  /** GitHub installation id (ตัวเลข) ของ repo หลักของ project */
+  project_installation_id: number;
 }
 
 /**

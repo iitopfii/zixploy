@@ -42,6 +42,7 @@ import {
   PROXY_NETWORK,
   projectServiceName,
   serviceContainerName,
+  splitCommandArgs,
 } from "@zixploy/shared";
 import { failDeployment, getDeploymentStatus, transitionDeployment } from "../db/deployment-state";
 import { loadProjectConfig, setProjectStatus } from "../db/project-config";
@@ -562,7 +563,8 @@ export async function runComposePipeline(
         labels,
         networkName,
         networkAliases: [c.name],
-        ...(c.command ? { cmd: [c.command] } : {}),
+        // command เก็บเป็นบรรทัดเดียว — แยกเป็น argv ก่อนส่งเป็น CMD (ไม่ผ่าน shell)
+        ...(c.command ? { cmd: splitCommandArgs(c.command) } : {}),
         cpuLimit: c.cpuLimit,
         memoryLimitMb: c.memoryLimitMb,
         memorySwapMb: c.memorySwapMb,

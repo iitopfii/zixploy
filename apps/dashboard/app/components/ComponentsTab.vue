@@ -50,6 +50,9 @@ interface Component {
   isWeb: boolean;
   webPort: number | null;
   healthCheckPath: string | null;
+  healthCheckIntervalSec: number;
+  healthCheckTimeoutSec: number;
+  healthCheckRetries: number;
   healthCmd: string | null;
   cpuLimit: number | null;
   memoryLimitMb: number | null;
@@ -137,6 +140,9 @@ const blankForm = () => ({
   isWeb: false,
   webPort: "",
   healthCheckPath: "",
+  healthCheckIntervalSec: "5",
+  healthCheckTimeoutSec: "30",
+  healthCheckRetries: "3",
   healthCmd: "",
   cpuLimit: "",
   memoryLimitMb: "",
@@ -187,6 +193,9 @@ function openEdit(c: Component) {
     isWeb: c.isWeb,
     webPort: c.webPort != null ? String(c.webPort) : "",
     healthCheckPath: c.healthCheckPath ?? "",
+    healthCheckIntervalSec: String(c.healthCheckIntervalSec),
+    healthCheckTimeoutSec: String(c.healthCheckTimeoutSec),
+    healthCheckRetries: String(c.healthCheckRetries),
     cpuLimit: c.cpuLimit != null ? String(c.cpuLimit) : "",
     memoryLimitMb: c.memoryLimitMb != null ? String(c.memoryLimitMb) : "",
     memorySwapMb: c.memorySwapMb != null ? String(c.memorySwapMb) : "",
@@ -258,6 +267,16 @@ function buildPayload() {
     isWeb: form.isWeb,
     webPort: form.isWeb ? toNum(form.webPort) : null,
     healthCheckPath: form.healthCheckPath.trim() === "" ? null : form.healthCheckPath.trim(),
+    // ช่องว่าง = ไม่ส่ง (API คงค่าเดิม/ใช้ค่าเริ่มต้น)
+    ...(toNum(form.healthCheckIntervalSec) != null
+      ? { healthCheckIntervalSec: Number(form.healthCheckIntervalSec) }
+      : {}),
+    ...(toNum(form.healthCheckTimeoutSec) != null
+      ? { healthCheckTimeoutSec: Number(form.healthCheckTimeoutSec) }
+      : {}),
+    ...(toNum(form.healthCheckRetries) != null
+      ? { healthCheckRetries: Number(form.healthCheckRetries) }
+      : {}),
     healthCmd: form.healthCmd.trim() === "" ? null : form.healthCmd.trim(),
     cpuLimit: toNum(form.cpuLimit),
     memoryLimitMb: toNum(form.memoryLimitMb),
@@ -664,6 +683,40 @@ function sourceSummary(c: Component): string {
             </label>
           </div>
 
+          <div class="form-grid">
+            <label>
+              <span>Health interval (วินาที)</span>
+              <input
+                v-model="form.healthCheckIntervalSec"
+                class="mono"
+                placeholder="5"
+                inputmode="numeric"
+              />
+            </label>
+            <label>
+              <span>Health timeout (วินาที)</span>
+              <input
+                v-model="form.healthCheckTimeoutSec"
+                class="mono"
+                placeholder="30"
+                inputmode="numeric"
+              />
+            </label>
+            <label>
+              <span>Health retries</span>
+              <input
+                v-model="form.healthCheckRetries"
+                class="mono"
+                placeholder="3"
+                inputmode="numeric"
+              />
+            </label>
+          </div>
+          <small class="muted">
+            deploy รอ health check ได้นานสุดประมาณ interval × retries วินาที — service ที่ start ช้า
+            (เช่น โหลดโมเดล) ให้เพิ่ม retries
+          </small>
+
           <label>
             <span>Health command (ไม่บังคับ)</span>
             <input v-model="form.healthCmd" class="mono" placeholder="redis-cli ping" />
@@ -676,6 +729,10 @@ function sourceSummary(c: Component): string {
           <label>
             <span>Command (ไม่บังคับ)</span>
             <input v-model="form.command" class="mono" placeholder="node server.js" />
+            <small class="muted">
+              เว้นวรรคคั่น argument (ใช้ "..." หรือ '...' ครอบค่าที่มีเว้นวรรค) — ไม่ผ่าน shell
+              ถ้าต้องการ shell ให้เขียน <code>sh -c "..."</code>
+            </small>
           </label>
 
           <div class="form-grid">

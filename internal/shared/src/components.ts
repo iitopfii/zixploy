@@ -142,3 +142,53 @@ export function isLinkNetworkName(value: string): boolean {
 export function linkNetworkDockerName(name: string): string {
   return `zx-link-${name}`;
 }
+
+/**
+ * แยก command ของ component เป็น argv แบบ shell อย่างง่าย — เว้นวรรคคั่น argument,
+ * รองรับ "double quote" 'single quote' และ backslash escape (นอก single quote)
+ * ไม่ทำ variable/glob expansion: ค่าถูกส่งเป็น CMD ของ container ตรง ๆ ไม่ผ่าน shell
+ * (ต้องการ shell ให้เขียน `sh -c "..."` เอง) — throw เมื่อ quote ไม่ปิด
+ */
+export function splitCommandArgs(command: string): string[] {
+  const args: string[] = [];
+  let cur = "";
+  let has = false; // มี token ค้างอยู่ (รวม "" ที่ตั้งใจให้เป็น argument ว่าง)
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i] as string;
+    const next = command[i + 1];
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      else cur += ch;
+    } else if (quote === '"') {
+      if (ch === '"') quote = null;
+      else if (ch === "\\" && (next === '"' || next === "\\")) {
+        cur += next;
+        i++;
+      } else cur += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      has = true;
+    } else if (ch === "\\" && next !== undefined) {
+      cur += next;
+      i++;
+      has = true;
+    } else if (/\s/.test(ch)) {
+      if (has || cur.length > 0) args.push(cur);
+      cur = "";
+      has = false;
+    } else {
+      cur += ch;
+    }
+  }
+  if (quote) throw new Error(`command มีเครื่องหมาย ${quote} ที่ไม่ปิด`);
+  if (has || cur.length > 0) args.push(cur);
+  return args;
+}
+
+/** ขอบเขตค่าตั้ง health check ต่อ component (ใช้ทั้ง API validation และ dashboard) */
+export const HEALTH_CHECK_LIMITS = {
+  intervalSec: { min: 1, max: 300 },
+  timeoutSec: { min: 1, max: 300 },
+  retries: { min: 1, max: 360 },
+} as const;

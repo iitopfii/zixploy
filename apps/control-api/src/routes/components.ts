@@ -14,7 +14,7 @@
  */
 
 import type { Database } from "bun:sqlite";
-import { API_PREFIX, AppError, isUlid } from "@zixploy/shared";
+import { API_PREFIX, AppError, HEALTH_CHECK_LIMITS, isUlid } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
 import type { GitHubAppRegistry } from "../github/registry";
 import { authPlugin, requireAuthenticated } from "../plugins/auth";
@@ -59,6 +59,8 @@ const dependsOnSchema = t.Array(
   }),
 );
 
+const healthLimit = (l: { min: number; max: number }) => ({ minimum: l.min, maximum: l.max });
+
 const componentSchema = t.Object({
   id: t.String(),
   projectId: t.String(),
@@ -76,6 +78,9 @@ const componentSchema = t.Object({
   isWeb: t.Boolean(),
   webPort: t.Nullable(t.Number()),
   healthCheckPath: t.Nullable(t.String()),
+  healthCheckIntervalSec: t.Number(),
+  healthCheckTimeoutSec: t.Number(),
+  healthCheckRetries: t.Number(),
   healthCmd: t.Nullable(t.String()),
   cpuLimit: t.Nullable(t.Number()),
   memoryLimitMb: t.Nullable(t.Number()),
@@ -112,6 +117,9 @@ const createBody = t.Object({
   isWeb: t.Optional(t.Boolean()),
   webPort: t.Optional(t.Nullable(t.Integer({ minimum: 1, maximum: 65535 }))),
   healthCheckPath: t.Optional(t.Nullable(t.String({ maxLength: 255 }))),
+  healthCheckIntervalSec: t.Optional(t.Integer(healthLimit(HEALTH_CHECK_LIMITS.intervalSec))),
+  healthCheckTimeoutSec: t.Optional(t.Integer(healthLimit(HEALTH_CHECK_LIMITS.timeoutSec))),
+  healthCheckRetries: t.Optional(t.Integer(healthLimit(HEALTH_CHECK_LIMITS.retries))),
   healthCmd: t.Optional(t.Nullable(t.String({ maxLength: 1024 }))),
   cpuLimit: t.Optional(t.Nullable(t.Number({ minimum: 0.1, maximum: 64 }))),
   memoryLimitMb: t.Optional(t.Nullable(t.Integer({ minimum: 16, maximum: 65536 }))),
@@ -131,6 +139,9 @@ const updateBody = t.Object({
   isWeb: t.Optional(t.Boolean()),
   webPort: t.Optional(t.Nullable(t.Integer({ minimum: 1, maximum: 65535 }))),
   healthCheckPath: t.Optional(t.Nullable(t.String({ maxLength: 255 }))),
+  healthCheckIntervalSec: t.Optional(t.Integer(healthLimit(HEALTH_CHECK_LIMITS.intervalSec))),
+  healthCheckTimeoutSec: t.Optional(t.Integer(healthLimit(HEALTH_CHECK_LIMITS.timeoutSec))),
+  healthCheckRetries: t.Optional(t.Integer(healthLimit(HEALTH_CHECK_LIMITS.retries))),
   healthCmd: t.Optional(t.Nullable(t.String({ maxLength: 1024 }))),
   cpuLimit: t.Optional(t.Nullable(t.Number({ minimum: 0.1, maximum: 64 }))),
   memoryLimitMb: t.Optional(t.Nullable(t.Integer({ minimum: 16, maximum: 65536 }))),

@@ -425,6 +425,142 @@ describe("webhook endpoint — push event", () => {
   });
 });
 
+describe("webhook endpoint — push เข้า repo ของ component (0.1.27)", () => {
+  const INSTALLATION = 77777;
+  const PROJECT_REPO_ID = 1001;
+  const COMPONENT_REPO_ID = 2002;
+
+  /** compose project (repo หลัก test-org/my-app@main) + build component ที่ชี้ test-org/frontend@develop */
+  function insertComposeWithComponentRepo(
+    db: ReturnType<typeof openDatabase>,
+    opts: { autoDeploy?: boolean; enabled?: boolean } = {},
+  ) {
+    const installDbId = insertInstallation(db, INSTALLATION);
+    const projectId = insertProject(db, {
+      installationDbId: installDbId,
+      repoId: PROJECT_REPO_ID,
+      branch: "main",
+      autoDeploy: opts.autoDeploy !== false,
+    });
+    db.query("UPDATE projects SET mode = 'compose' WHERE id = ?").run(projectId);
+    const now = Date.now();
+    db.query(
+      `INSERT INTO project_components
+        (id, project_id, name, role, source_kind, dockerfile_path, build_context, is_web, web_port,
+         repo_installation_id, repo_full_name, repo_branch, position, enabled, created_at, updated_at)
+       VALUES (?, ?, 'web', 'web', 'build', 'Dockerfile', '.', 1, 3000, ?, 'test-org/frontend', 'develop', 0, ?, ?, ?)`,
+    ).run(ulid(), projectId, installDbId, opts.enabled === false ? 0 : 1, now, now);
+    return projectId;
+  }
+
+  const componentPush = (branch = "develop") => ({
+    ref: `refs/heads/${branch}`,
+    after: "f".repeat(40),
+    deleted: false,
+    installation: { id: INSTALLATION },
+    repository: { id: COMPONENT_REPO_ID, full_name: "test-org/frontend" },
+    head_commit: { message: "fix: button", author: { name: "Dev" } },
+  });
+
+  test("push เข้า repo/branch ของ component → deploy project ด้วย head ของ repo หลัก", async () => {
+    const { app, db } = await setup();
+    const projectId = insertComposeWithComponentRepo(db);
+
+    const { response } = await sendWebhook(app, { event: "push", payload: componentPush() });
+    expect(response.status).toBe(200);
+
+    const deployment = db
+      .query("SELECT * FROM deployments WHERE project_id = ?")
+      .get(projectId) as Record<string, unknown> | null;
+    expect(deployment).not.toBeNull();
+    expect(deployment!.trigger).toBe("push");
+    // commit ของ deployment = head ของ branch main ใน repo หลัก (mock: "a"×40) ไม่ใช่ commit ของ component
+    expect(deployment!.commit_sha).toBe("a".repeat(40));
+    expect(deployment!.commit_message).toBe("[test-org/frontend@develop] fix: button");
+
+    const job = db
+      .query("SELECT payload FROM deploy_jobs WHERE deployment_id = ?")
+      .get(deployment!.id as string) as { payload: string };
+    const payload = JSON.parse(job.payload);
+    expect(payload.commitSha).toBe("a".repeat(40));
+    expect(payload.source).toEqual({
+      type: "github",
+      installationId: INSTALLATION,
+      repoFullName: "test-org/my-app",
+    });
+
+    const intent = db
+      .query("SELECT * FROM deploy_intents WHERE project_id = ?")
+      .get(projectId) as Record<string, unknown> | null;
+    expect(intent!.status).toBe("picked_up");
+    expect(intent!.commit_sha).toBe("f".repeat(40));
+  });
+
+  test("push ผิด branch ของ component → ไม่ deploy", async () => {
+    const { app, db } = await setup();
+    insertComposeWithComponentRepo(db);
+    await sendWebhook(app, { event: "push", payload: componentPush("main") });
+    expect(db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM deployments").get()!.n).toBe(0);
+  });
+
+  test("auto_deploy ปิด หรือ component ถูกปิด → ไม่ deploy", async () => {
+    const a = await setup();
+    insertComposeWithComponentRepo(a.db, { autoDeploy: false });
+    await sendWebhook(a.app, { event: "push", payload: componentPush() });
+    expect(a.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM deployments").get()!.n).toBe(0);
+
+    const b = await setup();
+    insertComposeWithComponentRepo(b.db, { enabled: false });
+    await sendWebhook(b.app, { event: "push", payload: componentPush() });
+    expect(b.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM deployments").get()!.n).toBe(0);
+  });
+
+  test("delivery เดิมส่งซ้ำ → deployment เดียว", async () => {
+    const { app, db } = await setup();
+    insertComposeWithComponentRepo(db);
+    const deliveryId = crypto.randomUUID();
+    await sendWebhook(app, { event: "push", payload: componentPush(), deliveryId });
+    await sendWebhook(app, { event: "push", payload: componentPush(), deliveryId });
+    expect(db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM deployments").get()!.n).toBe(1);
+  });
+
+  test("push เข้า repo หลักของ project เดียวกัน → ใช้ทางเดิม ไม่สร้างซ้ำ", async () => {
+    const { app, db } = await setup();
+    const projectId = insertComposeWithComponentRepo(db);
+    // component อีกตัวชี้ repo หลัก + branch เดียวกับ project
+    const installDbId = db
+      .query<{ id: string }, [number]>(
+        "SELECT id FROM github_installations WHERE installation_id = ?",
+      )
+      .get(INSTALLATION)!.id;
+    const now = Date.now();
+    db.query(
+      `INSERT INTO project_components
+        (id, project_id, name, role, source_kind, dockerfile_path, build_context,
+         repo_installation_id, repo_full_name, repo_branch, position, enabled, created_at, updated_at)
+       VALUES (?, ?, 'api', 'app', 'build', 'Dockerfile', '.', ?, 'test-org/my-app', 'main', 1, 1, ?, ?)`,
+    ).run(ulid(), projectId, installDbId, now, now);
+
+    await sendWebhook(app, {
+      event: "push",
+      payload: {
+        ref: "refs/heads/main",
+        after: "d".repeat(40),
+        deleted: false,
+        installation: { id: INSTALLATION },
+        repository: { id: PROJECT_REPO_ID, full_name: "test-org/my-app" },
+        head_commit: { message: "feat: api", author: { name: "Dev" } },
+      },
+    });
+    const rows = db.query("SELECT commit_sha, commit_message FROM deployments").all() as Array<
+      Record<string, unknown>
+    >;
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.commit_sha).toBe("d".repeat(40));
+    expect(rows[0]!.commit_message).toBe("feat: api");
+  });
+});
+
 describe("webhook endpoint — installation events", () => {
   test("installation deleted → status เป็น deleted, auto_deploy projects ปิด", async () => {
     const { app, db } = await setup();

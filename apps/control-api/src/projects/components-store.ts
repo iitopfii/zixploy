@@ -14,9 +14,11 @@ import {
   type ComponentRole,
   type ComponentSourceKind,
   type DepCondition,
+  HEALTH_CHECK_LIMITS,
   isComponentName,
   isGitBranchName,
   isRepoFullName,
+  splitCommandArgs,
   ulid,
   validateImageRef,
 } from "@zixploy/shared";
@@ -96,6 +98,12 @@ export interface ComponentDto {
   isWeb: boolean;
   webPort: number | null;
   healthCheckPath: string | null;
+  /** วินาทีระหว่างการตรวจแต่ละครั้ง (HTTP health check และ Docker HEALTHCHECK) */
+  healthCheckIntervalSec: number;
+  /** timeout ต่อครั้ง (วินาที) */
+  healthCheckTimeoutSec: number;
+  /** จำนวนครั้งที่ตรวจก่อนถือว่า deploy ล้ม — service ที่ start ช้าต้องตั้งให้มากขึ้น */
+  healthCheckRetries: number;
   /** คำสั่ง Docker HEALTHCHECK ในคอนเทนเนอร์ — จำเป็นเมื่อมี component อื่นรอตัวนี้แบบ condition='healthy' */
   healthCmd: string | null;
   cpuLimit: number | null;
@@ -131,6 +139,9 @@ export interface ComponentInput {
   isWeb?: boolean;
   webPort?: number | null;
   healthCheckPath?: string | null;
+  healthCheckIntervalSec?: number;
+  healthCheckTimeoutSec?: number;
+  healthCheckRetries?: number;
   healthCmd?: string | null;
   cpuLimit?: number | null;
   memoryLimitMb?: number | null;
@@ -213,6 +224,9 @@ export function toDto(row: ComponentRow, deps: ComponentDep[]): ComponentDto {
     isWeb: row.is_web === 1,
     webPort: row.web_port,
     healthCheckPath: row.health_check_path,
+    healthCheckIntervalSec: row.health_check_interval_sec,
+    healthCheckTimeoutSec: row.health_check_timeout_sec,
+    healthCheckRetries: row.health_check_retries,
     healthCmd: row.health_cmd,
     cpuLimit: row.cpu_limit,
     memoryLimitMb: row.memory_limit_mb,
@@ -291,6 +305,9 @@ export function assertGitSourceFormat(source: ComponentGitSource): void {
 }
 
 /** ตรวจ field ตาม source_kind + web + limits — โยน COMPONENT_INVALID เมื่อผิด */
+/** ค่าเริ่มต้นเดียวกับ DEFAULT ของคอลัมน์ใน migration 0023 */
+const DEFAULT_HEALTH_CHECK = { intervalSec: 5, timeoutSec: 30, retries: 3 } as const;
+
 function validateInput(db: Database, input: ComponentInput): void {
   if (!isComponentName(input.name)) {
     throw new AppError(
@@ -328,6 +345,31 @@ function validateInput(db: Database, input: ComponentInput): void {
     }
   }
   // source_kind='build' ไม่มี field บังคับ (dockerfile_path/build_context มี default)
+  if (input.command) {
+    try {
+      splitCommandArgs(input.command);
+    } catch (err) {
+      throw new AppError(
+        "COMPONENT_INVALID",
+        err instanceof Error ? err.message : "command ไม่ถูกต้อง",
+        {
+          field: "command",
+        },
+      );
+    }
+  }
+  for (const [field, value, lim] of [
+    ["healthCheckIntervalSec", input.healthCheckIntervalSec, HEALTH_CHECK_LIMITS.intervalSec],
+    ["healthCheckTimeoutSec", input.healthCheckTimeoutSec, HEALTH_CHECK_LIMITS.timeoutSec],
+    ["healthCheckRetries", input.healthCheckRetries, HEALTH_CHECK_LIMITS.retries],
+  ] as const) {
+    if (value === undefined) continue;
+    if (!Number.isInteger(value) || value < lim.min || value > lim.max) {
+      throw new AppError("COMPONENT_INVALID", `${field} ต้องเป็นจำนวนเต็ม ${lim.min}–${lim.max}`, {
+        field,
+      });
+    }
+  }
   if (input.gitSource) {
     if (input.sourceKind !== "build") {
       throw new AppError("COMPONENT_INVALID", "ตั้ง repo แยกได้เฉพาะ component แบบ build", {
@@ -526,10 +568,11 @@ export function createComponent(
       `INSERT INTO project_components
          (id, project_id, name, role, source_kind, dockerfile_path, build_context, target_stage,
           image_ref, managed_service_id, command, internal_port, is_web, web_port,
-          health_check_path, health_cmd, cpu_limit, memory_limit_mb, memory_swap_mb, pids_limit,
+          health_check_path, health_check_interval_sec, health_check_timeout_sec,
+          health_check_retries, health_cmd, cpu_limit, memory_limit_mb, memory_swap_mb, pids_limit,
           cap_drop_all, no_new_privileges, restart_policy, position,
           repo_installation_id, repo_full_name, repo_branch, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       projectId,
@@ -546,6 +589,9 @@ export function createComponent(
       input.isWeb ? 1 : 0,
       input.webPort ?? null,
       input.healthCheckPath ?? null,
+      input.healthCheckIntervalSec ?? DEFAULT_HEALTH_CHECK.intervalSec,
+      input.healthCheckTimeoutSec ?? DEFAULT_HEALTH_CHECK.timeoutSec,
+      input.healthCheckRetries ?? DEFAULT_HEALTH_CHECK.retries,
       input.healthCmd ?? null,
       input.cpuLimit ?? null,
       input.memoryLimitMb ?? null,
@@ -586,6 +632,9 @@ export interface ComponentUpdate {
   isWeb?: boolean;
   webPort?: number | null;
   healthCheckPath?: string | null;
+  healthCheckIntervalSec?: number;
+  healthCheckTimeoutSec?: number;
+  healthCheckRetries?: number;
   healthCmd?: string | null;
   cpuLimit?: number | null;
   memoryLimitMb?: number | null;
@@ -628,6 +677,9 @@ export function updateComponent(
     isWeb: update.isWeb ?? row.is_web === 1,
     webPort: update.webPort ?? row.web_port,
     healthCheckPath: update.healthCheckPath ?? row.health_check_path,
+    healthCheckIntervalSec: update.healthCheckIntervalSec ?? row.health_check_interval_sec,
+    healthCheckTimeoutSec: update.healthCheckTimeoutSec ?? row.health_check_timeout_sec,
+    healthCheckRetries: update.healthCheckRetries ?? row.health_check_retries,
     healthCmd: update.healthCmd ?? row.health_cmd,
     cpuLimit: update.cpuLimit ?? row.cpu_limit,
     memoryLimitMb: update.memoryLimitMb ?? row.memory_limit_mb,
@@ -650,6 +702,12 @@ export function updateComponent(
   if (update.isWeb !== undefined) set("is_web", update.isWeb ? 1 : 0);
   if (update.webPort !== undefined) set("web_port", update.webPort);
   if (update.healthCheckPath !== undefined) set("health_check_path", update.healthCheckPath);
+  if (update.healthCheckIntervalSec !== undefined)
+    set("health_check_interval_sec", update.healthCheckIntervalSec);
+  if (update.healthCheckTimeoutSec !== undefined)
+    set("health_check_timeout_sec", update.healthCheckTimeoutSec);
+  if (update.healthCheckRetries !== undefined)
+    set("health_check_retries", update.healthCheckRetries);
   if (update.healthCmd !== undefined) set("health_cmd", update.healthCmd);
   if (update.cpuLimit !== undefined) set("cpu_limit", update.cpuLimit);
   if (update.memoryLimitMb !== undefined) set("memory_limit_mb", update.memoryLimitMb);

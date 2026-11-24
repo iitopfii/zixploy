@@ -9,6 +9,23 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.1.27] — 2026-11-24
+
+### Added
+- **ตั้งค่า health check ต่อ component ได้** — interval, timeout และจำนวน retries ในฟอร์ม
+  component และผ่าน API (`healthCheckIntervalSec`, `healthCheckTimeoutSec`,
+  `healthCheckRetries`) · service ที่ start ช้า เช่น ต้องโหลดโมเดล ให้เพิ่ม retries แทนที่
+  deploy จะล้มหลังรอ 15 วินาที
+- **auto-deploy จาก repo ของ component** — push เข้า repo/branch ที่ build component ของ
+  โปรเจกต์ compose ชี้ไว้ จะ deploy โปรเจกต์นั้นด้วยเมื่อเปิด auto-deploy (เดิมจับเฉพาะ repo
+  หลักของโปรเจกต์) · ข้อความ commit ในประวัติ deploy ขึ้นต้นด้วย `[owner/repo@branch]`
+
+### Fixed
+- **command ของ component ถูกส่งเป็น argument เดียว** — command ที่มีหลายคำ เช่น
+  `--model-id=x --auto-truncate` ทำให้ container อ่าน flag ไม่ออกแล้ว crash loop · ตอนนี้แยก
+  ด้วยเว้นวรรค รองรับ `"..."` และ `'...'` ครอบค่าที่มีเว้นวรรค (ไม่ผ่าน shell — ต้องการ shell
+  ให้เขียน `sh -c "..."`) และปฏิเสธ command ที่ quote ไม่ปิดตั้งแต่ตอนบันทึก
+
 ## [0.1.26] — 2026-11-24
 
 ### Added

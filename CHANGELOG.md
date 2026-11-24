@@ -9,6 +9,18 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [0.1.26] — 2026-11-24
+
+### Added
+- **link network ระหว่าง project compose** — ตั้งชื่อ link เดียวกันในหน้า Settings แล้ว component
+  ของทุก project ใน link เรียกกันด้วยชื่อ component ได้ (network ร่วม `zx-link-<ชื่อ>`) · เช่น
+  แยก service หนัก ๆ อย่างโมเดล embedding/OCR ไว้ project ของตัวเอง แอปหลัก deploy ใหม่ได้
+  โดยไม่ต้องสร้าง service พวกนั้นซ้อนทุกครั้ง · ระบบไม่ให้ตั้งถ้าชื่อ component ซ้ำกับ project อื่น
+  ใน link เดียวกัน (ตรวจทั้งตอนบันทึกและตอน deploy)
+
+### Changed
+- migration 0034 เพิ่มคอลัมน์ `link_network` ของ project (rollback ได้ ข้อมูลเดิมไม่เปลี่ยน)
+
 ## [0.1.25] — 2026-11-24
 
 ### Added

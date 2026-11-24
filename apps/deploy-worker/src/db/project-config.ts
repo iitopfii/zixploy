@@ -24,6 +24,8 @@ export interface ProjectConfig {
   memoryLimitMb: number | null;
   restartPolicy: "no" | "on-failure" | "always" | "unless-stopped";
   deployTimeoutSec: number;
+  /** link network (0.1.26, compose) — null = ไม่ต่อ network ร่วม */
+  linkNetwork: string | null;
 }
 
 interface ProjectConfigRow {
@@ -43,11 +45,12 @@ interface ProjectConfigRow {
   memory_limit_mb: number | null;
   restart_policy: string;
   deploy_timeout_sec: number;
+  link_network: string | null;
 }
 
 const SELECT_COLUMNS = `id, name, dockerfile_path, build_context, target_stage, internal_port, exposed_port,
   health_check_path, health_check_interval_sec, health_check_timeout_sec, health_check_retries,
-  start_command, cpu_limit, memory_limit_mb, restart_policy, deploy_timeout_sec`;
+  start_command, cpu_limit, memory_limit_mb, restart_policy, deploy_timeout_sec, link_network`;
 
 export function loadProjectConfig(db: Database, projectId: string): ProjectConfig | null {
   const row = db
@@ -72,6 +75,7 @@ export function loadProjectConfig(db: Database, projectId: string): ProjectConfi
     memoryLimitMb: row.memory_limit_mb,
     restartPolicy: row.restart_policy as "no" | "on-failure" | "always" | "unless-stopped",
     deployTimeoutSec: row.deploy_timeout_sec,
+    linkNetwork: row.link_network,
   };
 }
 

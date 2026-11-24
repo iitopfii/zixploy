@@ -496,8 +496,15 @@ export class DockerCliClient {
     }
   }
 
-  async connectNetwork(networkName: string, containerId: string): Promise<void> {
-    const result = await this.exec(["network", "connect", networkName, containerId]);
+  async connectNetwork(
+    networkName: string,
+    containerId: string,
+    opts?: { aliases?: string[] },
+  ): Promise<void> {
+    const args = ["network", "connect"];
+    for (const alias of opts?.aliases ?? []) args.push("--alias", alias);
+    args.push(networkName, containerId);
+    const result = await this.exec(args);
     if (result.code !== 0 && !/already exists|already connected/i.test(result.stderr)) {
       throw new AppError(
         "DOCKER_UNAVAILABLE",

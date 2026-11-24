@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { API_PREFIX, AppError, isUlid, ulid } from "@zixploy/shared";
+import { API_PREFIX, AppError, isLinkNetworkName, isUlid, ulid } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
 import { getClientIp, recordAuditEvent } from "../audit/log";
 import { authPlugin, requireAuthenticated } from "../plugins/auth";
@@ -20,6 +20,7 @@ interface ProjectRow {
   internal_port: number | null;
   exposed_port: number | null;
   health_check_path: string | null;
+  link_network: string | null;
   archived_at: number | null;
   degraded_at: number | null;
   created_at: number;
@@ -68,6 +69,8 @@ const projectSchema = t.Object({
   /** host port ที่ map เข้า internal port ตรง ๆ (เช่น host 3100 → container 3000) — null = ไม่ expose */
   exposedPort: t.Nullable(t.Number()),
   healthCheckPath: t.Nullable(t.String()),
+  /** link network (0.1.26, compose) — project ที่ตั้งชื่อเดียวกันเรียก component ของกันได้ด้วยชื่อ component */
+  linkNetwork: t.Nullable(t.String()),
   archivedAt: t.Nullable(t.Number()),
   createdAt: t.Number(),
   updatedAt: t.Number(),
@@ -94,6 +97,7 @@ const updateBody = t.Object({
   exposedPort: t.Optional(t.Nullable(t.Integer({ minimum: 1, maximum: 65535 }))),
   healthCheckPath: t.Optional(t.Nullable(t.String({ maxLength: 255 }))),
   autoDeploy: t.Optional(t.Boolean()),
+  linkNetwork: t.Optional(t.Nullable(t.String({ maxLength: 40 }))),
 });
 
 function toProject(row: ProjectRow) {
@@ -114,6 +118,7 @@ function toProject(row: ProjectRow) {
     internalPort: row.internal_port,
     exposedPort: row.exposed_port,
     healthCheckPath: row.health_check_path,
+    linkNetwork: row.link_network,
     archivedAt: row.archived_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -132,7 +137,7 @@ function toProject(row: ProjectRow) {
  */
 const SELECT_COLUMNS = `p.id, p.name, p.status, p.mode, p.source_type, p.installation_id, p.repo_id, p.repo_full_name,
   p.branch, p.auto_deploy, p.dockerfile_path, p.build_context, p.internal_port, p.exposed_port,
-  p.health_check_path, p.archived_at, p.degraded_at, p.created_at, p.updated_at,
+  p.health_check_path, p.link_network, p.archived_at, p.degraded_at, p.created_at, p.updated_at,
   (SELECT d.status FROM deployments d
     WHERE d.project_id = p.id AND d.status NOT IN ('succeeded','failed','cancelled')
     ORDER BY d.created_at DESC LIMIT 1) AS active_deployment_status,
@@ -202,6 +207,45 @@ function assertSafeRelativePath(value: string, field: string): void {
   }
 }
 
+/**
+ * ตรวจก่อนตั้ง link network — รูปแบบชื่อ, ใช้ได้เฉพาะ compose, และชื่อ component ต้องไม่ชนกับ project อื่น
+ * ใน link เดียวกัน (บน network ร่วม ชื่อ component คือ DNS alias — ชนกันแล้ว resolve ไปผิด project)
+ * worker ตรวจซ้ำตอน deploy เพราะ component อาจถูกเพิ่ม/เปลี่ยนชื่อหลังตั้ง link
+ */
+function assertLinkNetworkUsable(db: Database, projectId: string, mode: string, name: string) {
+  if (!isLinkNetworkName(name)) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      'ชื่อ link network ใช้ได้เฉพาะ a-z 0-9 และ "-" ยาวไม่เกิน 40 ตัว ขึ้นต้นด้วยตัวอักษรหรือตัวเลข',
+      { field: "linkNetwork" },
+    );
+  }
+  if (mode !== "compose") {
+    throw new AppError("VALIDATION_ERROR", "link network ใช้ได้เฉพาะ project แบบ compose", {
+      field: "linkNetwork",
+    });
+  }
+  const clashes = db
+    .query<{ name: string; project_name: string }, [string, string, string]>(
+      `SELECT c.name, p.name AS project_name
+         FROM project_components c JOIN projects p ON p.id = c.project_id
+        WHERE p.link_network = ? AND p.id != ? AND p.archived_at IS NULL
+          AND c.source_kind != 'managed_ref'
+          AND c.name IN (SELECT name FROM project_components
+                          WHERE project_id = ? AND source_kind != 'managed_ref')
+        ORDER BY c.name`,
+    )
+    .all(name, projectId, projectId);
+  if (clashes.length > 0) {
+    const list = clashes.map((c) => `"${c.name}" (${c.project_name})`).join(", ");
+    throw new AppError(
+      "VALIDATION_ERROR",
+      `ชื่อ component ซ้ำกับ project อื่นใน link "${name}": ${list} — เปลี่ยนชื่อก่อน`,
+      { field: "linkNetwork" },
+    );
+  }
+}
+
 export function projectRoutes(db: Database) {
   return new Elysia({ prefix: `${API_PREFIX}/projects` })
     .use(authPlugin(db))
@@ -258,6 +302,9 @@ export function projectRoutes(db: Database) {
         if (body.exposedPort != null) {
           assertExposedPortAvailable(db, body.exposedPort, params.id);
         }
+        if (body.linkNetwork != null) {
+          assertLinkNetworkUsable(db, params.id, existing.mode, body.linkNetwork);
+        }
 
         const fields: string[] = [];
         const values: (string | number | null)[] = [];
@@ -273,6 +320,7 @@ export function projectRoutes(db: Database) {
         if (body.exposedPort !== undefined) set("exposed_port", body.exposedPort);
         if (body.healthCheckPath !== undefined) set("health_check_path", body.healthCheckPath);
         if (body.autoDeploy !== undefined) set("auto_deploy", body.autoDeploy ? 1 : 0);
+        if (body.linkNetwork !== undefined) set("link_network", body.linkNetwork);
 
         if (fields.length > 0) {
           set("updated_at", Date.now());

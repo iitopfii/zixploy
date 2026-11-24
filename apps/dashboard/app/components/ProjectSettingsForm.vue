@@ -12,6 +12,8 @@ export interface EditableProject {
   exposedPort: number | null;
   healthCheckPath: string | null;
   autoDeploy: boolean;
+  mode?: "single" | "compose";
+  linkNetwork?: string | null;
   archivedAt: number | null;
 }
 
@@ -28,6 +30,7 @@ const form = reactive({
   exposedPort: "" as string,
   healthCheckPath: "",
   autoDeploy: false,
+  linkNetwork: "",
 });
 
 // ประกาศก่อน resetForm() เพราะ watch ด้านล่างเรียก resetForm ทันทีตอน setup
@@ -49,6 +52,7 @@ function resetForm(keepStatus = false) {
   form.exposedPort = props.project.exposedPort === null ? "" : String(props.project.exposedPort);
   form.healthCheckPath = props.project.healthCheckPath ?? "";
   form.autoDeploy = props.project.autoDeploy;
+  form.linkNetwork = props.project.linkNetwork ?? "";
   fieldErrors.value = {};
   if (!keepStatus) {
     saveError.value = "";
@@ -79,8 +83,11 @@ const dirty = computed(
     form.exposedPort !==
       (props.project.exposedPort === null ? "" : String(props.project.exposedPort)) ||
     form.healthCheckPath !== (props.project.healthCheckPath ?? "") ||
-    form.autoDeploy !== props.project.autoDeploy,
+    form.autoDeploy !== props.project.autoDeploy ||
+    form.linkNetwork !== (props.project.linkNetwork ?? ""),
 );
+
+const isCompose = computed(() => props.project.mode === "compose");
 
 /** validate ฝั่ง client เพื่อ feedback เร็ว — API ยัง validate ซ้ำเสมอ */
 function validate(): boolean {
@@ -116,6 +123,11 @@ function validate(): boolean {
     } else if (form.internalPort === "") {
       errors.exposedPort = "ต้องระบุ internal port ก่อนจึงจะ expose port ออก host ได้";
     }
+  }
+
+  const link = form.linkNetwork.trim();
+  if (link !== "" && !/^[a-z0-9][a-z0-9-]{0,39}$/.test(link)) {
+    errors.linkNetwork = 'ใช้ได้เฉพาะ a-z 0-9 และ "-" ยาวไม่เกิน 40 ตัว ขึ้นต้นด้วยตัวอักษรหรือตัวเลข';
   }
 
   fieldErrors.value = errors;
@@ -159,6 +171,9 @@ async function save() {
       exposedPort: form.exposedPort === "" ? null : Number(form.exposedPort),
       healthCheckPath: form.healthCheckPath.trim() === "" ? null : form.healthCheckPath.trim(),
       autoDeploy: form.autoDeploy,
+      ...(isCompose.value
+        ? { linkNetwork: form.linkNetwork.trim() === "" ? null : form.linkNetwork.trim() }
+        : {}),
     });
 
     if (error) {
@@ -285,6 +300,16 @@ async function save() {
     <label>
       <span>Health check path</span>
       <input v-model="form.healthCheckPath" :disabled="disabled" placeholder="/healthz" />
+    </label>
+
+    <label v-if="isCompose">
+      <span>Link network — project compose ที่ตั้งชื่อเดียวกันเรียก component ของกันได้ด้วยชื่อ component (ว่าง = ไม่ต่อ)</span>
+      <input v-model="form.linkNetwork" :disabled="disabled" maxlength="40" placeholder="sealand" />
+      <em v-if="fieldErrors.linkNetwork" class="field-error">{{ fieldErrors.linkNetwork }}</em>
+      <em v-else-if="form.linkNetwork.trim() !== ''" class="field-hint-inline">
+        ทุก component ต่อ network <code>zx-link-{{ form.linkNetwork.trim() }}</code> เมื่อ deploy ครั้งถัดไป
+        · ชื่อ component ต้องไม่ซ้ำกับ project อื่นใน link เดียวกัน
+      </em>
     </label>
 
     <div class="check-row">

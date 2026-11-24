@@ -129,3 +129,16 @@ export function isGitBranchName(value: string): boolean {
   if (/[\x00-\x20\x7f~^:?*[\\]/.test(value)) return false;
   return value.split("/").every((part) => part.length > 0 && !part.startsWith("."));
 }
+
+/**
+ * ชื่อ link network ของ project (0.1.26) — a-z 0-9 และ "-" ยาว 1–40 ขึ้นต้นด้วยตัวอักษร/ตัวเลข
+ * (ตรงกับ CHECK ใน migration 0034) · project ที่ใช้ชื่อเดียวกันเรียก component ของกันได้ด้วยชื่อ component
+ */
+export function isLinkNetworkName(value: string): boolean {
+  return /^[a-z0-9][a-z0-9-]{0,39}$/.test(value);
+}
+
+/** ชื่อ Docker network จริงของ link network */
+export function linkNetworkDockerName(name: string): string {
+  return `zx-link-${name}`;
+}

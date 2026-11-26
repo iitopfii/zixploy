@@ -21,6 +21,8 @@ const autoDeploySupported = computed(() => (props.sourceType ?? "github") !== "d
 const emit = defineEmits<{ "auto-deploy-changed": [] }>();
 
 const api = useApi();
+const { t } = useI18n();
+const { canWrite } = usePermissions();
 
 // ---------------------------------------------------------------------------
 // Auto deploy toggle
@@ -51,14 +53,13 @@ async function toggleAutoDeploy() {
     });
     if (error) {
       autoDeployLocal.value = !next; // คืนค่าเดิมเมื่อบันทึกไม่สำเร็จ
-      const body = error.value as { error?: { message?: string } } | null;
-      autoDeployError.value = body?.error?.message ?? "บันทึกไม่สำเร็จ";
+      autoDeployError.value = apiErrorMessage(error, "common.saveFailed");
       return;
     }
     emit("auto-deploy-changed");
   } catch {
     autoDeployLocal.value = !next;
-    autoDeployError.value = "ติดต่อ API ไม่ได้";
+    autoDeployError.value = t("common.apiUnreachable");
   } finally {
     savingAutoDeploy.value = false;
   }
@@ -121,7 +122,7 @@ async function fetchDeployments(cursor?: string) {
       query: { limit: String(PAGE_SIZE), ...(cursor ? { cursor } : {}) },
     });
     if (error) {
-      listError.value = "โหลดรายการ deploy ไม่ได้";
+      listError.value = t("deploy.error.list");
       return;
     }
     deployments.value = data?.items ?? [];
@@ -130,7 +131,7 @@ async function fetchDeployments(cursor?: string) {
     // ไม่มี cursor = หน้าแรก — หัวรายการคือ deployment ล่าสุดจริง
     if (!cursor) latestDeployment.value = deployments.value[0] ?? null;
   } catch {
-    listError.value = "ติดต่อ API ไม่ได้";
+    listError.value = t("common.apiUnreachable");
   } finally {
     loadingList.value = false;
   }
@@ -253,11 +254,11 @@ async function doAction(label: string, fn: () => Promise<void>) {
   actionOk.value = "";
   try {
     await fn();
-    actionOk.value = `${label} สำเร็จ`;
+    actionOk.value = t("deploy.actionOk", { action: label });
     await fetchDeployments();
     schedulePoll();
   } catch (e) {
-    actionError.value = e instanceof Error ? e.message : "เกิดข้อผิดพลาด";
+    actionError.value = e instanceof Error ? e.message : t("deploy.error.generic");
   } finally {
     busy.value = null;
   }
@@ -266,42 +267,28 @@ async function doAction(label: string, fn: () => Promise<void>) {
 async function deploy() {
   await doAction("Deploy", async () => {
     const { error } = await api.api.v1.projects({ id: props.projectId }).deploy.post({});
-    if (error)
-      throw new Error(
-        (error.value as { error?: { message?: string } } | null)?.error?.message ?? "deploy ล้มเหลว",
-      );
+    if (error) throw new Error(apiErrorMessage(error, "deploy.error.deploy"));
   });
 }
 
 async function redeploy() {
   await doAction("Redeploy", async () => {
     const { error } = await api.api.v1.projects({ id: props.projectId }).redeploy.post({});
-    if (error)
-      throw new Error(
-        (error.value as { error?: { message?: string } } | null)?.error?.message ??
-          "redeploy ล้มเหลว",
-      );
+    if (error) throw new Error(apiErrorMessage(error, "deploy.error.redeploy"));
   });
 }
 
 async function restart() {
   await doAction("Restart", async () => {
     const { error } = await api.api.v1.projects({ id: props.projectId }).restart.post({});
-    if (error)
-      throw new Error(
-        (error.value as { error?: { message?: string } } | null)?.error?.message ??
-          "restart ล้มเหลว",
-      );
+    if (error) throw new Error(apiErrorMessage(error, "deploy.error.restart"));
   });
 }
 
 async function stop() {
   await doAction("Stop", async () => {
     const { error } = await api.api.v1.projects({ id: props.projectId }).stop.post({});
-    if (error)
-      throw new Error(
-        (error.value as { error?: { message?: string } } | null)?.error?.message ?? "stop ล้มเหลว",
-      );
+    if (error) throw new Error(apiErrorMessage(error, "deploy.error.stop"));
   });
 }
 
@@ -310,11 +297,7 @@ async function rollback(targetDeploymentId: string) {
     const { error } = await api.api.v1
       .projects({ id: props.projectId })
       .rollback.post({ targetDeploymentId });
-    if (error)
-      throw new Error(
-        (error.value as { error?: { message?: string } } | null)?.error?.message ??
-          "rollback ล้มเหลว",
-      );
+    if (error) throw new Error(apiErrorMessage(error, "deploy.error.rollback"));
   });
 }
 
@@ -342,15 +325,14 @@ async function removeDeployment(id: string) {
       .deployments({ deploymentId: id })
       .delete();
     if (error) {
-      actionError.value =
-        (error.value as { error?: { message?: string } } | null)?.error?.message ?? "ลบไม่สำเร็จ";
+      actionError.value = apiErrorMessage(error, "common.deleteFailed");
       return;
     }
     // cursor เดิมอาจชี้ไปยังแถวที่เพิ่งหายไป — กลับหน้าแรกแทนการโหลดหน้าเดิมซ้ำ
     await resetToFirstPage();
-    actionOk.value = "ลบแล้ว";
+    actionOk.value = t("deploy.history.deleted");
   } catch {
-    actionError.value = "ติดต่อ API ไม่ได้";
+    actionError.value = t("common.apiUnreachable");
   } finally {
     deletingId.value = null;
   }
@@ -365,21 +347,20 @@ async function pruneHistory() {
       .projects({ id: props.projectId })
       .deployments.prune.post({});
     if (error) {
-      actionError.value =
-        (error.value as { error?: { message?: string } } | null)?.error?.message ??
-        "ล้างประวัติไม่สำเร็จ";
+      actionError.value = apiErrorMessage(error, "deploy.error.prune");
       return;
     }
     confirmPrune.value = false;
     await resetToFirstPage();
 
     const skipped = data?.skipped?.length ?? 0;
+    const deleted = data?.deleted ?? 0;
     actionOk.value =
       skipped > 0
-        ? `ลบ ${data?.deleted ?? 0} รายการ — เหลือไว้ ${skipped} รายการที่ลบไม่ได้ (ให้บริการอยู่หรือกำลังทำงาน)`
-        : `ลบประวัติ ${data?.deleted ?? 0} รายการแล้ว`;
+        ? t("deploy.history.prunedSkipped", { deleted, skipped })
+        : trCount("deploy.history.pruned", deleted);
   } catch {
-    actionError.value = "ติดต่อ API ไม่ได้";
+    actionError.value = t("common.apiUnreachable");
   } finally {
     pruning.value = false;
   }
@@ -388,10 +369,7 @@ async function pruneHistory() {
 async function cancel(deploymentId: string) {
   await doAction("Cancel", async () => {
     const { error } = await api.api.v1.deployments({ id: deploymentId }).cancel.post({});
-    if (error)
-      throw new Error(
-        (error.value as { error?: { message?: string } } | null)?.error?.message ?? "cancel ล้มเหลว",
-      );
+    if (error) throw new Error(apiErrorMessage(error, "deploy.error.cancel"));
   });
 }
 
@@ -407,23 +385,23 @@ function fmtDuration(start: number | null, end: number | null) {
   <div class="stack-lg">
     <!-- Action buttons -->
     <div class="stack">
-      <div v-if="!archived" class="actions">
+      <div v-if="!archived && canWrite" class="actions">
         <button class="primary" :disabled="!!busy || !hasSource" @click="deploy">
           <span v-if="busy === 'Deploy'" class="spinner" />
           <AppIcon v-else name="rotate" :size="15" />
-          {{ busy === "Deploy" ? "กำลัง deploy…" : "Deploy" }}
+          {{ busy === "Deploy" ? $t("deploy.deploying") : "Deploy" }}
         </button>
         <!-- โชว์ sha บนปุ่มกันเข้าใจผิดว่า Redeploy จะได้โค้ดใหม่ — มันคือ build ซ้ำ commit เดิม -->
         <button
           class="secondary"
           :disabled="!!busy || deployments.length === 0"
           :title="latestDeployment
-            ? `build ซ้ำ commit ${shortSha(latestDeployment.commitSha)} เดิม — ไม่ดึงโค้ดล่าสุดจาก branch (ถ้าเพิ่ง push โค้ดใหม่ให้ใช้ Deploy)`
+            ? $t('deploy.redeployTitle', { sha: shortSha(latestDeployment.commitSha) })
             : undefined"
           @click="redeploy"
         >
           <span v-if="busy === 'Redeploy'" class="spinner" />
-          <template v-if="busy === 'Redeploy'">กำลัง…</template>
+          <template v-if="busy === 'Redeploy'">{{ $t("deploy.busy") }}</template>
           <template v-else-if="latestDeployment">
             Redeploy <span class="mono">{{ shortSha(latestDeployment.commitSha) }}</span>
           </template>
@@ -431,17 +409,17 @@ function fmtDuration(start: number | null, end: number | null) {
         </button>
         <button class="secondary" :disabled="!!busy" @click="restart">
           <span v-if="busy === 'Restart'" class="spinner" />
-          {{ busy === "Restart" ? "กำลัง…" : "Restart" }}
+          {{ busy === "Restart" ? $t("deploy.busy") : "Restart" }}
         </button>
         <button class="danger" :disabled="!!busy" @click="stop">
           <span v-if="busy === 'Stop'" class="spinner" />
           <AppIcon v-else name="stop" :size="14" />
-          {{ busy === "Stop" ? "กำลัง…" : "Stop" }}
+          {{ busy === "Stop" ? $t("deploy.busy") : "Stop" }}
         </button>
       </div>
       <p v-if="!hasSource" class="alert alert-warn">
         <AppIcon name="alert" :size="15" />
-        <span>ตั้งค่า Source repository ก่อนจึงจะ Deploy ได้</span>
+        <span>{{ $t("deploy.needSource") }}</span>
       </p>
 
       <p v-if="actionError" class="alert alert-bad">
@@ -462,7 +440,7 @@ function fmtDuration(start: number | null, end: number | null) {
           class="switch"
           role="switch"
           :aria-checked="autoDeployLocal"
-          :disabled="savingAutoDeploy || archived || !hasSource"
+          :disabled="savingAutoDeploy || archived || !hasSource || !canWrite"
           @click="toggleAutoDeploy"
         >
           <span class="switch-track" :class="{ on: autoDeployLocal }">
@@ -474,23 +452,29 @@ function fmtDuration(start: number | null, end: number | null) {
           <span class="ad-title">
             Auto deploy
             <span class="badge tiny" :class="autoDeployLocal ? 'tone-ok' : 'tone-idle'">
-              {{ autoDeployLocal ? "เปิด" : "ปิด" }}
+              {{ autoDeployLocal ? $t("common.enabled") : $t("common.disabled") }}
             </span>
             <span v-if="savingAutoDeploy" class="spinner" />
           </span>
           <span class="muted tiny">
-            <template v-if="autoDeployLocal">
-              push เข้า <code>{{ branch ?? "—" }}</code> แล้วระบบจะ build และ deploy ให้อัตโนมัติ
-            </template>
-            <template v-else>
-              ตอนนี้ push เข้า <code>{{ branch ?? "—" }}</code> จะ<strong>ไม่</strong>ทำอะไร —
-              ต้องกด Deploy เอง
-            </template>
+            <i18n-t v-if="autoDeployLocal" scope="global" keypath="deploy.autoDeploy.onHint" tag="span">
+              <template #branch>
+                <code>{{ branch ?? "—" }}</code>
+              </template>
+            </i18n-t>
+            <i18n-t v-else scope="global" keypath="deploy.autoDeploy.offHint" tag="span">
+              <template #branch>
+                <code>{{ branch ?? "—" }}</code>
+              </template>
+              <template #not>
+                <strong>{{ $t("deploy.autoDeploy.offHintNot") }}</strong>
+              </template>
+            </i18n-t>
           </span>
         </div>
       </div>
 
-      <p v-if="!hasSource" class="field-hint">เชื่อม repository ก่อนจึงจะเปิด auto deploy ได้</p>
+      <p v-if="!hasSource" class="field-hint">{{ $t("deploy.autoDeploy.needRepo") }}</p>
       <p v-if="autoDeployError" class="alert alert-bad tiny">
         <AppIcon name="alert" :size="14" />
         <span>{{ autoDeployError }}</span>
@@ -501,34 +485,35 @@ function fmtDuration(start: number | null, end: number | null) {
          (บทเรียนจริง: แก้ env แล้วลืมกด Deploy โดยไม่มีอะไรเตือนเลย) -->
     <p v-if="!archived && envChangedAfterDeploy" class="alert alert-warn">
       <AppIcon name="alert" :size="15" />
-      <span>
-        มีการแก้ environment variables หลัง deploy ล่าสุด — ค่าที่รันอยู่ยังเป็นชุดเก่า
-        กด <strong>Deploy</strong> เพื่อให้ค่าใหม่มีผล
-      </span>
+      <i18n-t scope="global" keypath="deploy.envChanged" tag="span">
+        <template #deploy>
+          <strong>Deploy</strong>
+        </template>
+      </i18n-t>
     </p>
 
     <!-- Deployment list -->
     <div>
       <div class="row-between section-head">
         <h2 class="section-title">
-          ประวัติ Deployment
+          {{ $t("deploy.history.title") }}
           <span v-if="total > 0" class="badge tiny">{{ total }}</span>
         </h2>
         <span class="spacer" />
         <button
-          v-if="!archived && total > 0"
+          v-if="!archived && canWrite && total > 0"
           class="danger small"
           :disabled="pruning || loadingList"
           @click="confirmPrune = true"
         >
           <AppIcon name="trash" :size="13" />
-          ล้างประวัติ
+          {{ $t("deploy.history.prune") }}
         </button>
         <button
           class="ghost small icon"
           :disabled="loadingList"
-          title="รีเฟรช"
-          aria-label="รีเฟรช"
+          :title="$t('common.refresh')"
+          :aria-label="$t('common.refresh')"
           @click="resetToFirstPage()"
         >
           <AppIcon name="refresh" :size="14" />
@@ -545,7 +530,7 @@ function fmtDuration(start: number | null, end: number | null) {
       </p>
       <div v-else-if="deployments.length === 0" class="empty">
         <span class="empty-icon"><AppIcon name="rotate" :size="20" /></span>
-        <span class="empty-title">ยังไม่เคย deploy</span>
+        <span class="empty-title">{{ $t("deploy.history.empty") }}</span>
       </div>
 
       <ul v-else class="deploy-list">
@@ -570,7 +555,7 @@ function fmtDuration(start: number | null, end: number | null) {
             <span>{{ d.failureCode }}: {{ d.failureMessage }}</span>
           </p>
 
-          <div v-if="!archived" class="deploy-item-actions">
+          <div v-if="!archived && canWrite" class="deploy-item-actions">
             <button
               v-if="IN_FLIGHT.includes(d.status)"
               class="danger tiny"
@@ -595,7 +580,8 @@ function fmtDuration(start: number | null, end: number | null) {
             <button
               class="ghost tiny delete-btn"
               :disabled="!!busy || deletingId === d.id"
-              title="ลบรายการนี้"
+              :title="$t('deploy.history.deleteItem')"
+              :aria-label="$t('deploy.history.deleteItem')"
               @click="removeDeployment(d.id)"
             >
               <span v-if="deletingId === d.id" class="spinner" />
@@ -608,16 +594,16 @@ function fmtDuration(start: number | null, end: number | null) {
       <!-- Pagination -->
       <div v-if="!loadingList && total > 0" class="pager">
         <span class="muted tiny">
-          แสดง {{ rangeStart }}–{{ rangeEnd }} จาก {{ total }}
+          {{ $t("deploy.history.range", { start: rangeStart, end: rangeEnd, total }) }}
         </span>
         <span class="spacer" />
         <button class="secondary small" :disabled="pageIndex === 0" @click="goPrev">
           <AppIcon name="arrowLeft" :size="13" />
-          ก่อนหน้า
+          {{ $t("deploy.history.prev") }}
         </button>
         <span class="muted tiny page-num">{{ pageIndex + 1 }} / {{ totalPages }}</span>
         <button class="secondary small" :disabled="!nextCursor" @click="goNext">
-          ถัดไป
+          {{ $t("deploy.history.next") }}
           <AppIcon name="chevronRight" :size="13" />
         </button>
       </div>
@@ -625,9 +611,9 @@ function fmtDuration(start: number | null, end: number | null) {
 
     <ConfirmDialog
       :open="confirmPrune"
-      title="ล้างประวัติ Deployment"
-      message="ลบประวัติทั้งหมดพร้อม build log — ยกเว้นเวอร์ชันที่ให้บริการอยู่และรายการที่กำลังทำงาน ซึ่งจะถูกเก็บไว้ให้อัตโนมัติ ไม่กระทบแอปที่รันอยู่"
-      confirm-label="ล้างประวัติ"
+      :title="$t('deploy.history.pruneTitle')"
+      :message="$t('deploy.history.pruneMessage')"
+      :confirm-label="$t('deploy.history.prune')"
       :busy="pruning"
       @cancel="confirmPrune = false"
       @confirm="pruneHistory"

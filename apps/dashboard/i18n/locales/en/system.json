@@ -1,0 +1,50 @@
+{
+  "system": {
+    "subtitle": "Dashboard domain, server network details and container registry credentials",
+    "domain": {
+      "intro": "Set the domain used to open this dashboard (for example after pointing a new domain at this server). It takes effect immediately, no restart needed. If it is not set, only the host configured by the installer is accepted and access through any other domain is rejected (INVALID_HOST).",
+      "label": "Domain (empty = no additional domain)",
+      "saved": "Saved. The dashboard is now reachable through this domain."
+    },
+    "dns": {
+      "title": "A record for DNS setup",
+      "intro": "Point a domain at this server by adding an A record at your DNS provider: Type {type}, Name is the domain or subdomain you want, Value is the IP below.",
+      "copyIp": "Copy {ip}",
+      "noIp": "Server IP not found. Set {name} in the {file} of the installation, then restart control-api."
+    },
+    "registries": {
+      "add": "Add registry",
+      "intro": "Credentials for pulling private images (such as {host}) for image components. They apply to every project that pulls from that host. zixploy does not keep a {login} session on the server. It passes the credentials to each pull and then removes them.",
+      "ghcrHint": "ghcr.io: use a GitHub personal access token with only the {scope} scope",
+      "empty": "None yet. Images from a registry without credentials are pulled without login (works for public images).",
+      "lastUsed": "last used {time}",
+      "neverUsed": "never used",
+      "changePassword": "Change password",
+      "newPasswordPlaceholder": "New password / token",
+      "confirmDelete": "Delete the credentials for {registry}? The next deploy will pull without login.",
+      "error": {
+        "load": "Could not load registries",
+        "add": "Could not add the registry"
+      }
+    },
+    "update": {
+      "updating": "Updating… the system will restart itself",
+      "published": "(published {date})",
+      "updateTo": "Update to {version}{published}",
+      "available": "Update available",
+      "checkFailed": "update check failed",
+      "confirmTitle": "Update Zixploy",
+      "confirmMessage": "Update from {current} to {latest}{published}. The system will restart and be unavailable for about 1-2 minutes. Deployed apps keep running and are not touched.",
+      "confirmLabel": "Update now",
+      "startFailed": "Could not start the update"
+    },
+    "health": {
+      "title": "System status",
+      "checking": "Checking…",
+      "ok": "All systems normal",
+      "down": "Degraded: {components}",
+      "okShort": "OK",
+      "downShort": "Degraded"
+    }
+  }
+}

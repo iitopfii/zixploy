@@ -89,7 +89,7 @@ export function requireBackupRow(db: Database, serviceId: string, backupId: stri
     .query<BackupRow, [string]>(`SELECT ${SELECT_ALL} FROM service_backups WHERE id = ?`)
     .get(backupId);
   if (!row || row.service_id !== serviceId) {
-    throw new AppError("SERVICE_BACKUP_NOT_FOUND", "ไม่พบ backup นี้");
+    throw new AppError("SERVICE_BACKUP_NOT_FOUND", { th: "ไม่พบ backup นี้", en: "Backup not found" });
   }
   return row;
 }
@@ -97,11 +97,17 @@ export function requireBackupRow(db: Database, serviceId: string, backupId: stri
 /** path เต็มของไฟล์บน disk — โยนถ้ายังไม่เสร็จหรือไฟล์หายไปจากดิสก์แล้ว */
 export function resolveBackupFilePath(serviceId: string, row: BackupRow): string {
   if (row.status !== "succeeded" || !row.file_name) {
-    throw new AppError("SERVICE_BACKUP_NOT_READY", "backup นี้ยังไม่พร้อมใช้งาน");
+    throw new AppError("SERVICE_BACKUP_NOT_READY", {
+      th: "backup นี้ยังไม่พร้อมใช้งาน",
+      en: "This backup is not ready yet",
+    });
   }
   const path = join(serviceBackupDir(serviceId), row.file_name);
   if (!existsSync(path)) {
-    throw new AppError("SERVICE_BACKUP_NOT_FOUND", "ไฟล์ backup หายไปจากดิสก์แล้ว");
+    throw new AppError("SERVICE_BACKUP_NOT_FOUND", {
+      th: "ไฟล์ backup หายไปจากดิสก์แล้ว",
+      en: "The backup file is no longer on disk",
+    });
   }
   return path;
 }
@@ -113,7 +119,10 @@ export function resolveBackupFilePath(serviceId: string, row: BackupRow): string
 export function deleteBackup(db: Database, serviceId: string, backupId: string): void {
   const row = requireBackupRow(db, serviceId, backupId);
   if (row.status === "running") {
-    throw new AppError("SERVICE_BACKUP_NOT_READY", "backup นี้กำลังทำงานอยู่ — รอให้เสร็จก่อนลบ");
+    throw new AppError("SERVICE_BACKUP_NOT_READY", {
+      th: "backup นี้กำลังทำงานอยู่ — รอให้เสร็จก่อนลบ",
+      en: "This backup is still running. Wait for it to finish before deleting it",
+    });
   }
   if (row.file_name) {
     try {

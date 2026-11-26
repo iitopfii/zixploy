@@ -41,15 +41,20 @@ interface ProjectRow {
 }
 
 function loadProject(db: Database, id: string): ProjectRow {
-  if (!isUlid(id)) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+  if (!isUlid(id))
+    throw new AppError("PROJECT_NOT_FOUND", { th: "ไม่พบ project นี้", en: "Project not found" });
   const row = db
     .query<ProjectRow, [string]>(
       "SELECT id, archived_at, source_type, dockerfile_content, updated_at FROM projects WHERE id = ?",
     )
     .get(id);
-  if (!row) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+  if (!row)
+    throw new AppError("PROJECT_NOT_FOUND", { th: "ไม่พบ project นี้", en: "Project not found" });
   if (row.archived_at !== null) {
-    throw new AppError("PROJECT_ARCHIVED", "project นี้ถูก archive แล้ว");
+    throw new AppError("PROJECT_ARCHIVED", {
+      th: "project นี้ถูก archive แล้ว",
+      en: "This project is archived",
+    });
   }
   return row;
 }

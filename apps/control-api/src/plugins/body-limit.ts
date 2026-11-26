@@ -11,6 +11,9 @@ export const MAX_BODY_BYTES = 256 * 1024;
 export const bodyLimit = new Elysia({ name: "body-limit" }).onRequest(({ request }) => {
   const declared = request.headers.get("content-length");
   if (declared && Number(declared) > MAX_BODY_BYTES) {
-    throw new AppError("VALIDATION_ERROR", "request body ใหญ่เกินกำหนด");
+    throw new AppError("VALIDATION_ERROR", {
+      th: "request body ใหญ่เกินกำหนด",
+      en: "Request body is too large",
+    });
   }
 });

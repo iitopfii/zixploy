@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
-import { AppError } from "@zixploy/shared";
+import { AppError, isUserRole } from "@zixploy/shared";
 import { Elysia } from "elysia";
+import { assertAccess, type CurrentUser, requiredAccess } from "../auth/policy";
 import {
   type ActiveSession,
   CSRF_COOKIE,
@@ -38,6 +39,22 @@ export function authPlugin(db: Database) {
 
     let session = token ? findActiveSession(db, token) : null;
 
+    // โหลดผู้ใช้ทุก request — role ที่เปลี่ยนและบัญชีที่ถูกปิดมีผลทันที ไม่ต้องรอ session หมดอายุ
+    let currentUser: CurrentUser | null = null;
+    if (session) {
+      const row = db
+        .query<
+          { id: string; username: string; role: string; disabled_at: number | null },
+          [string]
+        >("SELECT id, username, role, disabled_at FROM users WHERE id = ?")
+        .get(session.userId);
+      if (row && row.disabled_at === null && isUserRole(row.role)) {
+        currentUser = { id: row.id, username: row.username, role: row.role };
+      } else {
+        session = null;
+      }
+    }
+
     if (session && token) {
       touchSession(db, session.sessionId);
 
@@ -71,10 +88,37 @@ export function authPlugin(db: Database) {
 
     return {
       session,
+      currentUser,
+
+      /** ผู้ใช้ของ request นี้ — โยน UNAUTHENTICATED ถ้าไม่ได้ login */
+      requireUser(): CurrentUser {
+        if (!currentUser) {
+          throw new AppError("UNAUTHENTICATED", {
+            th: "ต้อง login ก่อนใช้งาน endpoint นี้",
+            en: "Sign in to use this endpoint",
+          });
+        }
+        return currentUser;
+      },
+
+      /** ตรวจสิทธิ์ตามนโยบายกลาง (auth/policy.ts) จาก method + path ของ request นี้ */
+      authorize(): void {
+        if (!currentUser) {
+          throw new AppError("UNAUTHENTICATED", {
+            th: "ต้อง login ก่อนใช้งาน endpoint นี้",
+            en: "Sign in to use this endpoint",
+          });
+        }
+        const { pathname } = new URL(request.url);
+        assertAccess(db, currentUser, requiredAccess(request.method, pathname));
+      },
 
       requireSession(): ActiveSession {
         if (!session) {
-          throw new AppError("UNAUTHENTICATED", "ต้อง login ก่อนใช้งาน endpoint นี้");
+          throw new AppError("UNAUTHENTICATED", {
+            th: "ต้อง login ก่อนใช้งาน endpoint นี้",
+            en: "Sign in to use this endpoint",
+          });
         }
         return session;
       },
@@ -87,7 +131,10 @@ export function authPlugin(db: Database) {
         if (!MUTATING_METHODS.has(request.method)) return;
         const fromHeader = request.headers.get(CSRF_HEADER);
         if (!csrfTokensMatch(csrfFromCookie, fromHeader)) {
-          throw new AppError("CSRF_REJECTED", "CSRF token ไม่ถูกต้องหรือหายไป");
+          throw new AppError("CSRF_REJECTED", {
+            th: "CSRF token ไม่ถูกต้องหรือหายไป",
+            en: "The CSRF token is missing or invalid",
+          });
         }
       },
     };
@@ -95,7 +142,7 @@ export function authPlugin(db: Database) {
 }
 
 /**
- * ใช้ใน route ที่ต้อง login + ผ่าน CSRF: `beforeHandle: [requireAuthenticated]`
+ * ใช้ใน route ที่ต้อง login + ผ่าน CSRF + มีสิทธิ์: `beforeHandle: [requireAuthenticated]`
  *
  * ตรวจ authentication ก่อน CSRF เสมอ เพื่อให้ status code สอดคล้องกันทุก method:
  * ไม่มี session = 401 ทั้ง GET และ mutation ส่วน 403 สงวนไว้สำหรับกรณีที่ login แล้ว
@@ -105,7 +152,10 @@ export function authPlugin(db: Database) {
 export function requireAuthenticated(ctx: {
   requireSession: () => ActiveSession;
   assertCsrf: () => void;
+  authorize: () => void;
 }): void {
   ctx.requireSession();
   ctx.assertCsrf();
+  // สิทธิ์ตรวจหลัง CSRF: 403 ของ CSRF กับของ role ใช้ code ต่างกัน (CSRF_REJECTED / FORBIDDEN)
+  ctx.authorize();
 }

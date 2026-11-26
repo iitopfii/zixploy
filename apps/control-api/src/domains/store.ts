@@ -149,14 +149,17 @@ export function createDomain(db: Database, projectId: string, input: CreateDomai
   } catch (err) {
     // UNIQUE (hostname, path_prefix)
     if (err instanceof Error && err.message.includes("UNIQUE")) {
-      throw new AppError(
-        "DOMAIN_DUPLICATE",
-        `"${input.hostname}${input.pathPrefix ?? ""}" ถูกใช้งานแล้ว`,
-      );
+      throw new AppError("DOMAIN_DUPLICATE", {
+        th: `"${input.hostname}${input.pathPrefix ?? ""}" ถูกใช้งานแล้ว`,
+        en: `"${input.hostname}${input.pathPrefix ?? ""}" is already in use`,
+      });
     }
     // CHECK path_prefix IS NULL OR redirect_mode = 'none'
     if (err instanceof Error && err.message.includes("CHECK")) {
-      throw new AppError("DOMAIN_INVALID", "domain ที่มี path prefix ตั้ง redirect www/root ไม่ได้");
+      throw new AppError("DOMAIN_INVALID", {
+        th: "domain ที่มี path prefix ตั้ง redirect www/root ไม่ได้",
+        en: "A domain with a path prefix cannot use a www/root redirect",
+      });
     }
     throw err;
   }
@@ -178,7 +181,7 @@ export interface UpdateDomainInput {
 
 export function updateDomain(db: Database, id: string, input: UpdateDomainInput): DomainDto {
   const row = getDomain(db, id);
-  if (!row) throw new AppError("DOMAIN_NOT_FOUND", "ไม่พบ domain นี้");
+  if (!row) throw new AppError("DOMAIN_NOT_FOUND", { th: "ไม่พบ domain นี้", en: "Domain not found" });
 
   const fields: string[] = [];
   const values: (string | number | null)[] = [];
@@ -203,7 +206,10 @@ export function updateDomain(db: Database, id: string, input: UpdateDomainInput)
       db.query(`UPDATE project_domains SET ${fields.join(", ")} WHERE id = ?`).run(...values);
     } catch (err) {
       if (err instanceof Error && err.message.includes("CHECK")) {
-        throw new AppError("DOMAIN_INVALID", "domain ที่มี path prefix ตั้ง redirect www/root ไม่ได้");
+        throw new AppError("DOMAIN_INVALID", {
+          th: "domain ที่มี path prefix ตั้ง redirect www/root ไม่ได้",
+          en: "A domain with a path prefix cannot use a www/root redirect",
+        });
       }
       throw err;
     }
@@ -216,14 +222,14 @@ export function updateDomain(db: Database, id: string, input: UpdateDomainInput)
 
 export function deleteDomain(db: Database, id: string): void {
   const row = getDomain(db, id);
-  if (!row) throw new AppError("DOMAIN_NOT_FOUND", "ไม่พบ domain นี้");
+  if (!row) throw new AppError("DOMAIN_NOT_FOUND", { th: "ไม่พบ domain นี้", en: "Domain not found" });
   db.query("DELETE FROM project_domains WHERE id = ?").run(id);
 }
 
 /** อัปเดต dns_status + dns_checked_at — เรียกจาก DNS check service */
 export function updateDnsStatus(db: Database, id: string, status: DnsStatus): DomainDto {
   const row = getDomain(db, id);
-  if (!row) throw new AppError("DOMAIN_NOT_FOUND", "ไม่พบ domain นี้");
+  if (!row) throw new AppError("DOMAIN_NOT_FOUND", { th: "ไม่พบ domain นี้", en: "Domain not found" });
 
   const now = Date.now();
   db.query(

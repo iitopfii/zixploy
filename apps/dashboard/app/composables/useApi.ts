@@ -13,7 +13,12 @@ export function useApi() {
     headers() {
       // CSRF double-submit: อ่านคุกกี้ที่ API ตั้งไว้แล้วส่งกลับใน header
       const csrf = useCookie("zx_csrf", { readonly: true }).value;
-      return csrf ? { "x-csrf-token": csrf } : {};
+      // ภาษาที่เลือกอยู่ — API ตอบข้อความ error ตามนี้
+      const locale = useNuxtApp().$i18n.locale.value;
+      return {
+        "x-zixploy-locale": locale,
+        ...(csrf ? { "x-csrf-token": csrf } : {}),
+      };
     },
   });
 }

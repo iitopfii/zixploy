@@ -1,0 +1,41 @@
+{
+  "deploy": {
+    "deploying": "กำลัง deploy…",
+    "busy": "กำลัง…",
+    "redeployTitle": "build ซ้ำ commit {sha} เดิม — ไม่ดึงโค้ดล่าสุดจาก branch (ถ้าเพิ่ง push โค้ดใหม่ให้ใช้ Deploy)",
+    "needSource": "ตั้งค่า Source repository ก่อนจึงจะ Deploy ได้",
+    "actionOk": "{action} สำเร็จ",
+    "autoDeploy": {
+      "onHint": "push เข้า {branch} แล้วระบบจะ build และ deploy ให้อัตโนมัติ",
+      "offHint": "ตอนนี้ push เข้า {branch} จะ{not}ทำอะไร — ต้องกด Deploy เอง",
+      "offHintNot": "ไม่",
+      "needRepo": "เชื่อม repository ก่อนจึงจะเปิด auto deploy ได้"
+    },
+    "envChanged": "มีการแก้ environment variables หลัง deploy ล่าสุด — ค่าที่รันอยู่ยังเป็นชุดเก่า กด {deploy} เพื่อให้ค่าใหม่มีผล",
+    "history": {
+      "title": "ประวัติ Deployment",
+      "prune": "ล้างประวัติ",
+      "empty": "ยังไม่เคย deploy",
+      "deleteItem": "ลบรายการนี้",
+      "deleted": "ลบแล้ว",
+      "range": "แสดง {start}–{end} จาก {total}",
+      "prev": "ก่อนหน้า",
+      "next": "ถัดไป",
+      "pruneTitle": "ล้างประวัติ Deployment",
+      "pruneMessage": "ลบประวัติทั้งหมดพร้อม build log — ยกเว้นเวอร์ชันที่ให้บริการอยู่และรายการที่กำลังทำงาน ซึ่งจะถูกเก็บไว้ให้อัตโนมัติ ไม่กระทบแอปที่รันอยู่",
+      "pruned": "ลบประวัติ {n} รายการแล้ว",
+      "prunedSkipped": "ลบ {deleted} รายการ — เหลือไว้ {skipped} รายการที่ลบไม่ได้ (ให้บริการอยู่หรือกำลังทำงาน)"
+    },
+    "error": {
+      "generic": "เกิดข้อผิดพลาด",
+      "list": "โหลดรายการ deploy ไม่ได้",
+      "deploy": "deploy ล้มเหลว",
+      "redeploy": "redeploy ล้มเหลว",
+      "restart": "restart ล้มเหลว",
+      "stop": "stop ล้มเหลว",
+      "rollback": "rollback ล้มเหลว",
+      "cancel": "cancel ล้มเหลว",
+      "prune": "ล้างประวัติไม่สำเร็จ"
+    }
+  }
+}

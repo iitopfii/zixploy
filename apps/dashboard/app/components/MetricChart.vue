@@ -95,7 +95,12 @@ const latest = computed(() => props.points[props.points.length - 1] ?? null);
       class="svg"
       :class="`tone-${tone}`"
       role="img"
-      :aria-label="`กราฟ ${points.length} จุด ค่าล่าสุด ${format ? format(latest?.value ?? 0) : (latest?.value ?? 0)}`"
+      :aria-label="
+        $t('monitoring.chart.ariaLabel', {
+          count: points.length,
+          value: format ? format(latest?.value ?? 0) : (latest?.value ?? 0),
+        })
+      "
     >
       <defs>
         <linearGradient :id="`grad-${tone}`" x1="0" y1="0" x2="0" y2="1">
@@ -133,7 +138,7 @@ const latest = computed(() => props.points[props.points.length - 1] ?? null);
     </svg>
 
     <div v-else class="chart-empty">
-      <span class="tiny muted">ยังไม่มีข้อมูล</span>
+      <span class="tiny muted">{{ $t("monitoring.chart.empty") }}</span>
     </div>
   </div>
 </template>

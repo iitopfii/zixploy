@@ -6,6 +6,7 @@
  * ใช้ทุกครั้งที่ deploy pull image จาก host นั้น ไม่ต้องผูกกับ project
  */
 const api = useApi();
+const { t } = useI18n();
 
 interface Registry {
   id: string;
@@ -22,21 +23,16 @@ async function fetchRegistries() {
   try {
     const { data, error } = await api.api.v1.registries.get();
     if (error) {
-      loadError.value = "โหลดรายการ registry ไม่ได้";
+      loadError.value = t("system.registries.error.load");
       return;
     }
     registries.value = (data?.registries ?? []) as Registry[];
   } catch {
-    loadError.value = "ติดต่อ API ไม่ได้";
+    loadError.value = t("common.apiUnreachable");
   }
 }
 
 await fetchRegistries();
-
-function errMessage(error: unknown, fallback: string): string {
-  const value = (error as { value?: { error?: { message?: string } } } | null)?.value;
-  return value?.error?.message ?? fallback;
-}
 
 // ── เพิ่ม ──
 const showAdd = ref(false);
@@ -54,7 +50,7 @@ async function addRegistry() {
       password: form.password,
     });
     if (error) {
-      formError.value = errMessage(error, "เพิ่ม registry ไม่สำเร็จ");
+      formError.value = apiErrorMessage(error, "system.registries.error.add");
       return;
     }
     showAdd.value = false;
@@ -62,7 +58,7 @@ async function addRegistry() {
     form.password = "";
     await fetchRegistries();
   } catch {
-    formError.value = "ติดต่อ API ไม่ได้";
+    formError.value = t("common.apiUnreachable");
   } finally {
     saving.value = false;
   }
@@ -80,14 +76,14 @@ async function savePassword(id: string) {
       .registries({ registryId: id })
       .patch({ password: newPassword.value });
     if (error) {
-      editError.value = errMessage(error, "บันทึกไม่สำเร็จ");
+      editError.value = apiErrorMessage(error, "common.saveFailed");
       return;
     }
     editingId.value = null;
     newPassword.value = "";
     await fetchRegistries();
   } catch {
-    editError.value = "ติดต่อ API ไม่ได้";
+    editError.value = t("common.apiUnreachable");
   }
 }
 
@@ -110,14 +106,13 @@ async function removeRegistry(id: string) {
       <h2 class="section-title">Container Registries</h2>
       <button class="small" @click="showAdd = !showAdd">
         <AppIcon name="plus" :size="14" />
-        เพิ่ม registry
+        {{ $t("system.registries.add") }}
       </button>
     </div>
-    <p class="muted small">
-      credential สำหรับ pull image ที่เป็น private (เช่น <code>ghcr.io</code>) ของ component แบบ image —
-      ใช้กับทุกโปรเจกต์ที่ pull จาก host นั้น · zixploy ไม่ <code>docker login</code> ค้างไว้บนเครื่อง
-      แต่ส่ง credential ให้การ pull แต่ละครั้งแล้วลบทิ้ง
-    </p>
+    <i18n-t scope="global" keypath="system.registries.intro" tag="p" class="muted small">
+      <template #host><code>ghcr.io</code></template>
+      <template #login><code>docker login</code></template>
+    </i18n-t>
 
     <div v-if="showAdd" class="inset stack">
       <label>
@@ -132,9 +127,9 @@ async function removeRegistry(id: string) {
         <span>Password / token</span>
         <input v-model="form.password" type="password" autocomplete="new-password" />
       </label>
-      <p class="muted tiny">
-        ghcr.io: ใช้ GitHub personal access token ที่มีแค่ scope <code>read:packages</code>
-      </p>
+      <i18n-t scope="global" keypath="system.registries.ghcrHint" tag="p" class="muted tiny">
+        <template #scope><code>read:packages</code></template>
+      </i18n-t>
       <p v-if="formError" class="alert alert-bad small">
         <AppIcon name="alert" :size="13" />
         <span>{{ formError }}</span>
@@ -146,7 +141,7 @@ async function removeRegistry(id: string) {
         @click="addRegistry"
       >
         <span v-if="saving" class="spinner" />
-        {{ saving ? "กำลังบันทึก…" : "บันทึก" }}
+        {{ saving ? $t("common.saving") : $t("common.save") }}
       </button>
     </div>
 
@@ -155,7 +150,7 @@ async function removeRegistry(id: string) {
       <span>{{ loadError }}</span>
     </p>
     <p v-else-if="registries.length === 0 && !showAdd" class="muted small">
-      ยังไม่มี — image จาก registry ที่ไม่มี credential จะ pull แบบไม่ login (ใช้ได้กับ image public)
+      {{ $t("system.registries.empty") }}
     </p>
 
     <ul v-else class="registry-list">
@@ -165,14 +160,21 @@ async function removeRegistry(id: string) {
             <strong class="mono">{{ r.registry }}</strong>
             <span class="muted small"> · {{ r.username }}</span>
             <span class="muted tiny">
-              · {{ r.lastUsedAt ? `ใช้ล่าสุด ${timeAgo(r.lastUsedAt)}` : "ยังไม่เคยใช้" }}
+              ·
+              {{
+                r.lastUsedAt
+                  ? $t("system.registries.lastUsed", { time: timeAgo(r.lastUsedAt) })
+                  : $t("system.registries.neverUsed")
+              }}
             </span>
           </div>
           <div class="actions">
             <button class="ghost small" @click="editingId = editingId === r.id ? null : r.id">
-              เปลี่ยน password
+              {{ $t("system.registries.changePassword") }}
             </button>
-            <button class="ghost small danger" @click="confirmDeleteId = r.id">ลบ</button>
+            <button class="ghost small danger" @click="confirmDeleteId = r.id">
+              {{ $t("common.delete") }}
+            </button>
           </div>
         </div>
         <div v-if="editingId === r.id" class="row-gap">
@@ -180,10 +182,10 @@ async function removeRegistry(id: string) {
             v-model="newPassword"
             type="password"
             autocomplete="new-password"
-            placeholder="password / token ใหม่"
+            :placeholder="$t('system.registries.newPasswordPlaceholder')"
           />
           <button class="primary small" :disabled="!newPassword" @click="savePassword(r.id)">
-            บันทึก
+            {{ $t("common.save") }}
           </button>
         </div>
         <p v-if="editingId === r.id && editError" class="alert alert-bad small">
@@ -191,11 +193,15 @@ async function removeRegistry(id: string) {
           <span>{{ editError }}</span>
         </p>
         <div v-if="confirmDeleteId === r.id" class="row-gap">
-          <span class="small">
-            ลบ credential ของ <strong>{{ r.registry }}</strong>? deploy ครั้งถัดไปจะ pull แบบไม่ login
-          </span>
-          <button class="small danger" @click="removeRegistry(r.id)">ลบ</button>
-          <button class="ghost small" @click="confirmDeleteId = null">ยกเลิก</button>
+          <i18n-t scope="global" keypath="system.registries.confirmDelete" tag="span" class="small">
+            <template #registry><strong>{{ r.registry }}</strong></template>
+          </i18n-t>
+          <button class="small danger" @click="removeRegistry(r.id)">
+            {{ $t("common.delete") }}
+          </button>
+          <button class="ghost small" @click="confirmDeleteId = null">
+            {{ $t("common.cancel") }}
+          </button>
         </div>
       </li>
     </ul>

@@ -6,6 +6,8 @@
  * (ผ่าน --network-alias) การ validate ที่ control-api เป็นชั้นแรก, ที่ worker เป็น defense-in-depth
  */
 
+import { LocalizedError, type LocalizedText } from "./i18n";
+
 /** DNS label: ขึ้นต้นด้วยตัวอักษร, [a-z0-9-], ยาวได้ถึง 31 ตัว — กัน alias ที่ขึ้นด้วย '-' เป็น flag */
 export const COMPONENT_NAME_RE = /^[a-z][a-z0-9-]{0,30}$/;
 
@@ -29,9 +31,21 @@ export function isComponentName(name: string): boolean {
  * และห้าม tag = "latest" ตรง ๆ · repo name ต้องเป็น lowercase ตามข้อกำหนดของ Docker
  * รองรับ registry host (ghcr.io, docker.io[:port]) + path หลายชั้น
  */
-export function validateImageRef(ref: string): { ok: boolean; reason?: string } {
+/** reason = ข้อความไทย (เหมือนเดิม) · reasonText = สองภาษา มีคู่กับ reason เสมอ */
+export type ImageRefValidationResult =
+  | { ok: true; reason?: undefined; reasonText?: undefined }
+  | { ok: false; reason: string; reasonText: LocalizedText };
+
+export function validateImageRef(ref: string): ImageRefValidationResult {
   if (!ref || ref.length > 255) {
-    return { ok: false, reason: "image ref ว่างหรือยาวเกินไป" };
+    return {
+      ok: false,
+      reason: "image ref ว่างหรือยาวเกินไป",
+      reasonText: {
+        th: "image ref ว่างหรือยาวเกินไป",
+        en: "Image ref is empty or too long",
+      },
+    };
   }
 
   let name = ref;
@@ -43,15 +57,36 @@ export function validateImageRef(ref: string): { ok: boolean; reason?: string } 
     const lastSlash = ref.lastIndexOf("/");
     // ":" ต้องมาหลัง "/" ล่าสุด ไม่งั้นเป็น registry:port ไม่ใช่ tag
     if (lastColon <= lastSlash) {
-      return { ok: false, reason: "ต้องระบุ tag หรือ digest (ห้ามใช้ latest โดยปริยาย)" };
+      return {
+        ok: false,
+        reason: "ต้องระบุ tag หรือ digest (ห้ามใช้ latest โดยปริยาย)",
+        reasonText: {
+          th: "ต้องระบุ tag หรือ digest (ห้ามใช้ latest โดยปริยาย)",
+          en: "A tag or digest is required (implicit latest is not allowed)",
+        },
+      };
     }
     const tag = ref.slice(lastColon + 1);
     name = ref.slice(0, lastColon);
     if (tag === "latest") {
-      return { ok: false, reason: "ห้ามใช้ tag 'latest' (ไม่ deterministic — ระบุเวอร์ชันหรือ digest)" };
+      return {
+        ok: false,
+        reason: "ห้ามใช้ tag 'latest' (ไม่ deterministic — ระบุเวอร์ชันหรือ digest)",
+        reasonText: {
+          th: "ห้ามใช้ tag 'latest' (ไม่ deterministic — ระบุเวอร์ชันหรือ digest)",
+          en: "The tag 'latest' is not allowed (not deterministic; specify a version or digest)",
+        },
+      };
     }
     if (!/^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$/.test(tag)) {
-      return { ok: false, reason: "รูปแบบ tag ไม่ถูกต้อง" };
+      return {
+        ok: false,
+        reason: "รูปแบบ tag ไม่ถูกต้อง",
+        reasonText: {
+          th: "รูปแบบ tag ไม่ถูกต้อง",
+          en: "Invalid tag format",
+        },
+      };
     }
   }
 
@@ -59,7 +94,14 @@ export function validateImageRef(ref: string): { ok: boolean; reason?: string } 
   const namePart = "[a-z0-9]+([._-][a-z0-9]+)*";
   const nameRe = new RegExp(`^${namePart}(:[0-9]+)?(/${namePart})*$`);
   if (!nameRe.test(name)) {
-    return { ok: false, reason: "ชื่อ image ไม่ถูกต้อง (ต้องเป็น lowercase)" };
+    return {
+      ok: false,
+      reason: "ชื่อ image ไม่ถูกต้อง (ต้องเป็น lowercase)",
+      reasonText: {
+        th: "ชื่อ image ไม่ถูกต้อง (ต้องเป็น lowercase)",
+        en: "Invalid image name (must be lowercase)",
+      },
+    };
   }
   return { ok: true };
 }
@@ -100,7 +142,10 @@ export function normalizeRegistryHost(raw: string): string {
   if (
     !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]{1,5})?$/.test(host)
   ) {
-    throw new Error("registry ต้องเป็น host เช่น ghcr.io หรือ registry.example.com:5000 (ไม่มี path)");
+    throw new LocalizedError({
+      th: "registry ต้องเป็น host เช่น ghcr.io หรือ registry.example.com:5000 (ไม่มี path)",
+      en: "Registry must be a host such as ghcr.io or registry.example.com:5000 (no path)",
+    });
   }
   return host;
 }
@@ -181,7 +226,11 @@ export function splitCommandArgs(command: string): string[] {
       cur += ch;
     }
   }
-  if (quote) throw new Error(`command มีเครื่องหมาย ${quote} ที่ไม่ปิด`);
+  if (quote)
+    throw new LocalizedError({
+      th: `command มีเครื่องหมาย ${quote} ที่ไม่ปิด`,
+      en: `Command has an unclosed ${quote} quote`,
+    });
   if (has || cur.length > 0) args.push(cur);
   return args;
 }

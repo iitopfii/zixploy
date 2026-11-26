@@ -13,6 +13,7 @@
 const props = defineProps<{ projectId: string }>();
 
 const api = useApi();
+const { t } = useI18n();
 
 // ---------------------------------------------------------------------------
 // Mode toggle
@@ -80,13 +81,13 @@ async function loadBuildLogs() {
       query: {},
     });
     if (error) {
-      buildLogError.value = "โหลด logs ไม่ได้";
+      buildLogError.value = t("logs.error.load");
       return;
     }
     buildLogs.value = (data?.logs ?? []) as LogLine[];
     if (isLive.value) startBuildSse();
   } catch {
-    buildLogError.value = "ติดต่อ API ไม่ได้";
+    buildLogError.value = t("common.apiUnreachable");
   } finally {
     loadingBuildLogs.value = false;
   }
@@ -165,13 +166,13 @@ async function loadRuntimeLogs() {
       query: {},
     });
     if (error) {
-      runtimeError.value = "โหลด runtime logs ไม่ได้";
+      runtimeError.value = t("logs.error.loadRuntime");
       return;
     }
     runtimeLogs.value = (data?.logs ?? []) as RuntimeLine[];
     startRuntimeSse();
   } catch {
-    runtimeError.value = "ติดต่อ API ไม่ได้";
+    runtimeError.value = t("common.apiUnreachable");
   } finally {
     loadingRuntime.value = false;
   }
@@ -291,7 +292,7 @@ function onScroll() {
 // ---------------------------------------------------------------------------
 
 function fmtTime(ms: number) {
-  return new Date(ms).toLocaleString("th-TH", { timeStyle: "short" });
+  return new Date(ms).toLocaleString(localeTag(), { timeStyle: "short" });
 }
 </script>
 
@@ -313,8 +314,10 @@ function fmtTime(ms: number) {
     <template v-if="mode === 'build'">
       <div class="toolbar">
         <select v-model="selectedDepId" class="dep-select" :disabled="loadingDeps">
-          <option v-if="loadingDeps" value="">กำลังโหลด…</option>
-          <option v-else-if="deploymentList.length === 0" value="">ยังไม่มี deployment</option>
+          <option v-if="loadingDeps" value="">{{ $t("common.loading") }}</option>
+          <option v-else-if="deploymentList.length === 0" value="">
+            {{ $t("logs.noDeployments") }}
+          </option>
           <option v-for="d in deploymentList" :key="d.id" :value="d.id">
             {{ shortSha(d.commitSha) }} — {{ d.status }} — {{ fmtTime(d.queuedAt) }}
           </option>
@@ -323,8 +326,8 @@ function fmtTime(ms: number) {
         <button
           class="ghost icon small"
           :disabled="loadingBuildLogs"
-          title="รีเฟรช"
-          aria-label="รีเฟรช"
+          :title="$t('common.refresh')"
+          :aria-label="$t('common.refresh')"
           @click="loadBuildLogs"
         >
           <AppIcon name="refresh" :size="14" />
@@ -342,7 +345,9 @@ function fmtTime(ms: number) {
           <span class="skeleton" style="height: 14px; width: 75%" />
           <span class="skeleton" style="height: 14px; width: 82%" />
         </div>
-        <p v-else-if="buildLogs.length === 0" class="muted small center">ยังไม่มี log</p>
+        <p v-else-if="buildLogs.length === 0" class="muted small center">
+          {{ $t("logs.empty") }}
+        </p>
         <div
           v-for="l in buildLogs"
           :key="l.seq"
@@ -361,9 +366,9 @@ function fmtTime(ms: number) {
         <span class="status status-running is-live">LIVE</span>
         <button class="secondary small" @click="loadRuntimeLogs">
           <AppIcon name="refresh" :size="13" />
-          รีเชื่อม
+          {{ $t("logs.reconnect") }}
         </button>
-        <button class="ghost small" @click="runtimeLogs = []">ล้าง</button>
+        <button class="ghost small" @click="runtimeLogs = []">{{ $t("logs.clear") }}</button>
         <span class="spacer" />
         <label class="autoscroll-label">
           <input v-model="autoScroll" type="checkbox" />
@@ -381,7 +386,9 @@ function fmtTime(ms: number) {
           <span class="skeleton" style="height: 14px; width: 90%" />
           <span class="skeleton" style="height: 14px; width: 75%" />
         </div>
-        <p v-else-if="runtimeLogs.length === 0" class="muted small center">รอ log จาก container…</p>
+        <p v-else-if="runtimeLogs.length === 0" class="muted small center">
+          {{ $t("logs.waiting") }}
+        </p>
         <div
           v-for="l in runtimeLogs"
           :key="l.seq"

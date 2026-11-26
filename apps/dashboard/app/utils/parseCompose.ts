@@ -63,7 +63,7 @@ export function parseComposeForBuildConfig(source: string): ParseComposeResult {
     (l) => stripInlineComment(l).trim() === "services:" && indentOf(l) === 0,
   );
   if (servicesIdx === -1) {
-    return { ok: false, error: "ไม่พบ 'services:' ระดับบนสุด — ไฟล์นี้ดูไม่ใช่ docker-compose.yml" };
+    return { ok: false, error: tr("components.compose.error.noServicesKey") };
   }
 
   // ขอบเขต services block: ตั้งแต่บรรทัดถัดไป จนกว่าจะเจอ key ระดับบนสุด (indent 0) อีกครั้ง หรือจบไฟล์
@@ -79,7 +79,7 @@ export function parseComposeForBuildConfig(source: string): ParseComposeResult {
   const block = lines.slice(servicesIdx + 1, end);
   const nonEmpty = block.filter((l) => l.trim() !== "" && !l.trim().startsWith("#"));
   if (nonEmpty.length === 0) {
-    return { ok: false, error: "'services:' ว่างเปล่า — ไม่มี service ให้นำเข้า" };
+    return { ok: false, error: tr("components.compose.error.servicesEmpty") };
   }
 
   // service name อยู่ที่ indent ต่ำสุดในบล็อกนี้ (บรรทัดแรกสุดที่มี indent เท่ากับ min)
@@ -89,13 +89,13 @@ export function parseComposeForBuildConfig(source: string): ParseComposeResult {
     .filter(({ line }) => line.trim() !== "" && indentOf(line) === minIndent);
 
   if (serviceNameLines.length === 0) {
-    return { ok: false, error: "หา service ไม่เจอ — ตรวจสอบ indentation ของไฟล์" };
+    return { ok: false, error: tr("components.compose.error.serviceNotFound") };
   }
 
   const first = serviceNameLines[0]!;
   const kv = splitKeyValue(first.line);
   if (!kv || kv.value !== "") {
-    return { ok: false, error: "รูปแบบ service ไม่ตรงที่คาดไว้ — ต้องเป็น '<ชื่อ service>:' บรรทัดเดียว" };
+    return { ok: false, error: tr("components.compose.error.serviceFormat") };
   }
   const serviceName = kv.key;
 
@@ -106,14 +106,17 @@ export function parseComposeForBuildConfig(source: string): ParseComposeResult {
   const warnings: string[] = [];
   if (serviceNameLines.length > 1) {
     warnings.push(
-      `ไฟล์นี้มี ${serviceNameLines.length} service — ใช้เฉพาะ service แรก ("${serviceName}") เท่านั้น เพราะ project ในระบบนี้รองรับ 1 container ต่อ project`,
+      tr("components.compose.warn.multipleServices", {
+        count: serviceNameLines.length,
+        name: serviceName,
+      }),
     );
   }
 
   // property ของ service อยู่ที่ indent ต่ำสุดใน serviceBlock
   const serviceNonEmpty = serviceBlock.filter((l) => l.trim() !== "" && !l.trim().startsWith("#"));
   if (serviceNonEmpty.length === 0) {
-    return { ok: false, error: `service "${serviceName}" ว่างเปล่า` };
+    return { ok: false, error: tr("components.compose.error.serviceEmpty", { name: serviceName }) };
   }
   const propIndent = Math.min(...serviceNonEmpty.map(indentOf));
 
@@ -176,13 +179,13 @@ export function parseComposeForBuildConfig(source: string): ParseComposeResult {
     return {
       ok: false,
       error: hasImage
-        ? `service "${serviceName}" ใช้ image สำเร็จรูป (ไม่มี 'build:') — นำเข้าแบบนี้ไม่ได้ ต้องมี build.context/dockerfile ในไฟล์`
-        : `service "${serviceName}" ไม่มี 'build:' หรือ 'image:' — ตรวจสอบไฟล์อีกครั้ง`,
+        ? tr("components.compose.error.imageOnly", { name: serviceName })
+        : tr("components.compose.error.noBuildOrImage", { name: serviceName }),
     };
   }
 
   if (!internalPort) {
-    warnings.push("ไม่พบ 'ports:' ในไฟล์ — ต้องระบุ internal port เองหลังนำเข้า");
+    warnings.push(tr("components.compose.warn.noPorts"));
   }
 
   return {

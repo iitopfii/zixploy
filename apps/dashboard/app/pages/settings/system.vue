@@ -6,6 +6,7 @@
  * ยอมรับทันทีไม่ต้อง restart แสดง IP ของเครื่อง (A record) ให้ copy ไปตั้งใน DNS ด้วย
  */
 const api = useApi();
+const { t } = useI18n();
 
 const { data: settings, refresh } = await useAsyncData("system-settings", async () => {
   const { data } = await api.api.v1.system.settings.get();
@@ -37,14 +38,13 @@ async function save() {
       dashboardDomain: value === "" ? null : value,
     });
     if (error) {
-      const body = error.value as { error?: { message?: string } } | null;
-      saveError.value = body?.error?.message ?? "บันทึกไม่สำเร็จ";
+      saveError.value = apiErrorMessage(error, "common.saveFailed");
       return;
     }
     saved.value = true;
     await refresh();
   } catch {
-    saveError.value = "ติดต่อ API ไม่ได้";
+    saveError.value = t("common.apiUnreachable");
   } finally {
     saving.value = false;
   }
@@ -67,20 +67,18 @@ async function copyIp(ip: string) {
 <template>
   <div class="stack-lg">
     <header>
-      <h1>ตั้งค่าระบบ</h1>
-      <p class="muted">domain ของ dashboard, ข้อมูลเครือข่ายของเครื่อง และ credential ของ container registry</p>
+      <h1>{{ $t("nav.system") }}</h1>
+      <p class="muted">{{ $t("system.subtitle") }}</p>
     </header>
 
     <section class="card stack">
       <h2 class="section-title">Dashboard Domain</h2>
       <p class="muted small">
-        ตั้ง domain ที่ใช้เข้า dashboard นี้ (เช่นชี้ domain ใหม่มาที่เครื่องหลังติดตั้งเสร็จ) —
-        มีผลทันทีไม่ต้อง restart ถ้าไม่ตั้ง ระบบจะยอมรับเฉพาะ host ที่ตัวติดตั้งกำหนดไว้
-        และการเข้าผ่าน domain อื่นจะถูกปฏิเสธ (INVALID_HOST)
+        {{ $t("system.domain.intro") }}
       </p>
 
       <label>
-        <span>Domain (ว่าง = ปิดการใช้ domain เพิ่มเติม)</span>
+        <span>{{ $t("system.domain.label") }}</span>
         <input v-model="domain" placeholder="zixploy.example.com" spellcheck="false" />
       </label>
 
@@ -90,39 +88,38 @@ async function copyIp(ip: string) {
       </p>
       <p v-else-if="saved && !dirty" class="alert alert-ok">
         <AppIcon name="check" :size="15" />
-        <span>บันทึกแล้ว — เข้า dashboard ผ่าน domain นี้ได้ทันที</span>
+        <span>{{ $t("system.domain.saved") }}</span>
       </p>
 
       <div class="actions-end">
         <button class="primary" :disabled="!dirty || saving" @click="save">
           <span v-if="saving" class="spinner" />
-          {{ saving ? "กำลังบันทึก…" : "บันทึก" }}
+          {{ saving ? $t("common.saving") : $t("common.save") }}
         </button>
       </div>
     </section>
 
     <section class="card stack">
-      <h2 class="section-title">A Record สำหรับตั้งค่า DNS</h2>
-      <p class="muted small">
-        ชี้ domain มาที่เครื่องนี้โดยเพิ่ม A record ใน DNS ของผู้ให้บริการ domain —
-        Type <code>A</code>, Name เป็นชื่อ domain/subdomain ที่ต้องการ, Value เป็น IP ด้านล่าง
-      </p>
+      <h2 class="section-title">{{ $t("system.dns.title") }}</h2>
+      <i18n-t scope="global" keypath="system.dns.intro" tag="p" class="muted small">
+        <template #type><code>A</code></template>
+      </i18n-t>
 
       <template v-if="settings?.serverIps.length">
         <div v-for="ip in settings.serverIps" :key="ip" class="ip-row">
           <code class="ip">{{ ip }}</code>
-          <button class="ghost small" :title="`คัดลอก ${ip}`" @click="copyIp(ip)">
+          <button class="ghost small" :title="$t('system.dns.copyIp', { ip })" @click="copyIp(ip)">
             <AppIcon :name="copiedIp === ip ? 'check' : 'copy'" :size="14" />
-            {{ copiedIp === ip ? "คัดลอกแล้ว" : "คัดลอก" }}
+            {{ copiedIp === ip ? $t("common.copied") : $t("common.copy") }}
           </button>
         </div>
       </template>
       <p v-else class="alert alert-warn">
         <AppIcon name="info" :size="15" />
-        <span>
-          ไม่พบ IP ของเครื่อง — ตั้ง <code>SERVER_IP</code> ใน <code>.env</code> ของการติดตั้งแล้ว
-          restart control-api
-        </span>
+        <i18n-t scope="global" keypath="system.dns.noIp" tag="span">
+          <template #name><code>SERVER_IP</code></template>
+          <template #file><code>.env</code></template>
+        </i18n-t>
       </p>
     </section>
 

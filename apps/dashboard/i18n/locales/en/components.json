@@ -1,0 +1,109 @@
+{
+  "components": {
+    "subtitle": "Run several containers per project (web + worker + database), compose style",
+    "mode": {
+      "compose": "Mode: compose (multi-container)",
+      "single": "Mode: single container"
+    },
+    "singleIntro": {
+      "title": "This project still runs as a single container",
+      "body": "Define the components below (at least one must be web), then click \"Switch to compose\". The next deploy will run multiple containers."
+    },
+    "empty": {
+      "title": "No components yet",
+      "hint": "Add your first component (for example your web app) to get started"
+    },
+    "disabledBadge": "Disabled",
+    "add": "Add component",
+    "note": "Component changes take effect on the next deploy",
+    "action": {
+      "disable": "Disable",
+      "enable": "Enable"
+    },
+    "confirmDelete": {
+      "message": "Delete component {name}? (Removes the definition only, not the data)",
+      "confirm": "Confirm delete"
+    },
+    "form": {
+      "editTitle": "Edit {name}",
+      "name": "Name (DNS alias)",
+      "nameHint": "a-z, 0-9 and hyphens. Other containers reach this one by this name.",
+      "role": "Type (role)",
+      "source": "Image source",
+      "sourceBuild": "Build from a Dockerfile",
+      "sourceImage": "Prebuilt image (registry)",
+      "sourceManaged": "Reference a managed database",
+      "sourceLocked": "The source cannot be changed after creation. Delete the component and create a new one.",
+      "targetStage": "Target stage (optional)",
+      "imageHint": "A tag or digest is required. Do not use latest.",
+      "selectService": "Select a service",
+      "noServices": "No managed database yet. Create one on the Databases page first.",
+      "managedEnvHint": "Components that set depends_on to this one get connection env injected automatically:",
+      "isWeb": "Web (public), routed through the project's domain",
+      "internalPort": "Internal port (for the health check)",
+      "healthPath": "Health check path (optional)",
+      "healthInterval": "Health interval (seconds)",
+      "healthTimeout": "Health timeout (seconds)",
+      "healthWaitHint": "A deploy waits for the health check for at most about interval × retries seconds. For a service that starts slowly (for example one that loads a model), increase retries.",
+      "healthCmd": "Health command (optional)",
+      "healthCmdHint": "Health check command run inside the container (Docker HEALTHCHECK). Required if another component depends on this one with the \"healthy\" condition (for example {a}, {b})",
+      "command": "Command (optional)",
+      "commandHint": "Separate arguments with spaces (wrap values containing spaces in \"...\" or '...'). It does not run through a shell. If you need a shell, write {example}",
+      "cpuLimit": "CPU limit (optional)",
+      "memoryLimit": "Memory limit MB (optional)",
+      "memorySwap": "Memory + swap MB (optional)",
+      "memorySwapPlaceholder": "Same as memory = no swap",
+      "pidsLimit": "PID limit (optional)",
+      "capDropAll": "Drop all Linux capabilities ({flag})",
+      "noNewPrivileges": "Block privilege escalation in the container ({flag})",
+      "dependsOn": "Depends on (starts after these components)",
+      "depStarted": "started (has started)",
+      "depHealthy": "healthy (passes the health check)"
+    },
+    "repo": {
+      "useProject": "Using the project's repo",
+      "change": "Change repo",
+      "other": "Use another repo",
+      "backToProject": "Go back to the project's repo",
+      "needGithub": "Connect the GitHub App before choosing another repo",
+      "hint": "A deploy builds the latest commit of this branch · a redeploy reuses the same commit"
+    },
+    "promote": {
+      "title": "Switch to multi-container (compose)",
+      "ready": "Ready. The next deploy will run {n} component | Ready. The next deploy will run {n} components",
+      "notReady": "At least one component, and at least one that is web, is required before switching",
+      "action": "Switch to compose",
+      "working": "Switching…"
+    },
+    "error": {
+      "load": "Could not load components",
+      "create": "Could not add the component",
+      "promote": "Could not switch to compose"
+    },
+    "dockerfile": {
+      "intro": "Paste a Dockerfile instead of connecting a repository. Every deploy builds from this content with no git clone. Good for small projects without a repo, or for quick experiments.",
+      "label": "Dockerfile content",
+      "discard": "Discard changes",
+      "useAsSource": "Use as source",
+      "error": {
+        "empty": "Paste the Dockerfile content",
+        "tooLarge": "Content is larger than {n}KB"
+      }
+    },
+    "compose": {
+      "error": {
+        "noServicesKey": "No top-level 'services:' found. This does not look like a docker-compose.yml file.",
+        "servicesEmpty": "'services:' is empty. There is no service to import.",
+        "serviceNotFound": "No service found. Check the file's indentation.",
+        "serviceFormat": "Unexpected service format. It must be '{'<'}service name{'>'}:' on a line of its own.",
+        "serviceEmpty": "Service \"{name}\" is empty",
+        "imageOnly": "Service \"{name}\" uses a prebuilt image (no 'build:'), which cannot be imported. The file needs build.context/dockerfile.",
+        "noBuildOrImage": "Service \"{name}\" has no 'build:' or 'image:'. Check the file again."
+      },
+      "warn": {
+        "multipleServices": "This file has {count} services. Only the first one (\"{name}\") is used, because a project here supports one container per project.",
+        "noPorts": "No 'ports:' found in the file. Set the internal port yourself after importing."
+      }
+    }
+  }
+}

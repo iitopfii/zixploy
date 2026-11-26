@@ -2,6 +2,7 @@
  * Error codes และ error envelope กลางของระบบ — ดู docs/conventions.md
  * UI/clients ตัดสินใจจาก `code` เท่านั้น ไม่ parse `message`
  */
+import { DEFAULT_LOCALE, type Locale, type LocalizedText } from "./i18n";
 
 export const ERROR_CODES = {
   // generic
@@ -141,13 +142,25 @@ export interface ErrorEnvelope {
 
 /** Error ที่ตั้งใจโยนจาก business logic — ถูก map เป็น envelope + HTTP status โดย API layer */
 export class AppError extends Error {
+  /** ข้อความสองภาษา — null เมื่อสร้างด้วย string เดียว (ยังไม่ได้แปล) */
+  readonly localized: LocalizedText | null;
+
+  /**
+   * `message` เป็น string เดียว หรือ `{ th, en }` — `error.message` เป็นภาษาไทยเสมอ
+   * (log และค่าที่บันทึกลง DB ใช้ค่านี้) ส่วนข้อความที่ตอบ client เลือกด้วย `messageFor()`
+   */
   constructor(
     readonly code: ErrorCode,
-    message: string,
+    message: string | LocalizedText,
     readonly details?: Record<string, unknown>,
   ) {
-    super(message);
+    super(typeof message === "string" ? message : message.th);
     this.name = "AppError";
+    this.localized = typeof message === "string" ? null : message;
+  }
+
+  messageFor(locale: Locale): string {
+    return this.localized ? this.localized[locale] : this.message;
   }
 
   get status(): number {
@@ -155,11 +168,15 @@ export class AppError extends Error {
   }
 }
 
-export function toErrorEnvelope(error: AppError, requestId: string): ErrorEnvelope {
+export function toErrorEnvelope(
+  error: AppError,
+  requestId: string,
+  locale: Locale = DEFAULT_LOCALE,
+): ErrorEnvelope {
   return {
     error: {
       code: error.code,
-      message: error.message,
+      message: error.messageFor(locale),
       requestId,
       ...(error.details ? { details: error.details } : {}),
     },

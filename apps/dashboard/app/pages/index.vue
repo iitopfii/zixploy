@@ -1,5 +1,7 @@
 <script setup lang="ts">
 const api = useApi();
+const { t } = useI18n();
+const { isAdmin } = usePermissions();
 
 const {
   data: projects,
@@ -10,7 +12,7 @@ const {
   "projects",
   async () => {
     const { data, error: apiError } = await api.api.v1.projects.get();
-    if (apiError) throw new Error("โหลดรายการ project ไม่สำเร็จ");
+    if (apiError) throw new Error(t("projects.list.loadFailed"));
     return data?.items ?? [];
   },
   { server: false },
@@ -69,8 +71,7 @@ async function create() {
   try {
     const { error: apiError } = await api.api.v1.projects.post({ name });
     if (apiError) {
-      const body = apiError.value as { error?: { message?: string } } | null;
-      createError.value = body?.error?.message ?? "สร้าง project ไม่สำเร็จ";
+      createError.value = apiErrorMessage(apiError, "projects.list.createFailed");
       return;
     }
     newName.value = "";
@@ -87,16 +88,21 @@ async function create() {
     <!-- Page header -->
     <header class="page-head">
       <div>
-        <h1>Projects</h1>
-        <p class="muted small">แอปพลิเคชันทั้งหมดที่ deploy ผ่าน Zixploy</p>
+        <h1>{{ $t("projects.list.title") }}</h1>
+        <p class="muted small">{{ $t("projects.list.subtitle") }}</p>
       </div>
       <div class="actions">
-        <button class="secondary icon" title="โหลดใหม่" aria-label="โหลดใหม่" @click="refresh()">
+        <button
+          class="secondary icon"
+          :title="$t('projects.list.reload')"
+          :aria-label="$t('projects.list.reload')"
+          @click="refresh()"
+        >
           <AppIcon name="refresh" :size="15" />
         </button>
-        <button class="primary" @click="openCreate">
+        <button v-if="isAdmin" class="primary" @click="openCreate">
           <AppIcon name="plus" :size="15" />
-          สร้าง Project
+          {{ $t("projects.list.createButton") }}
         </button>
       </div>
     </header>
@@ -104,28 +110,28 @@ async function create() {
     <!-- Summary -->
     <div v-if="!error" class="stats">
       <div class="stat">
-        <span class="stat-label">ทั้งหมด</span>
+        <span class="stat-label">{{ $t("projects.list.stat.total") }}</span>
         <span class="stat-value">
           <span v-if="pending" class="skeleton stat-skeleton" />
           <template v-else>{{ stats.total }}</template>
         </span>
       </div>
       <div class="stat">
-        <span class="stat-label">ทำงานอยู่</span>
+        <span class="stat-label">{{ $t("projects.list.stat.running") }}</span>
         <span class="stat-value tone-ok-text">
           <span v-if="pending" class="skeleton stat-skeleton" />
           <template v-else>{{ stats.running }}</template>
         </span>
       </div>
       <div class="stat">
-        <span class="stat-label">กำลัง deploy</span>
+        <span class="stat-label">{{ $t("projects.list.stat.deploying") }}</span>
         <span class="stat-value tone-info-text">
           <span v-if="pending" class="skeleton stat-skeleton" />
           <template v-else>{{ stats.deploying }}</template>
         </span>
       </div>
       <div class="stat" :class="{ alarm: stats.attention > 0 }">
-        <span class="stat-label">ต้องดูแล</span>
+        <span class="stat-label">{{ $t("projects.list.stat.attention") }}</span>
         <span class="stat-value" :class="stats.attention ? 'tone-bad-text' : ''">
           <span v-if="pending" class="skeleton stat-skeleton" />
           <template v-else>{{ stats.attention }}</template>
@@ -134,10 +140,10 @@ async function create() {
     </div>
 
     <!-- Create form -->
-    <form v-if="creating" class="card create" @submit.prevent="create">
-      <h2 class="section-title">สร้าง project ใหม่</h2>
+    <form v-if="creating && isAdmin" class="card create" @submit.prevent="create">
+      <h2 class="section-title">{{ $t("projects.list.createTitle") }}</h2>
       <label>
-        <span>ชื่อ project</span>
+        <span>{{ $t("projects.list.nameLabel") }}</span>
         <input
           ref="nameInput"
           v-model="newName"
@@ -146,7 +152,7 @@ async function create() {
           :disabled="saving"
         />
         <span class="field-hint">
-          เชื่อม GitHub repository และตั้งค่า build ได้หลังสร้างเสร็จ ในแท็บ Source
+          {{ $t("projects.list.createHint") }}
         </span>
       </label>
       <p v-if="createError" class="alert alert-bad">
@@ -155,11 +161,11 @@ async function create() {
       </p>
       <div class="actions-end">
         <button type="button" class="secondary" :disabled="saving" @click="creating = false">
-          ยกเลิก
+          {{ $t("common.cancel") }}
         </button>
         <button class="primary" type="submit" :disabled="!newName.trim() || saving">
           <span v-if="saving" class="spinner" />
-          {{ saving ? "กำลังสร้าง…" : "สร้าง project" }}
+          {{ saving ? $t("common.creating") : $t("projects.list.createSubmit") }}
         </button>
       </div>
     </form>
@@ -167,7 +173,7 @@ async function create() {
     <!-- Search -->
     <div v-if="!pending && !error && (projects?.length ?? 0) > 4" class="search">
       <AppIcon name="search" :size="15" />
-      <input v-model="query" placeholder="ค้นหาตามชื่อหรือ repository…" />
+      <input v-model="query" :placeholder="$t('projects.list.searchPlaceholder')" />
     </div>
 
     <!-- Loading -->
@@ -183,11 +189,11 @@ async function create() {
     <div v-else-if="error" class="card">
       <div class="empty">
         <span class="empty-icon"><AppIcon name="alert" :size="20" /></span>
-        <span class="empty-title">โหลดรายการ project ไม่สำเร็จ</span>
-        <p class="small">ตรวจสอบว่า control API ทำงานอยู่ แล้วลองใหม่อีกครั้ง</p>
+        <span class="empty-title">{{ $t("projects.list.loadFailed") }}</span>
+        <p class="small">{{ $t("projects.list.loadFailedHint") }}</p>
         <button class="secondary" @click="refresh()">
           <AppIcon name="refresh" :size="15" />
-          ลองใหม่
+          {{ $t("common.retry") }}
         </button>
       </div>
     </div>
@@ -196,11 +202,11 @@ async function create() {
     <div v-else-if="!projects?.length" class="card">
       <div class="empty">
         <span class="empty-icon"><AppIcon name="box" :size="20" /></span>
-        <span class="empty-title">ยังไม่มี project</span>
-        <p class="small">สร้าง project แรกเพื่อเริ่ม deploy จาก GitHub repository</p>
-        <button class="primary" @click="openCreate">
+        <span class="empty-title">{{ $t("projects.list.emptyTitle") }}</span>
+        <p v-if="isAdmin" class="small">{{ $t("projects.list.emptyHint") }}</p>
+        <button v-if="isAdmin" class="primary" @click="openCreate">
           <AppIcon name="plus" :size="15" />
-          สร้าง Project
+          {{ $t("projects.list.createButton") }}
         </button>
       </div>
     </div>
@@ -209,8 +215,10 @@ async function create() {
     <div v-else-if="!filtered.length" class="card">
       <div class="empty">
         <span class="empty-icon"><AppIcon name="search" :size="20" /></span>
-        <span class="empty-title">ไม่พบ project ที่ตรงกับ "{{ query }}"</span>
-        <button class="secondary" @click="query = ''">ล้างการค้นหา</button>
+        <span class="empty-title">{{ $t("projects.list.noMatch", { query }) }}</span>
+        <button class="secondary" @click="query = ''">
+          {{ $t("projects.list.clearSearch") }}
+        </button>
       </div>
     </div>
 
@@ -224,7 +232,7 @@ async function create() {
             <span
               v-if="project.activeDeployment"
               class="status status-deploying"
-              :title="`กำลัง ${project.activeDeployment.status}`"
+              :title="$t('projects.list.inProgressTitle', { status: project.activeDeployment.status })"
             >
               {{ deploymentStatusLabel(project.activeDeployment.status) }}
             </span>
@@ -233,7 +241,9 @@ async function create() {
               class="status"
               :class="`status-${project.degraded ? 'degraded' : project.status}`"
             >
-              {{ project.degraded ? "ผิดปกติ" : projectStatusLabel(project.status) }}
+              {{
+                project.degraded ? $t("projects.status.degraded") : projectStatusLabel(project.status)
+              }}
             </span>
           </div>
 
@@ -244,11 +254,11 @@ async function create() {
             </span>
             <span v-else-if="project.sourceType === 'dockerfile'" class="meta truncate">
               <AppIcon name="box" :size="13" />
-              Dockerfile (วางเอง)
+              {{ $t("projects.dockerfilePasted") }}
             </span>
             <span v-else class="meta unlinked">
               <AppIcon name="alert" :size="13" />
-              ยังไม่ได้เชื่อม repository
+              {{ $t("projects.list.repoNotLinked") }}
             </span>
 
             <span v-if="project.branch" class="meta">
@@ -259,7 +269,7 @@ async function create() {
 
           <div class="project-foot">
             <span class="badge" :class="project.autoDeploy ? 'tone-ok' : ''">
-              {{ project.autoDeploy ? "Auto deploy" : "Manual" }}
+              {{ project.autoDeploy ? $t("projects.list.autoDeploy") : $t("projects.list.manual") }}
             </span>
             <span v-if="project.internalPort" class="badge mono">:{{ project.internalPort }}</span>
             <span class="spacer" />

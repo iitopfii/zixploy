@@ -1,0 +1,37 @@
+{
+  "format": {
+    "justNow": "เมื่อครู่",
+    "ago": {
+      "second": "{n} วินาทีที่แล้ว",
+      "minute": "{n} นาทีที่แล้ว",
+      "hour": "{n} ชั่วโมงที่แล้ว",
+      "day": "{n} วันที่แล้ว",
+      "month": "{n} เดือนที่แล้ว",
+      "year": "{n} ปีที่แล้ว"
+    },
+    "duration": {
+      "s": "{s} ว.",
+      "m": "{m} น.",
+      "ms": "{m} น. {s} ว.",
+      "hm": "{h} ชม. {m} น."
+    },
+    "projectStatus": {
+      "new": "ยังไม่ deploy",
+      "running": "ทำงานอยู่",
+      "deploying": "กำลัง deploy",
+      "failed": "ล้มเหลว",
+      "stopped": "หยุดแล้ว"
+    },
+    "deploymentStatus": {
+      "queued": "เข้าคิว",
+      "cloning": "ดึงโค้ด",
+      "building": "กำลัง build",
+      "starting": "กำลังเริ่ม",
+      "health_checking": "ตรวจสุขภาพ",
+      "activating": "สลับ traffic",
+      "succeeded": "สำเร็จ",
+      "failed": "ล้มเหลว",
+      "cancelled": "ยกเลิกแล้ว"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "nav": {
+    "heading": "Manage",
+    "mainLabel": "Main",
+    "openMenu": "Open menu",
+    "projects": "Projects",
+    "databases": "Databases",
+    "monitoring": "Monitoring",
+    "docker": "Docker",
+    "github": "GitHub Apps",
+    "members": "Members",
+    "system": "System settings",
+    "account": "Account settings",
+    "logout": "Sign out",
+    "role": {
+      "admin": "Admin",
+      "developer": "Developer",
+      "viewer": "Viewer"
+    }
+  }
+}

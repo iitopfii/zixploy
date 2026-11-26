@@ -1,0 +1,48 @@
+{
+  "docker": {
+    "subtitle": "container และ image ทั้งหมดบนเซิร์ฟเวอร์ (อ่านอย่างเดียว)",
+    "updated": "อัปเดต {time}",
+    "reload": "โหลดใหม่",
+    "loadFailed": "โหลดข้อมูลไม่สำเร็จ — ลองโหลดใหม่",
+    "tabsLabel": "ประเภทข้อมูล",
+    "filterPlaceholder": "ค้นหาชื่อ / image…",
+    "runningSummary": "ทำงานอยู่ {running} จาก {total} container",
+    "sourceOther": "อื่น ๆ",
+    "noContainers": "ไม่พบ container ที่ตรงกับคำค้น",
+    "noImages": "ไม่พบ image ที่ตรงกับคำค้น",
+    "snapshotNote": "รายการนี้เป็น snapshot ที่ worker กวาดทุก ~30 วินาที — image ที่ไม่ได้ใช้ลบได้ที่ Monitoring → ล้างพื้นที่",
+    "error": {
+      "load": "โหลด docker inventory ไม่สำเร็จ",
+      "importStart": "เริ่มนำเข้าไม่สำเร็จ",
+      "status": "อ่านสถานะไม่สำเร็จ",
+      "inspect": "อ่าน config ของ container ไม่สำเร็จ",
+      "workerTimeout": "รอ worker นานเกินไป — ตรวจว่า deploy-worker ทำงานอยู่",
+      "confirm": "ยืนยันไม่สำเร็จ",
+      "import": "นำเข้าไม่สำเร็จ",
+      "timeout": "รอนานเกินไป — ลองดูสถานะอีกครั้งภายหลัง"
+    },
+    "empty": {
+      "title": "ยังไม่มีข้อมูล",
+      "hint": "รอ worker เก็บข้อมูลรอบแรก (~30 วินาที) — ถ้าค้างนาน ตรวจว่า deploy-worker ทำงานอยู่"
+    },
+    "col": {
+      "name": "ชื่อ",
+      "state": "สถานะ",
+      "source": "ที่มา",
+      "size": "ขนาด",
+      "created": "สร้างเมื่อ"
+    },
+    "import": {
+      "action": "นำเข้า",
+      "reading": "กำลังอ่าน…",
+      "title": "นำเข้า {name}",
+      "intro": "สร้าง project จาก container นี้โดย{emphasis} — ของเดิมยังทำงานต่อ และจะยังไม่ deploy จนกว่าคุณจะกดเอง",
+      "introEmphasis": "ไม่แตะ container เดิม",
+      "projectName": "ชื่อ project",
+      "projectNamePlaceholder": "ชื่อที่จะใช้ในระบบ",
+      "envNote": "ค่าจะถูกอ่านจาก container แล้วเข้ารหัสเก็บตอนยืนยัน — ค่าไม่เคยผ่านหน้าเว็บ",
+      "volumeNote": "volume ที่ container เดิมใช้จะยังไม่ถูกผูกให้อัตโนมัติ — เพิ่มได้ที่แท็บ Volumes ของ project หลังนำเข้า",
+      "create": "สร้าง project"
+    }
+  }
+}

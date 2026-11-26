@@ -47,7 +47,10 @@ export function enqueueServiceJob(
     ).run(jobId, serviceId, type, JSON.stringify(payload), now, now);
   } catch (err) {
     if (err instanceof Error && err.message.includes("UNIQUE")) {
-      throw new AppError("SERVICE_BUSY", "service นี้มีงานที่กำลังดำเนินการอยู่ — รอให้เสร็จก่อนสั่งงานใหม่");
+      throw new AppError("SERVICE_BUSY", {
+        th: "service นี้มีงานที่กำลังดำเนินการอยู่ — รอให้เสร็จก่อนสั่งงานใหม่",
+        en: "This service has a job in progress. Wait for it to finish before starting another",
+      });
     }
     throw err;
   }

@@ -12,6 +12,7 @@
  */
 
 import { createPrivateKey, X509Certificate } from "node:crypto";
+import { LocalizedError } from "./i18n";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -101,7 +102,10 @@ export function parseCertificate(certPem: string): ParsedCertificate {
   const chain = splitCertificateChain(certPem);
   const leafPem = chain[0];
   if (!leafPem) {
-    throw new Error("ไม่พบ certificate ใน PEM ที่ส่งมา (ต้องมี -----BEGIN CERTIFICATE-----)");
+    throw new LocalizedError({
+      th: "ไม่พบ certificate ใน PEM ที่ส่งมา (ต้องมี -----BEGIN CERTIFICATE-----)",
+      en: "No certificate found in the PEM provided (-----BEGIN CERTIFICATE----- is required)",
+    });
   }
 
   let cert: X509Certificate;
@@ -109,7 +113,10 @@ export function parseCertificate(certPem: string): ParsedCertificate {
     cert = new X509Certificate(leafPem);
   } catch {
     // ไม่ส่ง original error ต่อ — บาง runtime ใส่เนื้อ PEM ลงใน message
-    throw new Error("parse certificate ไม่สำเร็จ — ตรวจสอบว่าเป็น PEM ที่ถูกต้อง");
+    throw new LocalizedError({
+      th: "parse certificate ไม่สำเร็จ — ตรวจสอบว่าเป็น PEM ที่ถูกต้อง",
+      en: "Could not parse the certificate. Check that it is a valid PEM",
+    });
   }
 
   const cn = extractCommonName(cert.subject);
@@ -119,7 +126,10 @@ export function parseCertificate(certPem: string): ParsedCertificate {
   const validFrom = Date.parse(cert.validFrom);
   const validTo = Date.parse(cert.validTo);
   if (Number.isNaN(validFrom) || Number.isNaN(validTo)) {
-    throw new Error("certificate มีวันหมดอายุที่อ่านไม่ได้");
+    throw new LocalizedError({
+      th: "certificate มีวันหมดอายุที่อ่านไม่ได้",
+      en: "The certificate has an unreadable expiry date",
+    });
   }
 
   // subject/issuer เป็น undefined ได้เมื่อ cert ไม่มี field นั้น — normalize เป็น "" ตั้งแต่ต้นทาง
@@ -200,20 +210,30 @@ export function validateCertificateBundle(
 
   // 1. ขนาด
   if (Buffer.byteLength(certPem, "utf8") > MAX_PEM_BYTES) {
-    throw new Error(`certificate ยาวเกิน ${MAX_PEM_BYTES} bytes`);
+    throw new LocalizedError({
+      th: `certificate ยาวเกิน ${MAX_PEM_BYTES} bytes`,
+      en: `Certificate is larger than ${MAX_PEM_BYTES} bytes`,
+    });
   }
   if (Buffer.byteLength(keyPem, "utf8") > MAX_PEM_BYTES) {
-    throw new Error(`private key ยาวเกิน ${MAX_PEM_BYTES} bytes`);
+    throw new LocalizedError({
+      th: `private key ยาวเกิน ${MAX_PEM_BYTES} bytes`,
+      en: `Private key is larger than ${MAX_PEM_BYTES} bytes`,
+    });
   }
 
   // 2. key format
   if (!KEY_BEGIN_RE.test(keyPem)) {
-    throw new Error("ไม่พบ private key ใน PEM ที่ส่งมา (ต้องมี -----BEGIN PRIVATE KEY-----)");
+    throw new LocalizedError({
+      th: "ไม่พบ private key ใน PEM ที่ส่งมา (ต้องมี -----BEGIN PRIVATE KEY-----)",
+      en: "No private key found in the PEM provided (-----BEGIN PRIVATE KEY----- is required)",
+    });
   }
   if (ENCRYPTED_KEY_RE.test(keyPem)) {
-    throw new Error(
-      "private key ถูกเข้ารหัสด้วย passphrase — Traefik อ่านไม่ได้ ให้ถอด passphrase ก่อนอัปโหลด",
-    );
+    throw new LocalizedError({
+      th: "private key ถูกเข้ารหัสด้วย passphrase — Traefik อ่านไม่ได้ ให้ถอด passphrase ก่อนอัปโหลด",
+      en: "The private key is encrypted with a passphrase and Traefik cannot read it. Remove the passphrase before uploading",
+    });
   }
 
   // 3. cert
@@ -226,31 +246,40 @@ export function validateCertificateBundle(
     const privateKey = createPrivateKey(keyPem);
     keyMatches = new X509Certificate(leafPem).checkPrivateKey(privateKey);
   } catch {
-    throw new Error("parse private key ไม่สำเร็จ — ตรวจสอบว่าเป็น PEM ที่ถูกต้องและไม่มี passphrase");
+    throw new LocalizedError({
+      th: "parse private key ไม่สำเร็จ — ตรวจสอบว่าเป็น PEM ที่ถูกต้องและไม่มี passphrase",
+      en: "Could not parse the private key. Check that it is a valid PEM without a passphrase",
+    });
   }
   if (!keyMatches) {
-    throw new Error("private key ไม่ตรงกับ certificate — ตรวจสอบว่าอัปโหลดไฟล์คู่กันถูกต้อง");
+    throw new LocalizedError({
+      th: "private key ไม่ตรงกับ certificate — ตรวจสอบว่าอัปโหลดไฟล์คู่กันถูกต้อง",
+      en: "The private key does not match the certificate. Check that you uploaded the matching pair",
+    });
   }
 
   // 5. expiry
   if (rejectExpired) {
     if (now > parsed.validTo) {
-      throw new Error(
-        `certificate หมดอายุแล้วเมื่อ ${new Date(parsed.validTo).toISOString().slice(0, 10)}`,
-      );
+      throw new LocalizedError({
+        th: `certificate หมดอายุแล้วเมื่อ ${new Date(parsed.validTo).toISOString().slice(0, 10)}`,
+        en: `The certificate expired on ${new Date(parsed.validTo).toISOString().slice(0, 10)}`,
+      });
     }
     if (now < parsed.validFrom) {
-      throw new Error(
-        `certificate ยังไม่ถึงวันเริ่มใช้งาน (${new Date(parsed.validFrom).toISOString().slice(0, 10)})`,
-      );
+      throw new LocalizedError({
+        th: `certificate ยังไม่ถึงวันเริ่มใช้งาน (${new Date(parsed.validFrom).toISOString().slice(0, 10)})`,
+        en: `The certificate is not valid yet (starts ${new Date(parsed.validFrom).toISOString().slice(0, 10)})`,
+      });
     }
   }
 
   // 6. hostname coverage
   if (hostname && !certCoversHostname(parsed, hostname)) {
-    throw new Error(
-      `certificate ไม่ครอบ hostname "${hostname}" — ใบนี้ออกให้กับ: ${parsed.hostnames.join(", ") || "(ไม่ระบุ)"}`,
-    );
+    throw new LocalizedError({
+      th: `certificate ไม่ครอบ hostname "${hostname}" — ใบนี้ออกให้กับ: ${parsed.hostnames.join(", ") || "(ไม่ระบุ)"}`,
+      en: `The certificate does not cover hostname "${hostname}". It was issued for: ${parsed.hostnames.join(", ") || "(none)"}`,
+    });
   }
 
   return parsed;

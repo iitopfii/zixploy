@@ -24,6 +24,10 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      # ไฟล์ภาษา th/en ต้องมี key ตรงกัน และห้ามมีข้อความไทยค้างในโค้ดของ dashboard
+      - name: Locale files check
+        run: bun run --filter @zixploy/dashboard i18n:check
+
       # ครอบคลุมทุก workspace รวม dashboard (nuxt typecheck -> vue-tsc)
       - name: Typecheck
         run: bun run typecheck

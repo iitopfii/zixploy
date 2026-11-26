@@ -8,14 +8,15 @@
 const props = defineProps<{ projectId: string }>();
 
 const api = useApi();
+const { t } = useI18n();
 
 type Range = "1h" | "6h" | "24h";
 const range = ref<Range>("1h");
-const ranges: Array<{ key: Range; label: string }> = [
-  { key: "1h", label: "1 ชม." },
-  { key: "6h", label: "6 ชม." },
-  { key: "24h", label: "24 ชม." },
-];
+const ranges = computed<Array<{ key: Range; label: string }>>(() => [
+  { key: "1h", label: t("monitoring.range.h1") },
+  { key: "6h", label: t("monitoring.range.h6") },
+  { key: "24h", label: t("monitoring.range.h24") },
+]);
 
 const { data, pending, error, refresh } = await useAsyncData(
   () => `project-metrics-${props.projectId}-${range.value}`,
@@ -23,7 +24,7 @@ const { data, pending, error, refresh } = await useAsyncData(
     const { data: body, error: apiError } = await api.api.v1
       .projects({ id: props.projectId })
       .metrics.get({ query: { range: range.value } });
-    if (apiError) throw new Error("โหลด metrics ไม่สำเร็จ");
+    if (apiError) throw new Error(t("monitoring.error.load"));
     return body;
   },
   { server: false, watch: [range, () => props.projectId] },
@@ -66,9 +67,9 @@ const restartsInRange = computed(() => {
 <template>
   <div class="stack">
     <div class="row-between wrap">
-      <h2 class="section-title">การใช้ทรัพยากร</h2>
+      <h2 class="section-title">{{ $t("monitoring.project.title") }}</h2>
       <div class="actions">
-        <div class="range-switch" role="group" aria-label="ช่วงเวลา">
+        <div class="range-switch" role="group" :aria-label="$t('monitoring.range.label')">
           <button
             v-for="r in ranges"
             :key="r.key"
@@ -79,7 +80,12 @@ const restartsInRange = computed(() => {
             {{ r.label }}
           </button>
         </div>
-        <button class="secondary icon small" title="โหลดใหม่" aria-label="โหลดใหม่" @click="refresh()">
+        <button
+          class="secondary icon small"
+          :title="$t('monitoring.reload')"
+          :aria-label="$t('monitoring.reload')"
+          @click="refresh()"
+        >
           <AppIcon name="refresh" :size="14" />
         </button>
       </div>
@@ -94,16 +100,16 @@ const restartsInRange = computed(() => {
     <!-- Error -->
     <div v-else-if="error" class="empty">
       <span class="empty-icon"><AppIcon name="alert" :size="20" /></span>
-      <span class="empty-title">โหลด metrics ไม่สำเร็จ</span>
-      <button class="secondary" @click="refresh()">ลองใหม่</button>
+      <span class="empty-title">{{ $t("monitoring.error.load") }}</span>
+      <button class="secondary" @click="refresh()">{{ $t("common.retry") }}</button>
     </div>
 
     <!-- ยังไม่มีข้อมูล -->
     <div v-else-if="!latest" class="empty">
       <span class="empty-icon"><AppIcon name="activity" :size="20" /></span>
-      <span class="empty-title">ยังไม่มีข้อมูลการใช้ทรัพยากร</span>
+      <span class="empty-title">{{ $t("monitoring.project.emptyTitle") }}</span>
       <p class="small">
-        เก็บได้เฉพาะ project ที่มี container ทำงานอยู่ — deploy แล้วรอประมาณ 15 วินาที
+        {{ $t("monitoring.project.emptyHint") }}
       </p>
     </div>
 
@@ -111,7 +117,7 @@ const restartsInRange = computed(() => {
       <!-- แจ้งเมื่อ container ไม่ได้ทำงาน: ตัวเลขที่เห็นเป็นค่าสุดท้ายก่อนหยุด -->
       <div v-if="!latest.running" class="alert alert-warn">
         <AppIcon name="info" :size="16" />
-        <span>container ไม่ได้ทำงานอยู่ — ตัวเลขด้านล่างเป็นค่าล่าสุดที่วัดได้ก่อนหยุด</span>
+        <span>{{ $t("monitoring.project.notRunning") }}</span>
       </div>
 
       <div class="metric-grid">
@@ -120,27 +126,35 @@ const restartsInRange = computed(() => {
           <div class="metric-head">
             <span class="eyebrow">CPU</span>
             <span v-if="cpuPeak !== null" class="badge tiny">
-              สูงสุด {{ formatPercent(cpuPeak) }}
+              {{ $t("monitoring.project.peak", { value: formatPercent(cpuPeak) }) }}
             </span>
           </div>
           <p class="metric-value">{{ formatPercent(latest.cpuPercent) }}</p>
-          <p class="metric-sub muted tiny">เทียบกับ 1 core = 100%</p>
+          <p class="metric-sub muted tiny">{{ $t("monitoring.project.cpuBasis") }}</p>
           <MetricChart :points="cpuSeries" :gap-ms="gapMs" tone="accent" :height="72" />
         </div>
 
         <!-- Memory -->
         <div class="inset metric">
           <div class="metric-head">
-            <span class="eyebrow">หน่วยความจำ</span>
+            <span class="eyebrow">{{ $t("monitoring.memory") }}</span>
             <span class="badge tiny">
-              {{ latest.memLimitBytes > 0 ? `จำกัด ${formatBytes(latest.memLimitBytes)}` : "ไม่จำกัด" }}
+              {{
+                latest.memLimitBytes > 0
+                  ? $t("monitoring.project.memLimit", { size: formatBytes(latest.memLimitBytes) })
+                  : $t("monitoring.project.memUnlimited")
+              }}
             </span>
           </div>
           <p class="metric-value" :class="memPercent !== null ? `v-${usageTone(memPercent)}` : ''">
             {{ formatBytes(latest.memUsedBytes) }}
           </p>
           <p class="metric-sub muted tiny">
-            {{ memPercent !== null ? `${formatPercent(memPercent)} ของ limit` : "ไม่ได้ตั้ง memory limit" }}
+            {{
+              memPercent !== null
+                ? $t("monitoring.project.memOfLimit", { percent: formatPercent(memPercent) })
+                : $t("monitoring.project.noMemLimit")
+            }}
           </p>
           <MetricChart
             :points="memSeries"
@@ -153,20 +167,20 @@ const restartsInRange = computed(() => {
       </div>
 
       <dl class="kv">
-        <dt>สถานะ container</dt>
+        <dt>{{ $t("monitoring.project.containerStatus") }}</dt>
         <dd>
           <span class="status" :class="latest.running ? 'status-running' : 'status-stopped'">
-            {{ latest.running ? "ทำงานอยู่" : "หยุดแล้ว" }}
+            {{ latest.running ? $t("monitoring.project.running") : $t("monitoring.project.stopped") }}
           </span>
         </dd>
-        <dt>Restart สะสม</dt>
+        <dt>{{ $t("monitoring.project.restarts") }}</dt>
         <dd>
           {{ latest.restartCount }}
           <span v-if="restartsInRange > 0" class="bad-text small">
-            (+{{ restartsInRange }} ในช่วงที่ดู)
+            {{ $t("monitoring.project.restartsInRange", { n: restartsInRange }) }}
           </span>
         </dd>
-        <dt>วัดล่าสุด</dt>
+        <dt>{{ $t("monitoring.project.lastMeasured") }}</dt>
         <dd :title="fullDateTime(latest.ts)">{{ timeAgo(latest.ts) }}</dd>
       </dl>
     </template>

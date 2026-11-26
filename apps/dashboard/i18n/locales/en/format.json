@@ -1,0 +1,37 @@
+{
+  "format": {
+    "justNow": "just now",
+    "ago": {
+      "second": "{n} second ago | {n} seconds ago",
+      "minute": "{n} minute ago | {n} minutes ago",
+      "hour": "{n} hour ago | {n} hours ago",
+      "day": "{n} day ago | {n} days ago",
+      "month": "{n} month ago | {n} months ago",
+      "year": "{n} year ago | {n} years ago"
+    },
+    "duration": {
+      "s": "{s}s",
+      "m": "{m}m",
+      "ms": "{m}m {s}s",
+      "hm": "{h}h {m}m"
+    },
+    "projectStatus": {
+      "new": "Not deployed",
+      "running": "Running",
+      "deploying": "Deploying",
+      "failed": "Failed",
+      "stopped": "Stopped"
+    },
+    "deploymentStatus": {
+      "queued": "Queued",
+      "cloning": "Cloning",
+      "building": "Building",
+      "starting": "Starting",
+      "health_checking": "Health check",
+      "activating": "Switching traffic",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    }
+  }
+}

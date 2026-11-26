@@ -20,6 +20,7 @@ import { domainRoutes } from "./routes/domains";
 import { environmentRoutes } from "./routes/environment";
 import { githubRoutes } from "./routes/github";
 import { logRoutes } from "./routes/logs";
+import { memberRoutes } from "./routes/members";
 import { monitoringRoutes } from "./routes/monitoring";
 import { projectRoutes } from "./routes/projects";
 import { registryRoutes } from "./routes/registries";
@@ -94,7 +95,8 @@ export function buildApp(db: Database, options: AppOptions = {}) {
     .use(updateRoutes(db))
     .use(registryRoutes(db, masterKeys))
     .use(systemSettingsRoutes(db, settingsStore))
-    .use(auditRoutes(db));
+    .use(auditRoutes(db))
+    .use(memberRoutes(db));
 }
 
 export type App = ReturnType<typeof buildApp>;

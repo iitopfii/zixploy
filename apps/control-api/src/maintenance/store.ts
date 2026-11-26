@@ -71,7 +71,10 @@ export function enqueueMaintenance(
     ).run(id, type, requestedBy, now, now);
   } catch (err) {
     if (err instanceof Error && err.message.includes("UNIQUE")) {
-      throw new AppError("MAINTENANCE_BUSY", "มีงานล้าง cache กำลังทำงานอยู่ — รอให้เสร็จก่อน");
+      throw new AppError("MAINTENANCE_BUSY", {
+        th: "มีงานล้าง cache กำลังทำงานอยู่ — รอให้เสร็จก่อน",
+        en: "A cache cleanup job is already running. Wait for it to finish",
+      });
     }
     throw err;
   }

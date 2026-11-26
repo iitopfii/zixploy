@@ -122,7 +122,10 @@ export function originGuard(
     if (hostHeader) {
       const requestHost = hostOf(hostHeader);
       if (!requestHost || !isAllowed(requestHost)) {
-        throw new AppError("INVALID_HOST", "Host header ไม่ถูกต้องหรือไม่ได้รับอนุญาต");
+        throw new AppError("INVALID_HOST", {
+          th: "Host header ไม่ถูกต้องหรือไม่ได้รับอนุญาต",
+          en: "Host header is invalid or not allowed",
+        });
       }
     }
 
@@ -133,7 +136,10 @@ export function originGuard(
     if (!origin) return;
     const originHost = hostOf(origin);
     if (!originHost || !isAllowed(originHost)) {
-      throw new AppError("INVALID_ORIGIN", "Origin ของ request ไม่ได้รับอนุญาต");
+      throw new AppError("INVALID_ORIGIN", {
+        th: "Origin ของ request ไม่ได้รับอนุญาต",
+        en: "Request origin is not allowed",
+      });
     }
   });
 }

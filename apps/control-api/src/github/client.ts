@@ -100,10 +100,10 @@ const MAX_BODY_BYTES = 4 * 1024 * 1024; // 4 MB ต่อ response
 
 function assertObject(v: unknown, context: string): asserts v is Record<string, unknown> {
   if (!v || typeof v !== "object" || Array.isArray(v)) {
-    throw new AppError(
-      "GITHUB_UNAVAILABLE",
-      `GitHub API response ผิดรูปแบบ (ไม่ใช่ object): ${context}`,
-    );
+    throw new AppError("GITHUB_UNAVAILABLE", {
+      th: `GitHub API response ผิดรูปแบบ (ไม่ใช่ object): ${context}`,
+      en: `Malformed GitHub API response (not an object): ${context}`,
+    });
   }
 }
 
@@ -111,17 +111,20 @@ function assertFields(v: unknown, fields: string[], context: string): void {
   assertObject(v, context);
   for (const f of fields) {
     if (!(f in v)) {
-      throw new AppError("GITHUB_UNAVAILABLE", `GitHub API response ขาด field '${f}': ${context}`);
+      throw new AppError("GITHUB_UNAVAILABLE", {
+        th: `GitHub API response ขาด field '${f}': ${context}`,
+        en: `GitHub API response is missing field '${f}': ${context}`,
+      });
     }
   }
 }
 
 function assertArray(v: unknown, context: string): asserts v is unknown[] {
   if (!Array.isArray(v)) {
-    throw new AppError(
-      "GITHUB_UNAVAILABLE",
-      `GitHub API response ผิดรูปแบบ (ไม่ใช่ array): ${context}`,
-    );
+    throw new AppError("GITHUB_UNAVAILABLE", {
+      th: `GitHub API response ผิดรูปแบบ (ไม่ใช่ array): ${context}`,
+      en: `Malformed GitHub API response (not an array): ${context}`,
+    });
   }
 }
 
@@ -191,9 +194,15 @@ export class GitHubHttpClient implements GitHubClient {
       return res;
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
-        throw new AppError("GITHUB_UNAVAILABLE", "GitHub API ไม่ตอบสนองภายในเวลาที่กำหนด");
+        throw new AppError("GITHUB_UNAVAILABLE", {
+          th: "GitHub API ไม่ตอบสนองภายในเวลาที่กำหนด",
+          en: "GitHub API did not respond in time",
+        });
       }
-      throw new AppError("GITHUB_UNAVAILABLE", "ติดต่อ GitHub API ไม่ได้");
+      throw new AppError("GITHUB_UNAVAILABLE", {
+        th: "ติดต่อ GitHub API ไม่ได้",
+        en: "Could not reach the GitHub API",
+      });
     } finally {
       clearTimeout(timer);
     }
@@ -205,35 +214,50 @@ export class GitHubHttpClient implements GitHubClient {
     validate?: (v: unknown) => void,
   ): Promise<T> {
     if (res.status === 404) {
-      throw new AppError("INSTALLATION_NOT_FOUND", `ไม่พบ resource: ${context}`);
+      throw new AppError("INSTALLATION_NOT_FOUND", {
+        th: `ไม่พบ resource: ${context}`,
+        en: `Resource not found: ${context}`,
+      });
     }
     if (res.status === 401 || res.status === 403) {
       // ไม่ใส่ credential detail ใน error message
-      throw new AppError(
-        "GITHUB_UNAVAILABLE",
-        "GitHub ปฏิเสธ credential — ตรวจสอบ App configuration",
-      );
+      throw new AppError("GITHUB_UNAVAILABLE", {
+        th: "GitHub ปฏิเสธ credential — ตรวจสอบ App configuration",
+        en: "GitHub rejected the credential. Check the App configuration",
+      });
     }
     if (res.status === 429) {
       const retryAfter = res.headers.get("retry-after");
       const waitMsg = retryAfter ? ` (retry-after: ${retryAfter}s)` : "";
-      throw new AppError("GITHUB_UNAVAILABLE", `GitHub rate limit — ลองใหม่ภายหลัง${waitMsg}`);
+      throw new AppError("GITHUB_UNAVAILABLE", {
+        th: `GitHub rate limit — ลองใหม่ภายหลัง${waitMsg}`,
+        en: `GitHub rate limit reached. Try again later${waitMsg}`,
+      });
     }
     if (!res.ok) {
-      throw new AppError("GITHUB_UNAVAILABLE", `GitHub API ตอบ ${res.status}: ${context}`);
+      throw new AppError("GITHUB_UNAVAILABLE", {
+        th: `GitHub API ตอบ ${res.status}: ${context}`,
+        en: `GitHub API returned ${res.status}: ${context}`,
+      });
     }
 
     const text = await res.text();
     // ตรวจเป็น byte ไม่ใช่ JS char count — multi-byte UTF-8 ทำให้ .length ต่ำกว่าจริง
     if (Buffer.byteLength(text, "utf8") > MAX_BODY_BYTES) {
-      throw new AppError("GITHUB_UNAVAILABLE", `GitHub response ใหญ่เกิน: ${context}`);
+      throw new AppError("GITHUB_UNAVAILABLE", {
+        th: `GitHub response ใหญ่เกิน: ${context}`,
+        en: `GitHub response is too large: ${context}`,
+      });
     }
 
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
     } catch {
-      throw new AppError("GITHUB_UNAVAILABLE", `GitHub API response ไม่ใช่ JSON ที่ถูกต้อง: ${context}`);
+      throw new AppError("GITHUB_UNAVAILABLE", {
+        th: `GitHub API response ไม่ใช่ JSON ที่ถูกต้อง: ${context}`,
+        en: `GitHub API response is not valid JSON: ${context}`,
+      });
     }
 
     validate?.(parsed);

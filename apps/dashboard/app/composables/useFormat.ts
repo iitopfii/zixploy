@@ -4,32 +4,32 @@
  * ทุกฟังก์ชันรับ epoch millis (รูปแบบเดียวกับที่ API คืนทุก timestamp)
  */
 
+/** unit เป็น key ใน format.ago.* (i18n/locales/<ภาษา>/format.json) */
 const RELATIVE_STEPS: Array<[limitSec: number, divisor: number, unit: string]> = [
-  [60, 1, "วินาที"],
-  [3600, 60, "นาที"],
-  [86400, 3600, "ชั่วโมง"],
-  [2592000, 86400, "วัน"],
-  [31536000, 2592000, "เดือน"],
-  [Number.POSITIVE_INFINITY, 31536000, "ปี"],
+  [60, 1, "second"],
+  [3600, 60, "minute"],
+  [86400, 3600, "hour"],
+  [2592000, 86400, "day"],
+  [31536000, 2592000, "month"],
+  [Number.POSITIVE_INFINITY, 31536000, "year"],
 ];
 
-/** "3 นาทีที่แล้ว" / "เมื่อครู่" — คืน "—" ถ้าไม่มีค่า */
+/** "3 นาทีที่แล้ว" / "เมื่อครู่" ("3 minutes ago" / "just now") — คืน "—" ถ้าไม่มีค่า */
 export function timeAgo(ms: number | null | undefined): string {
   if (!ms) return "—";
   const diffSec = Math.floor((Date.now() - ms) / 1000);
-  if (diffSec < 10) return "เมื่อครู่";
-  if (diffSec < 0) return "อีกสักครู่";
+  if (diffSec < 10) return tr("format.justNow");
 
   for (const [limit, divisor, unit] of RELATIVE_STEPS) {
-    if (diffSec < limit) return `${Math.floor(diffSec / divisor)} ${unit}ที่แล้ว`;
+    if (diffSec < limit) return trCount(`format.ago.${unit}`, Math.floor(diffSec / divisor));
   }
   return "—";
 }
 
-/** วันเวลาแบบเต็มสำหรับ tooltip — ใช้ locale ไทยพร้อมเวลา */
+/** วันเวลาแบบเต็มสำหรับ tooltip — รูปแบบตามภาษาที่เลือก */
 export function fullDateTime(ms: number | null | undefined): string {
   if (!ms) return "—";
-  return new Date(ms).toLocaleString("th-TH", {
+  return new Date(ms).toLocaleString(localeTag(), {
     dateStyle: "medium",
     timeStyle: "short",
   });
@@ -44,11 +44,13 @@ export function shortSha(sha: string | null | undefined): string {
 export function duration(fromMs: number | null | undefined, toMs?: number | null): string {
   if (!fromMs) return "—";
   const totalSec = Math.max(0, Math.round(((toMs ?? Date.now()) - fromMs) / 1000));
-  if (totalSec < 60) return `${totalSec} ว.`;
+  if (totalSec < 60) return tr("format.duration.s", { s: totalSec });
   const min = Math.floor(totalSec / 60);
   const sec = totalSec % 60;
-  if (min < 60) return sec ? `${min} น. ${sec} ว.` : `${min} น.`;
-  return `${Math.floor(min / 60)} ชม. ${min % 60} น.`;
+  if (min < 60) {
+    return sec ? tr("format.duration.ms", { m: min, s: sec }) : tr("format.duration.m", { m: min });
+  }
+  return tr("format.duration.hm", { h: Math.floor(min / 60), m: min % 60 });
 }
 
 const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"] as const;
@@ -83,7 +85,7 @@ export function ratioPercent(used: number, total: number): number {
 
 /** เวลาแบบสั้นสำหรับแกน X ของกราฟ — "14:05" */
 export function clockTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
+  return new Date(ms).toLocaleTimeString(localeTag(), { hour: "2-digit", minute: "2-digit" });
 }
 
 /**
@@ -96,35 +98,17 @@ export function usageTone(percent: number): "ok" | "warn" | "bad" {
   return "ok";
 }
 
-/** คำอธิบายสถานะ project เป็นภาษาไทย — ใช้กับ badge ทุกที่ให้ตรงกัน */
-export const PROJECT_STATUS_LABEL: Record<string, string> = {
-  new: "ยังไม่ deploy",
-  running: "ทำงานอยู่",
-  deploying: "กำลัง deploy",
-  failed: "ล้มเหลว",
-  stopped: "หยุดแล้ว",
-};
-
+/** คำอธิบายสถานะ project ตามภาษาที่เลือก — ใช้กับ badge ทุกที่ให้ตรงกัน (format.projectStatus.*) */
 export function projectStatusLabel(status: string): string {
-  return PROJECT_STATUS_LABEL[status] ?? status;
+  const key = `format.projectStatus.${status}`;
+  return hasMessage(key) ? tr(key) : status;
 }
 
 /**
  * สถานะของ deployment (การ build ครั้งหนึ่ง) — คนละชุดกับสถานะ project
  * project บอกว่า "แอปให้บริการอยู่ไหม" ส่วนอันนี้บอกว่า "build ไปถึงขั้นไหน"
  */
-export const DEPLOYMENT_STATUS_LABEL: Record<string, string> = {
-  queued: "เข้าคิว",
-  cloning: "ดึงโค้ด",
-  building: "กำลัง build",
-  starting: "กำลังเริ่ม",
-  health_checking: "ตรวจสุขภาพ",
-  activating: "สลับ traffic",
-  succeeded: "สำเร็จ",
-  failed: "ล้มเหลว",
-  cancelled: "ยกเลิกแล้ว",
-};
-
 export function deploymentStatusLabel(status: string): string {
-  return DEPLOYMENT_STATUS_LABEL[status] ?? status;
+  const key = `format.deploymentStatus.${status}`;
+  return hasMessage(key) ? tr(key) : status;
 }

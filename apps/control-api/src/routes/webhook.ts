@@ -18,7 +18,7 @@
  */
 
 import type { Database } from "bun:sqlite";
-import { API_PREFIX, AppError, ulid } from "@zixploy/shared";
+import { API_PREFIX, AppError, localeFromHeaders, localize, ulid } from "@zixploy/shared";
 import { Elysia } from "elysia";
 import { enqueuePushDeploy } from "../deploys/queue";
 import type { GitHubAppRegistry } from "../github/registry";
@@ -50,17 +50,26 @@ export function webhookRoutes(db: Database, registry: GitHubAppRegistry) {
   return new Elysia({ prefix: `${API_PREFIX}/github` }).post(
     "/webhooks/:appId",
     async ({ params, request, set }) => {
+      // ข้อความ reason ตามภาษาของ request (GitHub ไม่ส่ง header ภาษา = ไทยเหมือนเดิม)
+      const locale = localeFromHeaders(request.headers);
+
       // --- 1. อ่าน raw body ก่อน parse ---
       const contentLength = Number(request.headers.get("content-length") ?? 0);
       if (contentLength > MAX_WEBHOOK_BYTES) {
         set.status = 413;
-        return { ok: false, reason: "payload ใหญ่เกิน" };
+        return {
+          ok: false,
+          reason: localize({ th: "payload ใหญ่เกิน", en: "Payload too large" }, locale),
+        };
       }
 
       const rawBody = await request.text();
       if (rawBody.length > MAX_WEBHOOK_BYTES) {
         set.status = 413;
-        return { ok: false, reason: "payload ใหญ่เกิน" };
+        return {
+          ok: false,
+          reason: localize({ th: "payload ใหญ่เกิน", en: "Payload too large" }, locale),
+        };
       }
 
       // --- 2. ตรวจ signature ด้วย secret เฉพาะของ app นี้ ---
@@ -78,13 +87,25 @@ export function webhookRoutes(db: Database, registry: GitHubAppRegistry) {
           reason: err instanceof Error ? err.message : String(err),
         });
         set.status = 503;
-        return { ok: false, reason: "webhook secret ไม่พร้อมใช้งาน" };
+        return {
+          ok: false,
+          reason: localize(
+            { th: "webhook secret ไม่พร้อมใช้งาน", en: "Webhook secret is unavailable" },
+            locale,
+          ),
+        };
       }
 
       if (!webhookSecret) {
         // ไม่พบ app หรือ master key ไม่ได้ configure — reject ป้องกัน open webhook
         set.status = 404;
-        return { ok: false, reason: "ไม่พบ GitHub App สำหรับ webhook นี้" };
+        return {
+          ok: false,
+          reason: localize(
+            { th: "ไม่พบ GitHub App สำหรับ webhook นี้", en: "No GitHub App found for this webhook" },
+            locale,
+          ),
+        };
       }
 
       const valid = await verifyWebhookSignature(rawBody, signature, webhookSecret);
@@ -94,12 +115,24 @@ export function webhookRoutes(db: Database, registry: GitHubAppRegistry) {
           eventName: eventName ?? "unknown",
           deliveryId: deliveryId ?? "unknown",
         });
-        throw new AppError("WEBHOOK_SIGNATURE_INVALID", "Webhook signature ไม่ถูกต้อง");
+        throw new AppError("WEBHOOK_SIGNATURE_INVALID", {
+          th: "Webhook signature ไม่ถูกต้อง",
+          en: "Invalid webhook signature",
+        });
       }
 
       if (!deliveryId || !eventName) {
         set.status = 400;
-        return { ok: false, reason: "ขาด X-GitHub-Delivery หรือ X-GitHub-Event header" };
+        return {
+          ok: false,
+          reason: localize(
+            {
+              th: "ขาด X-GitHub-Delivery หรือ X-GitHub-Event header",
+              en: "Missing X-GitHub-Delivery or X-GitHub-Event header",
+            },
+            locale,
+          ),
+        };
       }
 
       // --- 3. Parse JSON และ extract action (best effort ก่อน INSERT) ---

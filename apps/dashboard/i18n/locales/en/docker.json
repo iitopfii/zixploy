@@ -1,0 +1,48 @@
+{
+  "docker": {
+    "subtitle": "All containers and images on the server (read-only)",
+    "updated": "Updated {time}",
+    "reload": "Reload",
+    "loadFailed": "Could not load the data. Try reloading.",
+    "tabsLabel": "Data type",
+    "filterPlaceholder": "Search name / image…",
+    "runningSummary": "{running} of {total} containers running",
+    "sourceOther": "Other",
+    "noContainers": "No containers match the search",
+    "noImages": "No images match the search",
+    "snapshotNote": "This list is a snapshot the worker takes every ~30 seconds. Unused images can be removed under Monitoring → Disk cleanup.",
+    "error": {
+      "load": "Could not load the Docker inventory",
+      "importStart": "Could not start the import",
+      "status": "Could not read the status",
+      "inspect": "Could not read the container config",
+      "workerTimeout": "Timed out waiting for the worker. Check that deploy-worker is running.",
+      "confirm": "Could not confirm",
+      "import": "Import failed",
+      "timeout": "Timed out. Check the status again later."
+    },
+    "empty": {
+      "title": "No data yet",
+      "hint": "Waiting for the worker's first scan (~30 seconds). If this takes long, check that deploy-worker is running."
+    },
+    "col": {
+      "name": "Name",
+      "state": "Status",
+      "source": "Source",
+      "size": "Size",
+      "created": "Created"
+    },
+    "import": {
+      "action": "Import",
+      "reading": "Reading…",
+      "title": "Import {name}",
+      "intro": "Creates a project from this container {emphasis}. The original keeps running, and nothing is deployed until you start it yourself.",
+      "introEmphasis": "without touching the original container",
+      "projectName": "Project name",
+      "projectNamePlaceholder": "Name to use in the system",
+      "envNote": "Values are read from the container and stored encrypted on confirm. They never pass through the web page.",
+      "volumeNote": "Volumes used by the original container are not attached automatically. Add them in the project's Volumes tab after importing.",
+      "create": "Create project"
+    }
+  }
+}

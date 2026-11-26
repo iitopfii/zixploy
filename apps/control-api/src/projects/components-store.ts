@@ -14,6 +14,7 @@ import {
   type ComponentRole,
   type ComponentSourceKind,
   type DepCondition,
+  errorText,
   HEALTH_CHECK_LIMITS,
   isComponentName,
   isGitBranchName,
@@ -273,7 +274,11 @@ export function requireComponent(
   componentId: string,
 ): ComponentRow {
   const row = getComponentRow(db, projectId, componentId);
-  if (!row) throw new AppError("COMPONENT_NOT_FOUND", "ไม่พบ component นี้");
+  if (!row)
+    throw new AppError("COMPONENT_NOT_FOUND", {
+      th: "ไม่พบ component นี้",
+      en: "Component not found",
+    });
   return row;
 }
 
@@ -286,21 +291,33 @@ const RESTART_POLICIES = new Set(["no", "on-failure", "always", "unless-stopped"
 function validatePort(value: number | null | undefined, field: string): void {
   if (value == null) return;
   if (!Number.isInteger(value) || value <= 0 || value > 65535) {
-    throw new AppError("COMPONENT_INVALID", `${field} ต้องอยู่ระหว่าง 1-65535`, { field });
+    throw new AppError(
+      "COMPONENT_INVALID",
+      { th: `${field} ต้องอยู่ระหว่าง 1-65535`, en: `${field} must be between 1 and 65535` },
+      { field },
+    );
   }
 }
 
 /** รูปแบบ owner/repo + ชื่อ branch — route เรียกก่อนถาม GitHub เพื่อให้ input ผิดรูปได้ 422 ทันที */
 export function assertGitSourceFormat(source: ComponentGitSource): void {
   if (!isRepoFullName(source.repoFullName)) {
-    throw new AppError("COMPONENT_INVALID", "repository ต้องอยู่ในรูป owner/repo", {
-      field: "gitSource.repoFullName",
-    });
+    throw new AppError(
+      "COMPONENT_INVALID",
+      { th: "repository ต้องอยู่ในรูป owner/repo", en: "Repository must be in the form owner/repo" },
+      {
+        field: "gitSource.repoFullName",
+      },
+    );
   }
   if (!isGitBranchName(source.branch)) {
-    throw new AppError("COMPONENT_INVALID", "ชื่อ branch ไม่ถูกต้อง", {
-      field: "gitSource.branch",
-    });
+    throw new AppError(
+      "COMPONENT_INVALID",
+      { th: "ชื่อ branch ไม่ถูกต้อง", en: "Invalid branch name" },
+      {
+        field: "gitSource.branch",
+      },
+    );
   }
 }
 
@@ -312,36 +329,52 @@ function validateInput(db: Database, input: ComponentInput): void {
   if (!isComponentName(input.name)) {
     throw new AppError(
       "COMPONENT_INVALID",
-      "ชื่อ component ต้องเป็น DNS label: ขึ้นต้นด้วยตัวอักษรพิมพ์เล็ก, ใช้ a-z 0-9 - ยาวไม่เกิน 31 ตัว",
+      {
+        th: "ชื่อ component ต้องเป็น DNS label: ขึ้นต้นด้วยตัวอักษรพิมพ์เล็ก, ใช้ a-z 0-9 - ยาวไม่เกิน 31 ตัว",
+        en: "Component name must be a DNS label: start with a lowercase letter, use a-z 0-9 -, at most 31 characters",
+      },
       { field: "name" },
     );
   }
 
   if (input.sourceKind === "image") {
     if (!input.imageRef) {
-      throw new AppError("COMPONENT_INVALID", "source แบบ image ต้องระบุ imageRef", {
-        field: "imageRef",
-      });
+      throw new AppError(
+        "COMPONENT_INVALID",
+        { th: "source แบบ image ต้องระบุ imageRef", en: "An image source requires imageRef" },
+        {
+          field: "imageRef",
+        },
+      );
     }
     const check = validateImageRef(input.imageRef);
     if (!check.ok) {
-      throw new AppError("COMPONENT_INVALID", check.reason ?? "imageRef ไม่ถูกต้อง", {
-        field: "imageRef",
-      });
+      throw new AppError("COMPONENT_INVALID", check.reasonText, { field: "imageRef" });
     }
   } else if (input.sourceKind === "managed_ref") {
     if (!input.managedServiceId) {
-      throw new AppError("COMPONENT_INVALID", "source แบบ managed_ref ต้องระบุ managedServiceId", {
-        field: "managedServiceId",
-      });
+      throw new AppError(
+        "COMPONENT_INVALID",
+        {
+          th: "source แบบ managed_ref ต้องระบุ managedServiceId",
+          en: "A managed_ref source requires managedServiceId",
+        },
+        {
+          field: "managedServiceId",
+        },
+      );
     }
     const svc = db
       .query<{ id: string }, [string]>("SELECT id FROM services WHERE id = ?")
       .get(input.managedServiceId);
     if (!svc) {
-      throw new AppError("COMPONENT_INVALID", "ไม่พบ managed service ที่อ้างถึง", {
-        field: "managedServiceId",
-      });
+      throw new AppError(
+        "COMPONENT_INVALID",
+        { th: "ไม่พบ managed service ที่อ้างถึง", en: "Referenced managed service not found" },
+        {
+          field: "managedServiceId",
+        },
+      );
     }
   }
   // source_kind='build' ไม่มี field บังคับ (dockerfile_path/build_context มี default)
@@ -351,7 +384,7 @@ function validateInput(db: Database, input: ComponentInput): void {
     } catch (err) {
       throw new AppError(
         "COMPONENT_INVALID",
-        err instanceof Error ? err.message : "command ไม่ถูกต้อง",
+        errorText(err, { th: "command ไม่ถูกต้อง", en: "Invalid command" }),
         {
           field: "command",
         },
@@ -365,24 +398,42 @@ function validateInput(db: Database, input: ComponentInput): void {
   ] as const) {
     if (value === undefined) continue;
     if (!Number.isInteger(value) || value < lim.min || value > lim.max) {
-      throw new AppError("COMPONENT_INVALID", `${field} ต้องเป็นจำนวนเต็ม ${lim.min}–${lim.max}`, {
-        field,
-      });
+      throw new AppError(
+        "COMPONENT_INVALID",
+        {
+          th: `${field} ต้องเป็นจำนวนเต็ม ${lim.min}–${lim.max}`,
+          en: `${field} must be an integer from ${lim.min} to ${lim.max}`,
+        },
+        {
+          field,
+        },
+      );
     }
   }
   if (input.gitSource) {
     if (input.sourceKind !== "build") {
-      throw new AppError("COMPONENT_INVALID", "ตั้ง repo แยกได้เฉพาะ component แบบ build", {
-        field: "gitSource",
-      });
+      throw new AppError(
+        "COMPONENT_INVALID",
+        {
+          th: "ตั้ง repo แยกได้เฉพาะ component แบบ build",
+          en: "A separate repo can only be set on a build component",
+        },
+        {
+          field: "gitSource",
+        },
+      );
     }
     assertGitSourceFormat(input.gitSource);
   }
 
   if (input.isWeb && input.webPort == null) {
-    throw new AppError("COMPONENT_INVALID", "component ที่เป็น web ต้องระบุ webPort", {
-      field: "webPort",
-    });
+    throw new AppError(
+      "COMPONENT_INVALID",
+      { th: "component ที่เป็น web ต้องระบุ webPort", en: "A web component requires webPort" },
+      {
+        field: "webPort",
+      },
+    );
   }
   validatePort(input.webPort, "webPort");
   validatePort(input.internalPort, "internalPort");
@@ -391,48 +442,85 @@ function validateInput(db: Database, input: ComponentInput): void {
   // ที่จะทำให้ประกอบ docker args เพี้ยน (managed_ref ใช้ healthcheck ของ service เองจึงไม่ต้องตั้ง)
   if (input.healthCmd != null && input.healthCmd !== "") {
     if (input.healthCmd.length > 1024) {
-      throw new AppError("COMPONENT_INVALID", "healthCmd ยาวเกิน 1024 ตัวอักษร", {
-        field: "healthCmd",
-      });
+      throw new AppError(
+        "COMPONENT_INVALID",
+        { th: "healthCmd ยาวเกิน 1024 ตัวอักษร", en: "healthCmd is longer than 1024 characters" },
+        {
+          field: "healthCmd",
+        },
+      );
     }
     // biome-ignore lint/suspicious/noControlCharactersInRegex: กัน control char ใน argv โดยเจตนา
     if (/[\x00-\x1f\x7f]/.test(input.healthCmd)) {
-      throw new AppError("COMPONENT_INVALID", "healthCmd ต้องไม่มี control character หรือขึ้นบรรทัดใหม่", {
-        field: "healthCmd",
-      });
+      throw new AppError(
+        "COMPONENT_INVALID",
+        {
+          th: "healthCmd ต้องไม่มี control character หรือขึ้นบรรทัดใหม่",
+          en: "healthCmd must not contain control characters or line breaks",
+        },
+        {
+          field: "healthCmd",
+        },
+      );
     }
   }
 
   if (input.cpuLimit != null && input.cpuLimit <= 0) {
-    throw new AppError("COMPONENT_INVALID", "cpuLimit ต้องมากกว่า 0", { field: "cpuLimit" });
+    throw new AppError(
+      "COMPONENT_INVALID",
+      { th: "cpuLimit ต้องมากกว่า 0", en: "cpuLimit must be greater than 0" },
+      { field: "cpuLimit" },
+    );
   }
   if (input.memoryLimitMb != null && input.memoryLimitMb <= 0) {
-    throw new AppError("COMPONENT_INVALID", "memoryLimitMb ต้องมากกว่า 0", {
-      field: "memoryLimitMb",
-    });
+    throw new AppError(
+      "COMPONENT_INVALID",
+      { th: "memoryLimitMb ต้องมากกว่า 0", en: "memoryLimitMb must be greater than 0" },
+      {
+        field: "memoryLimitMb",
+      },
+    );
   }
   // Docker: --memory-swap ใช้ได้เมื่อมี --memory และต้องไม่น้อยกว่า (ค่าเป็น RAM+swap รวมกัน)
   if (input.memorySwapMb != null) {
     if (input.memoryLimitMb == null) {
-      throw new AppError("COMPONENT_INVALID", "ตั้ง memorySwapMb ได้เมื่อมี memoryLimitMb แล้วเท่านั้น", {
-        field: "memorySwapMb",
-      });
+      throw new AppError(
+        "COMPONENT_INVALID",
+        {
+          th: "ตั้ง memorySwapMb ได้เมื่อมี memoryLimitMb แล้วเท่านั้น",
+          en: "memorySwapMb can only be set when memoryLimitMb is set",
+        },
+        {
+          field: "memorySwapMb",
+        },
+      );
     }
     if (input.memorySwapMb < input.memoryLimitMb) {
       throw new AppError(
         "COMPONENT_INVALID",
-        "memorySwapMb คือ RAM + swap รวมกัน — ต้องไม่น้อยกว่า memoryLimitMb (เท่ากัน = ไม่ให้ swap)",
+        {
+          th: "memorySwapMb คือ RAM + swap รวมกัน — ต้องไม่น้อยกว่า memoryLimitMb (เท่ากัน = ไม่ให้ swap)",
+          en: "memorySwapMb is RAM plus swap combined. It must not be less than memoryLimitMb (equal means no swap)",
+        },
         { field: "memorySwapMb" },
       );
     }
   }
   if (input.pidsLimit != null && (input.pidsLimit < 16 || input.pidsLimit > 32768)) {
-    throw new AppError("COMPONENT_INVALID", "pidsLimit ต้องอยู่ระหว่าง 16–32768", {
-      field: "pidsLimit",
-    });
+    throw new AppError(
+      "COMPONENT_INVALID",
+      { th: "pidsLimit ต้องอยู่ระหว่าง 16–32768", en: "pidsLimit must be between 16 and 32768" },
+      {
+        field: "pidsLimit",
+      },
+    );
   }
   if (input.restartPolicy != null && !RESTART_POLICIES.has(input.restartPolicy)) {
-    throw new AppError("COMPONENT_INVALID", "restartPolicy ไม่ถูกต้อง", { field: "restartPolicy" });
+    throw new AppError(
+      "COMPONENT_INVALID",
+      { th: "restartPolicy ไม่ถูกต้อง", en: "Invalid restartPolicy" },
+      { field: "restartPolicy" },
+    );
   }
 }
 
@@ -447,13 +535,16 @@ function resolveInstallationRowId(db: Database, installationId: number): string 
     )
     .get(installationId);
   if (!row) {
-    throw new AppError("INSTALLATION_NOT_FOUND", "ไม่พบ GitHub installation นี้ในระบบ");
+    throw new AppError("INSTALLATION_NOT_FOUND", {
+      th: "ไม่พบ GitHub installation นี้ในระบบ",
+      en: "GitHub installation not found",
+    });
   }
   if (row.status !== "active") {
-    throw new AppError(
-      "GITHUB_UNAVAILABLE",
-      "GitHub installation ไม่ได้ active — reinstall หรือ unsuspend ก่อน",
-    );
+    throw new AppError("GITHUB_UNAVAILABLE", {
+      th: "GitHub installation ไม่ได้ active — reinstall หรือ unsuspend ก่อน",
+      en: "GitHub installation is not active. Reinstall or unsuspend it first",
+    });
   }
   return row.id;
 }
@@ -516,16 +607,25 @@ export function setDependencies(
   for (const d of deps) {
     const targetId = names.get(d.name);
     if (!targetId) {
-      throw new AppError("COMPONENT_DEP_INVALID", `depends_on อ้าง component ที่ไม่มี: "${d.name}"`);
+      throw new AppError("COMPONENT_DEP_INVALID", {
+        th: `depends_on อ้าง component ที่ไม่มี: "${d.name}"`,
+        en: `depends_on refers to a component that does not exist: "${d.name}"`,
+      });
     }
     if (targetId === componentId) {
-      throw new AppError("COMPONENT_DEP_INVALID", "component ขึ้นกับตัวเองไม่ได้");
+      throw new AppError("COMPONENT_DEP_INVALID", {
+        th: "component ขึ้นกับตัวเองไม่ได้",
+        en: "A component cannot depend on itself",
+      });
     }
     targetIds.push(targetId);
     conditions.push(d.condition ?? "started");
   }
   if (wouldCycle(db, projectId, componentId, targetIds)) {
-    throw new AppError("COMPONENT_DEP_INVALID", "depends_on ทำให้เกิด dependency cycle");
+    throw new AppError("COMPONENT_DEP_INVALID", {
+      th: "depends_on ทำให้เกิด dependency cycle",
+      en: "depends_on would create a dependency cycle",
+    });
   }
 
   db.query("DELETE FROM component_deps WHERE project_id = ? AND component_id = ?").run(
@@ -609,10 +709,10 @@ export function createComponent(
     );
   } catch (err) {
     if (err instanceof Error && err.message.includes("UNIQUE")) {
-      throw new AppError(
-        "COMPONENT_DUPLICATE_NAME",
-        `ชื่อ component "${input.name}" ถูกใช้แล้วในโปรเจกต์นี้`,
-      );
+      throw new AppError("COMPONENT_DUPLICATE_NAME", {
+        th: `ชื่อ component "${input.name}" ถูกใช้แล้วในโปรเจกต์นี้`,
+        en: `Component name "${input.name}" is already used in this project`,
+      });
     }
     throw err;
   }
@@ -738,7 +838,10 @@ export function updateComponent(
       db.query(`UPDATE project_components SET ${fields.join(", ")} WHERE id = ?`).run(...values);
     } catch (err) {
       if (err instanceof Error && err.message.includes("UNIQUE")) {
-        throw new AppError("COMPONENT_DUPLICATE_NAME", "ชื่อ component นี้ถูกใช้แล้วในโปรเจกต์นี้");
+        throw new AppError("COMPONENT_DUPLICATE_NAME", {
+          th: "ชื่อ component นี้ถูกใช้แล้วในโปรเจกต์นี้",
+          en: "This component name is already used in this project",
+        });
       }
       throw err;
     }
@@ -796,13 +899,16 @@ export function projectMode(db: Database, projectId: string): string {
 export function promoteToCompose(db: Database, projectId: string): void {
   const components = listComponents(db, projectId);
   if (components.length === 0) {
-    throw new AppError("COMPOSE_PROMOTE_INVALID", "ต้องมี component อย่างน้อยหนึ่งตัวก่อนเปิดโหมด compose");
+    throw new AppError("COMPOSE_PROMOTE_INVALID", {
+      th: "ต้องมี component อย่างน้อยหนึ่งตัวก่อนเปิดโหมด compose",
+      en: "At least one component is required before enabling compose mode",
+    });
   }
   if (!components.some((c) => c.isWeb)) {
-    throw new AppError(
-      "COMPOSE_PROMOTE_INVALID",
-      "ต้องมี component ที่เป็น web อย่างน้อยหนึ่งตัว (ตัวที่รับ traffic จากภายนอก)",
-    );
+    throw new AppError("COMPOSE_PROMOTE_INVALID", {
+      th: "ต้องมี component ที่เป็น web อย่างน้อยหนึ่งตัว (ตัวที่รับ traffic จากภายนอก)",
+      en: "At least one web component is required (the one that receives external traffic)",
+    });
   }
   db.query("UPDATE projects SET mode = 'compose', updated_at = ? WHERE id = ?").run(
     Date.now(),

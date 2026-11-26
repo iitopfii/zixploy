@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { API_PREFIX, AppError } from "@zixploy/shared";
+import { API_PREFIX, AppError, type UserRole } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
 import { getClientIp, recordAuditEvent } from "../audit/log";
 import { hashPassword, PASSWORD_MIN_LENGTH, verifyPassword } from "../auth/password";
@@ -20,6 +20,8 @@ interface UserRow {
   id: string;
   username: string;
   password_hash: string;
+  role: UserRole;
+  disabled_at: number | null;
 }
 
 const loginBody = t.Object({
@@ -30,6 +32,8 @@ const loginBody = t.Object({
 const sessionResponse = t.Object({
   authenticated: t.Boolean(),
   username: t.Optional(t.String()),
+  userId: t.Optional(t.String()),
+  role: t.Optional(t.Union([t.Literal("admin"), t.Literal("developer"), t.Literal("viewer")])),
   expiresAt: t.Optional(t.Number()),
 });
 
@@ -56,18 +60,22 @@ export function authRoutes(db: Database) {
           const key = clientKey(request, server);
 
           if (isLoginRateLimited(db, key)) {
-            throw new AppError("RATE_LIMITED", "พยายาม login ผิดหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่");
+            throw new AppError("RATE_LIMITED", {
+              th: "พยายาม login ผิดหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่",
+              en: "Too many failed sign-in attempts. Wait a moment and try again",
+            });
           }
 
           const user = db
             .query<UserRow, [string]>(
-              "SELECT id, username, password_hash FROM users WHERE username = ?",
+              "SELECT id, username, password_hash, role, disabled_at FROM users WHERE username = ?",
             )
             .get(body.username);
 
-          // ตอบข้อความเดียวกันทั้งกรณี user ไม่มีและ password ผิด เพื่อไม่ให้ enumerate username ได้
+          // ตอบข้อความเดียวกันทั้งกรณี user ไม่มี, password ผิด และบัญชีถูกปิด
+          // เพื่อไม่ให้ enumerate username หรือรู้สถานะบัญชีได้
           const ok = user ? await verifyPassword(body.password, user.password_hash) : false;
-          if (!user || !ok) {
+          if (!user || !ok || user.disabled_at !== null) {
             recordFailedLogin(db, body.username, key);
             recordAuditEvent(db, {
               actorUsername: body.username,
@@ -75,7 +83,10 @@ export function authRoutes(db: Database) {
               resourceType: "session",
               ip: getClientIp(request),
             });
-            throw new AppError("INVALID_CREDENTIALS", "username หรือ password ไม่ถูกต้อง");
+            throw new AppError("INVALID_CREDENTIALS", {
+              th: "username หรือ password ไม่ถูกต้อง",
+              en: "Incorrect username or password",
+            });
           }
 
           clearFailedLogins(db, key);
@@ -107,7 +118,13 @@ export function authRoutes(db: Database) {
           });
 
           set.status = 200;
-          return { authenticated: true, username: user.username, expiresAt: session.expiresAt };
+          return {
+            authenticated: true,
+            username: user.username,
+            userId: user.id,
+            role: user.role,
+            expiresAt: session.expiresAt,
+          };
         },
         { body: loginBody, response: sessionResponse },
       )
@@ -153,13 +170,19 @@ export function authRoutes(db: Database) {
           const key = clientKey(request, server);
 
           if (isLoginRateLimited(db, key)) {
-            throw new AppError("RATE_LIMITED", "ลองผิดหลายครั้งเกินไป — รอสักครู่แล้วลองใหม่");
+            throw new AppError("RATE_LIMITED", {
+              th: "ลองผิดหลายครั้งเกินไป — รอสักครู่แล้วลองใหม่",
+              en: "Too many failed attempts. Wait a moment and try again",
+            });
           }
 
           const user = db
-            .query<UserRow, [string]>("SELECT id, username, password_hash FROM users WHERE id = ?")
+            .query<UserRow, [string]>(
+              "SELECT id, username, password_hash, role, disabled_at FROM users WHERE id = ?",
+            )
             .get(session.userId);
-          if (!user) throw new AppError("UNAUTHENTICATED", "ไม่พบบัญชีผู้ใช้");
+          if (!user)
+            throw new AppError("UNAUTHENTICATED", { th: "ไม่พบบัญชีผู้ใช้", en: "Account not found" });
 
           if (!(await verifyPassword(body.currentPassword, user.password_hash))) {
             // ลำดับพารามิเตอร์คือ (db, username, clientKey) — สลับแล้ว rate limit จะไม่ทำงานเลย
@@ -172,13 +195,23 @@ export function authRoutes(db: Database) {
               resourceId: user.id,
               ip: getClientIp(request),
             });
-            throw new AppError("INVALID_CREDENTIALS", "รหัสผ่านเดิมไม่ถูกต้อง");
+            throw new AppError("INVALID_CREDENTIALS", {
+              th: "รหัสผ่านเดิมไม่ถูกต้อง",
+              en: "The current password is incorrect",
+            });
           }
 
           if (body.newPassword === body.currentPassword) {
-            throw new AppError("VALIDATION_ERROR", "รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสผ่านเดิม", {
-              field: "newPassword",
-            });
+            throw new AppError(
+              "VALIDATION_ERROR",
+              {
+                th: "รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสผ่านเดิม",
+                en: "The new password must differ from the current one",
+              },
+              {
+                field: "newPassword",
+              },
+            );
           }
 
           const now = Date.now();
@@ -219,7 +252,13 @@ export function authRoutes(db: Database) {
           });
 
           set.status = 200;
-          return { authenticated: true, username: user.username, expiresAt: fresh.expiresAt };
+          return {
+            authenticated: true,
+            username: user.username,
+            userId: user.id,
+            role: user.role,
+            expiresAt: fresh.expiresAt,
+          };
         },
         {
           beforeHandle: requireAuthenticated,
@@ -229,15 +268,16 @@ export function authRoutes(db: Database) {
       )
       .get(
         "/session",
-        ({ session }) => {
-          if (!session) return { authenticated: false };
-          const user = db
-            .query<{ username: string }, [string]>("SELECT username FROM users WHERE id = ?")
-            .get(session.userId);
-          // ไม่ใส่ key เลยเมื่อไม่มีค่า (exactOptionalPropertyTypes) แทนการส่ง undefined
-          return user
-            ? { authenticated: true, username: user.username, expiresAt: session.expiresAt }
-            : { authenticated: true, expiresAt: session.expiresAt };
+        ({ session, currentUser }) => {
+          // session ของบัญชีที่ถูกปิด/ลบ ถูก authPlugin ตัดเป็น null แล้ว
+          if (!session || !currentUser) return { authenticated: false };
+          return {
+            authenticated: true,
+            username: currentUser.username,
+            userId: currentUser.id,
+            role: currentUser.role,
+            expiresAt: session.expiresAt,
+          };
         },
         { response: sessionResponse },
       )

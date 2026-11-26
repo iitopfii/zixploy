@@ -2,6 +2,8 @@
 const api = useApi();
 const route = useRoute();
 const router = useRouter();
+const { t } = useI18n();
+const { isAdmin, canWrite } = usePermissions();
 const id = computed(() => String(route.params.id));
 
 const {
@@ -26,17 +28,18 @@ const {
  */
 const initialLoading = computed(() => pending.value && !project.value);
 
+/** label ของแต่ละแท็บอยู่ที่ projects.tab.<key> — แปลใน template เพื่อให้เปลี่ยนตามภาษา */
 const tabs = [
-  { key: "overview", label: "ภาพรวม", icon: "grid" as const },
-  { key: "source", label: "Source", icon: "github" as const },
-  { key: "settings", label: "ตั้งค่า", icon: "settings" as const },
-  { key: "deploy", label: "Deploy", icon: "rotate" as const },
-  { key: "metrics", label: "ทรัพยากร", icon: "activity" as const },
-  { key: "environment", label: "Environment", icon: "key" as const },
-  { key: "domains", label: "Domains", icon: "globe" as const },
-  { key: "components", label: "Components", icon: "box" as const },
-  { key: "logs", label: "Logs", icon: "terminal" as const },
-  { key: "volumes", label: "Volumes", icon: "database" as const },
+  { key: "overview", icon: "grid" as const },
+  { key: "source", icon: "github" as const },
+  { key: "settings", icon: "settings" as const },
+  { key: "deploy", icon: "rotate" as const },
+  { key: "metrics", icon: "activity" as const },
+  { key: "environment", icon: "key" as const },
+  { key: "domains", icon: "globe" as const },
+  { key: "components", icon: "box" as const },
+  { key: "logs", icon: "terminal" as const },
+  { key: "volumes", icon: "database" as const },
 ] as const;
 
 type TabKey = (typeof tabs)[number]["key"];
@@ -48,7 +51,7 @@ type TabKey = (typeof tabs)[number]["key"];
 const activeTab = computed<TabKey>({
   get() {
     const q = route.query.tab;
-    const found = tabs.find((t) => t.key === q);
+    const found = tabs.find((tab) => tab.key === q);
     return found?.key ?? "overview";
   },
   set(value) {
@@ -167,8 +170,7 @@ async function connectSource(picked: {
       branch: picked.branch,
     });
     if (error) {
-      const body = error.value as { error?: { message?: string } } | null;
-      sourceError.value = body?.error?.message ?? "บันทึกไม่สำเร็จ";
+      sourceError.value = apiErrorMessage(error, "common.saveFailed");
       return;
     }
     sourceSuccess.value = true;
@@ -176,7 +178,7 @@ async function connectSource(picked: {
     chosenSourceMode.value = null;
     await Promise.all([refresh(), refreshDockerfileSource()]);
   } catch {
-    sourceError.value = "ติดต่อ API ไม่ได้";
+    sourceError.value = t("common.apiUnreachable");
   } finally {
     sourceSaving.value = false;
   }
@@ -189,15 +191,14 @@ async function disconnectSource() {
   try {
     const { error } = await api.api.v1.projects({ id: id.value }).source.delete();
     if (error) {
-      const body = error.value as { error?: { message?: string } } | null;
-      sourceError.value = body?.error?.message ?? "ยกเลิกการเชื่อมต่อไม่สำเร็จ";
+      sourceError.value = apiErrorMessage(error, "projects.source.disconnectFailed");
       return;
     }
     showPicker.value = false;
     chosenSourceMode.value = null;
     await Promise.all([refresh(), refreshDockerfileSource()]);
   } catch {
-    sourceError.value = "ติดต่อ API ไม่ได้";
+    sourceError.value = t("common.apiUnreachable");
   } finally {
     sourceSaving.value = false;
   }
@@ -217,11 +218,15 @@ const setupSteps = computed(() => {
   if (!p) return [];
   return [
     {
-      label: "ตั้งค่า source (GitHub หรือ Dockerfile)",
+      label: t("projects.overview.stepSource"),
       done: isConnected.value,
       tab: "source" as const,
     },
-    { label: "ระบุ internal port", done: p.internalPort != null, tab: "settings" as const },
+    {
+      label: t("projects.overview.stepPort"),
+      done: p.internalPort != null,
+      tab: "settings" as const,
+    },
   ];
 });
 
@@ -243,11 +248,11 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
     <div v-else-if="error || !project" class="card">
       <div class="empty">
         <span class="empty-icon"><AppIcon name="alert" :size="20" /></span>
-        <span class="empty-title">ไม่พบ project นี้</span>
-        <p class="small">project อาจถูกลบไปแล้ว หรือลิงก์ไม่ถูกต้อง</p>
+        <span class="empty-title">{{ $t("projects.detail.notFoundTitle") }}</span>
+        <p class="small">{{ $t("projects.detail.notFoundHint") }}</p>
         <NuxtLink to="/" class="btn secondary">
           <AppIcon name="arrowLeft" :size="15" />
-          กลับไปหน้า Projects
+          {{ $t("projects.detail.backToProjects") }}
         </NuxtLink>
       </div>
     </div>
@@ -257,7 +262,7 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
       <header class="head">
         <NuxtLink to="/" class="crumb">
           <AppIcon name="arrowLeft" :size="14" />
-          Projects
+          {{ $t("projects.list.title") }}
         </NuxtLink>
 
         <div class="head-main">
@@ -267,7 +272,9 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
               class="status"
               :class="`status-${project.degraded ? 'degraded' : project.status}`"
             >
-              {{ project.degraded ? "ผิดปกติ" : projectStatusLabel(project.status) }}
+              {{
+                project.degraded ? $t("projects.status.degraded") : projectStatusLabel(project.status)
+              }}
             </span>
           </div>
 
@@ -285,33 +292,37 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
             </a>
             <span v-else-if="project.sourceType === 'dockerfile' && isConnected" class="meta">
               <AppIcon name="box" :size="13" />
-              Dockerfile (วางเอง)
+              {{ $t("projects.dockerfilePasted") }}
             </span>
             <span v-if="project.branch" class="meta">
               <AppIcon name="branch" :size="13" />
               {{ project.branch }}
             </span>
-            <span class="meta mono tiny" :title="`Project ID: ${project.id}`">
+            <span class="meta mono tiny" :title="$t('projects.detail.projectIdTitle', { id: project.id })">
               {{ project.id }}
             </span>
           </div>
         </div>
       </header>
 
+      <!-- viewer ดูได้อย่างเดียว — บอกครั้งเดียวที่หัวหน้า แทนการอธิบายทุกปุ่มที่ถูกซ่อน -->
+      <p v-if="!canWrite" class="alert alert-info banner">
+        <AppIcon name="info" :size="16" />
+        <span>{{ $t("common.readOnly") }}</span>
+      </p>
+
       <!-- Banner: archived / degraded -->
       <div v-if="project.archivedAt" class="alert alert-warn banner">
         <AppIcon name="info" :size="16" />
-        <span>project นี้ถูก archive แล้ว — แก้ไขและ deploy ไม่ได้ แต่ประวัติทั้งหมดยังอยู่</span>
+        <span>{{ $t("projects.detail.archivedBanner") }}</span>
       </div>
       <div v-else-if="project.degraded" class="alert alert-bad banner">
         <AppIcon name="alert" :size="16" />
-        <span>
-          container ที่ควรทำงานอยู่หายไปจาก Docker — สั่ง deploy ใหม่เพื่อกู้คืนบริการ
-        </span>
+        <span>{{ $t("projects.detail.degradedBanner") }}</span>
       </div>
 
       <!-- ── Tabs ── -->
-      <nav class="tabs" aria-label="ส่วนของ project">
+      <nav class="tabs" :aria-label="$t('projects.detail.tabsLabel')">
         <button
           v-for="tab in tabs"
           :key="tab.key"
@@ -321,7 +332,7 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
           @click="activeTab = tab.key"
         >
           <AppIcon :name="tab.icon" :size="15" />
-          <span>{{ tab.label }}</span>
+          <span>{{ $t(`projects.tab.${tab.key}`) }}</span>
         </button>
       </nav>
 
@@ -331,15 +342,15 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
         <template v-if="activeTab === 'overview'">
           <!-- checklist ก่อนพร้อม deploy — ซ่อนเมื่อครบแล้ว -->
           <div v-if="!setupComplete && !project.archivedAt" class="card setup">
-            <h2 class="section-title">เตรียมพร้อมก่อน deploy</h2>
+            <h2 class="section-title">{{ $t("projects.overview.setupTitle") }}</h2>
             <ul class="steps">
-              <li v-for="step in setupSteps" :key="step.label" :class="{ done: step.done }">
+              <li v-for="step in setupSteps" :key="step.tab" :class="{ done: step.done }">
                 <span class="step-mark">
                   <AppIcon v-if="step.done" name="check" :size="12" />
                 </span>
                 <span class="step-label">{{ step.label }}</span>
                 <button v-if="!step.done" class="ghost small" @click="activeTab = step.tab">
-                  ไปตั้งค่า
+                  {{ $t("projects.overview.goSetup") }}
                   <AppIcon name="chevronRight" :size="13" />
                 </button>
               </li>
@@ -348,13 +359,15 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
 
           <div class="overview-grid">
             <section class="card">
-              <h2 class="section-title">Source</h2>
+              <h2 class="section-title">{{ $t("projects.tab.source") }}</h2>
               <dl class="kv">
                 <template v-if="project.sourceType === 'dockerfile'">
-                  <dt>ประเภท</dt>
+                  <dt>{{ $t("projects.overview.type") }}</dt>
                   <dd>
-                    <span v-if="isConnected" class="badge tone-ok">Dockerfile (วางเอง)</span>
-                    <span v-else class="muted">ยังไม่ได้ตั้งค่า</span>
+                    <span v-if="isConnected" class="badge tone-ok">
+                      {{ $t("projects.dockerfilePasted") }}
+                    </span>
+                    <span v-else class="muted">{{ $t("projects.overview.notConfigured") }}</span>
                   </dd>
                 </template>
                 <template v-else>
@@ -366,7 +379,7 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
                       target="_blank"
                       rel="noopener noreferrer"
                     >{{ project.repoFullName }}</a>
-                    <span v-else class="muted">ยังไม่ได้เชื่อม</span>
+                    <span v-else class="muted">{{ $t("projects.overview.notLinked") }}</span>
                   </dd>
                   <dt>Branch</dt>
                   <dd>
@@ -377,7 +390,7 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
                 <dt>Auto deploy</dt>
                 <dd>
                   <span class="badge" :class="project.autoDeploy ? 'tone-ok' : 'tone-idle'">
-                    {{ project.autoDeploy ? "เปิด" : "ปิด" }}
+                    {{ project.autoDeploy ? $t("common.enabled") : $t("common.disabled") }}
                   </span>
                 </dd>
               </dl>
@@ -393,22 +406,22 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
                 <dt>Internal port</dt>
                 <dd>
                   <code v-if="project.internalPort">{{ project.internalPort }}</code>
-                  <span v-else class="warn-text small">ยังไม่ได้ระบุ</span>
+                  <span v-else class="warn-text small">{{ $t("projects.overview.portMissing") }}</span>
                 </dd>
                 <dt>Health check</dt>
                 <dd>
                   <code v-if="project.healthCheckPath">{{ project.healthCheckPath }}</code>
-                  <span v-else class="muted">ไม่ได้ตั้งค่า</span>
+                  <span v-else class="muted">{{ $t("projects.overview.healthCheckNone") }}</span>
                 </dd>
               </dl>
             </section>
 
             <section class="card">
-              <h2 class="section-title">ข้อมูลทั่วไป</h2>
+              <h2 class="section-title">{{ $t("projects.overview.general") }}</h2>
               <dl class="kv">
-                <dt>สร้างเมื่อ</dt>
+                <dt>{{ $t("projects.overview.createdAt") }}</dt>
                 <dd :title="fullDateTime(project.createdAt)">{{ timeAgo(project.createdAt) }}</dd>
-                <dt>แก้ไขล่าสุด</dt>
+                <dt>{{ $t("projects.overview.updatedAt") }}</dt>
                 <dd :title="fullDateTime(project.updatedAt)">{{ timeAgo(project.updatedAt) }}</dd>
                 <dt>Project ID</dt>
                 <dd><code class="tiny">{{ project.id }}</code></dd>
@@ -416,17 +429,17 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
             </section>
           </div>
 
-          <section v-if="!project.archivedAt" class="card danger-zone">
+          <section v-if="!project.archivedAt && isAdmin" class="card danger-zone">
             <div class="row-between wrap">
               <div>
-                <h2 class="section-title">Archive project</h2>
+                <h2 class="section-title">{{ $t("projects.overview.archiveTitle") }}</h2>
                 <p class="muted small">
-                  ซ่อน project จากรายการ ประวัติ deployment ยังอยู่ครบ ไม่ลบ volume หรือข้อมูลใด ๆ
+                  {{ $t("projects.overview.archiveHint") }}
                 </p>
               </div>
               <button class="danger" @click="confirmArchive = true">
                 <AppIcon name="trash" :size="15" />
-                Archive
+                {{ $t("projects.overview.archiveButton") }}
               </button>
             </div>
           </section>
@@ -435,20 +448,23 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
         <!-- Source -->
         <template v-else-if="activeTab === 'source'">
           <div class="card stack">
-            <h2 class="section-title">Source</h2>
+            <h2 class="section-title">{{ $t("projects.tab.source") }}</h2>
 
             <!-- ยังไม่เชื่อมอะไรเลยและยังไม่ได้เลือกโหมด — ให้เลือกก่อน -->
             <template v-if="!effectiveSourceMode">
-              <p class="muted small">เลือกวิธีที่จะใช้ build project นี้</p>
-              <div class="mode-picker">
+              <p v-if="!canWrite" class="muted small">
+                {{ $t("projects.overview.notConfigured") }}
+              </p>
+              <p v-if="canWrite" class="muted small">{{ $t("projects.source.chooseMode") }}</p>
+              <div v-if="canWrite" class="mode-picker">
                 <button
                   class="mode-card"
                   :disabled="!!project.archivedAt"
                   @click="chosenSourceMode = 'github'"
                 >
                   <AppIcon name="github" :size="22" />
-                  <strong>GitHub Repository</strong>
-                  <span class="muted small">เชื่อม repo แล้ว deploy อัตโนมัติเมื่อมี push</span>
+                  <strong>{{ $t("projects.source.modeGithub") }}</strong>
+                  <span class="muted small">{{ $t("projects.source.modeGithubHint") }}</span>
                 </button>
                 <button
                   class="mode-card"
@@ -456,15 +472,15 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
                   @click="switchToDockerfileMode"
                 >
                   <AppIcon name="box" :size="22" />
-                  <strong>วาง Dockerfile</strong>
-                  <span class="muted small">ไม่ต้องมี repo — วางเนื้อหา Dockerfile แล้ว deploy ได้เลย</span>
+                  <strong>{{ $t("projects.source.modeDockerfile") }}</strong>
+                  <span class="muted small">{{ $t("projects.source.modeDockerfileHint") }}</span>
                 </button>
               </div>
             </template>
 
             <!-- Dockerfile-paste mode -->
             <template v-else-if="effectiveSourceMode === 'dockerfile'">
-              <p v-if="dockerfileSourcePending" class="muted small">กำลังโหลด…</p>
+              <p v-if="dockerfileSourcePending" class="muted small">{{ $t("common.loading") }}</p>
               <template v-else>
                 <DockerfileSource
                   :project-id="id"
@@ -472,14 +488,14 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
                   :archived="!!project.archivedAt"
                   @saved="onDockerfileSourceSaved"
                 />
-                <div v-if="!project.archivedAt" class="actions">
+                <div v-if="!project.archivedAt && canWrite" class="actions">
                   <button
                     v-if="isConnected"
                     class="secondary small"
                     :disabled="sourceSaving"
                     @click="switchToGitHubMode"
                   >
-                    เปลี่ยนเป็น GitHub repository แทน
+                    {{ $t("projects.source.switchToGithub") }}
                   </button>
                   <button
                     v-else
@@ -488,7 +504,7 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
                     @click="chosenSourceMode = null"
                   >
                     <AppIcon name="arrowLeft" :size="13" />
-                    กลับไปเลือกโหมด
+                    {{ $t("projects.source.backToModes") }}
                   </button>
                 </div>
               </template>
@@ -503,15 +519,17 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
                 <AppIcon name="alert" :size="16" />
                 <div class="stack-sm">
                   <strong>
-                    GitHub installation
-                    {{ installationStatus === "deleted" ? "ถูกถอนการติดตั้งแล้ว" : "ถูก suspend" }}
-                    — Auto deploy ถูกปิดอัตโนมัติ
+                    {{
+                      installationStatus === "deleted"
+                        ? $t("projects.source.installDeletedTitle")
+                        : $t("projects.source.installSuspendedTitle")
+                    }}
                   </strong>
                   <span class="muted">
                     {{
                       installationStatus === "deleted"
-                        ? "Reinstall GitHub App แล้วเชื่อมต่อ repository ใหม่"
-                        : "Unsuspend GitHub App ผ่าน GitHub Settings แล้ว refresh"
+                        ? $t("projects.source.installDeletedHint")
+                        : $t("projects.source.installSuspendedHint")
                     }}
                   </span>
                 </div>
@@ -535,31 +553,35 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
                     </dd>
                     <dt>Branch</dt>
                     <dd><code>{{ project.branch }}</code></dd>
-                    <dt v-if="connectedInstallation">Account</dt>
+                    <dt v-if="connectedInstallation">{{ $t("projects.source.account") }}</dt>
                     <dd v-if="connectedInstallation">{{ connectedInstallation.accountLogin }}</dd>
                   </dl>
                 </div>
 
                 <p v-if="sourceSuccess" class="alert alert-ok">
                   <AppIcon name="check" :size="15" />
-                  <span>เชื่อมต่อสำเร็จ</span>
+                  <span>{{ $t("projects.source.connected") }}</span>
                 </p>
                 <p v-if="sourceError" class="alert alert-bad">
                   <AppIcon name="alert" :size="15" />
                   <span>{{ sourceError }}</span>
                 </p>
 
-                <div v-if="!project.archivedAt" class="actions">
+                <div v-if="!project.archivedAt && canWrite" class="actions">
                   <button
                     class="secondary"
                     :disabled="sourceSaving"
                     @click="showPicker = true; sourceSuccess = false"
                   >
-                    เปลี่ยน repository
+                    {{ $t("projects.source.changeRepo") }}
                   </button>
                   <button class="danger" :disabled="sourceSaving" @click="disconnectSource">
                     <span v-if="sourceSaving" class="spinner" />
-                    {{ sourceSaving ? "กำลังยกเลิก…" : "ยกเลิกการเชื่อมต่อ" }}
+                    {{
+                      sourceSaving
+                        ? $t("projects.source.disconnecting")
+                        : $t("projects.source.disconnect")
+                    }}
                   </button>
                 </div>
               </template>
@@ -567,7 +589,7 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
               <!-- Not connected / picker -->
               <template v-else>
                 <template v-if="statusPending">
-                  <p class="muted small">กำลังตรวจ GitHub integration…</p>
+                  <p class="muted small">{{ $t("projects.source.checkingGithub") }}</p>
                 </template>
 
                 <template v-else-if="!gitHubStatus?.configured">
@@ -577,8 +599,8 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
                 <template v-else-if="activeInstallations.length === 0 && !showPicker">
                   <div class="empty">
                     <span class="empty-icon"><AppIcon name="github" :size="20" /></span>
-                    <span class="empty-title">ยังไม่มี GitHub installation</span>
-                    <p class="small">ติดตั้ง GitHub App บนบัญชีของคุณก่อนเลือก repository</p>
+                    <span class="empty-title">{{ $t("projects.source.noInstallationTitle") }}</span>
+                    <p class="small">{{ $t("projects.source.noInstallationHint") }}</p>
                   </div>
                   <GitHubConnect />
                 </template>
@@ -587,22 +609,26 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
                   <template v-if="!showPicker && !isConnected">
                     <div class="empty">
                       <span class="empty-icon"><AppIcon name="github" :size="20" /></span>
-                      <span class="empty-title">ยังไม่ได้เชื่อม repository</span>
-                      <p class="small">เลือก repository และ branch ที่จะใช้ deploy project นี้</p>
-                      <button v-if="!project.archivedAt" class="primary" @click="showPicker = true">
-                        เลือก repository
+                      <span class="empty-title">{{ $t("projects.source.notLinkedTitle") }}</span>
+                      <p v-if="canWrite" class="small">{{ $t("projects.source.notLinkedHint") }}</p>
+                      <button
+                        v-if="!project.archivedAt && canWrite"
+                        class="primary"
+                        @click="showPicker = true"
+                      >
+                        {{ $t("projects.source.pickRepo") }}
                       </button>
                     </div>
                   </template>
 
-                  <template v-if="showPicker">
+                  <template v-if="showPicker && canWrite">
                     <RepositoryPicker :installations="activeInstallations" @pick="connectSource" />
 
                     <p v-if="sourceError" class="alert alert-bad">
                       <AppIcon name="alert" :size="15" />
                       <span>{{ sourceError }}</span>
                     </p>
-                    <p v-if="sourceSaving" class="muted small">กำลังบันทึก…</p>
+                    <p v-if="sourceSaving" class="muted small">{{ $t("common.saving") }}</p>
 
                     <div class="actions">
                       <button
@@ -610,15 +636,18 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
                         :disabled="sourceSaving"
                         @click="showPicker = false; sourceError = ''"
                       >
-                        ยกเลิก
+                        {{ $t("common.cancel") }}
                       </button>
                     </div>
                   </template>
 
-                  <div v-if="!showPicker && !isConnected && !project.archivedAt" class="actions">
+                  <div
+                    v-if="!showPicker && !isConnected && !project.archivedAt && canWrite"
+                    class="actions"
+                  >
                     <button class="secondary small" @click="chosenSourceMode = null">
                       <AppIcon name="arrowLeft" :size="13" />
-                      กลับไปเลือกโหมด
+                      {{ $t("projects.source.backToModes") }}
                     </button>
                   </div>
                 </template>
@@ -684,9 +713,9 @@ const setupComplete = computed(() => setupSteps.value.every((s) => s.done));
 
       <ConfirmDialog
         :open="confirmArchive"
-        title="Archive project"
-        message="project จะถูกซ่อนจากรายการแต่ประวัติยังอยู่ ไม่ลบ volume หรือข้อมูลใด ๆ"
-        confirm-label="Archive"
+        :title="$t('projects.overview.archiveTitle')"
+        :message="$t('projects.overview.archiveConfirm')"
+        :confirm-label="$t('projects.overview.archiveButton')"
         :require-typed="project.name"
         :busy="archiving"
         @cancel="confirmArchive = false"

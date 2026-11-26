@@ -1,0 +1,13 @@
+{
+  "logs": {
+    "noDeployments": "No deployments yet",
+    "empty": "No logs yet",
+    "waiting": "Waiting for logs from the container…",
+    "reconnect": "Reconnect",
+    "clear": "Clear",
+    "error": {
+      "load": "Could not load logs",
+      "loadRuntime": "Could not load runtime logs"
+    }
+  }
+}

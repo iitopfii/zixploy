@@ -16,6 +16,7 @@
 import type { Database } from "bun:sqlite";
 import { API_PREFIX, AppError, HEALTH_CHECK_LIMITS, isUlid } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
+import { assertAdmin } from "../auth/policy";
 import type { GitHubAppRegistry } from "../github/registry";
 import { authPlugin, requireAuthenticated } from "../plugins/auth";
 import {
@@ -172,19 +173,33 @@ async function verifyGitSource(
   if (!registry) return;
   const service = await registry.getServiceForInstallation(source.installationId);
   if (!service) {
-    throw new AppError("GITHUB_UNAVAILABLE", "GitHub App ของ installation นี้ไม่พร้อมใช้งาน");
+    throw new AppError("GITHUB_UNAVAILABLE", {
+      th: "GitHub App ของ installation นี้ไม่พร้อมใช้งาน",
+      en: "The GitHub App for this installation is unavailable",
+    });
   }
   await service.validateRepo(source.installationId, source.repoFullName);
   await service.validateBranch(source.installationId, source.repoFullName, source.branch);
 }
 
 function requireProject(db: Database, projectId: string): void {
-  if (!isUlid(projectId)) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+  if (!isUlid(projectId))
+    throw new AppError("PROJECT_NOT_FOUND", { th: "ไม่พบ project นี้", en: "Project not found" });
   const row = db
     .query<{ id: string }, [string]>("SELECT id FROM projects WHERE id = ? AND archived_at IS NULL")
     .get(projectId);
-  if (!row) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+  if (!row)
+    throw new AppError("PROJECT_NOT_FOUND", { th: "ไม่พบ project นี้", en: "Project not found" });
 }
+
+/**
+ * managed service ใช้ร่วมกันทั้งเครื่อง — ผูกเข้า component แล้ว container ได้ connection URL ของมัน
+ * การเลือกว่าโปรเจกต์ไหนใช้ service ไหนจึงเป็นของ admin ไม่ใช่ของสมาชิกโปรเจกต์
+ */
+const MANAGED_REF_ADMIN_ONLY = {
+  th: "ต้องเป็น admin จึงจะผูก managed service เข้ากับ component ได้",
+  en: "Only an admin can attach a managed service to a component",
+};
 
 export function componentRoutes(db: Database, registry?: GitHubAppRegistry) {
   return new Elysia({ prefix: API_PREFIX })
@@ -202,8 +217,11 @@ export function componentRoutes(db: Database, registry?: GitHubAppRegistry) {
 
     .post(
       "/projects/:id/components",
-      async ({ params, body, set }) => {
+      async ({ params, body, set, requireUser }) => {
         requireProject(db, params.id);
+        if (body.managedServiceId != null) {
+          assertAdmin(requireUser(), MANAGED_REF_ADMIN_ONLY);
+        }
         await verifyGitSource(registry, body.gitSource);
         const created = createComponent(db, params.id, body);
         set.status = 201;
@@ -214,10 +232,14 @@ export function componentRoutes(db: Database, registry?: GitHubAppRegistry) {
 
     .patch(
       "/projects/:id/components/:componentId",
+      // managedServiceId แก้ผ่าน PATCH ไม่ได้ (ไม่อยู่ใน updateBody) — ตรวจสิทธิ์ admin ที่ POST ที่เดียวพอ
       async ({ params, body }) => {
         requireProject(db, params.id);
         if (!isUlid(params.componentId))
-          throw new AppError("COMPONENT_NOT_FOUND", "ไม่พบ component นี้");
+          throw new AppError("COMPONENT_NOT_FOUND", {
+            th: "ไม่พบ component นี้",
+            en: "Component not found",
+          });
         await verifyGitSource(registry, body.gitSource);
         return updateComponent(db, params.id, params.componentId, body);
       },
@@ -229,7 +251,10 @@ export function componentRoutes(db: Database, registry?: GitHubAppRegistry) {
       ({ params, set }) => {
         requireProject(db, params.id);
         if (!isUlid(params.componentId))
-          throw new AppError("COMPONENT_NOT_FOUND", "ไม่พบ component นี้");
+          throw new AppError("COMPONENT_NOT_FOUND", {
+            th: "ไม่พบ component นี้",
+            en: "Component not found",
+          });
         deleteComponent(db, params.id, params.componentId);
         set.status = 204;
         return null;

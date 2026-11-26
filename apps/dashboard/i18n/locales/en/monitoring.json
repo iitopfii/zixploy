@@ -1,0 +1,63 @@
+{
+  "monitoring": {
+    "reload": "Reload",
+    "memory": "Memory",
+    "disk": "Disk",
+    "range": {
+      "label": "Time range",
+      "h1": "1 h",
+      "h6": "6 h",
+      "h24": "24 h"
+    },
+    "error": {
+      "load": "Could not load metrics"
+    },
+    "chart": {
+      "ariaLabel": "Chart with {count} points, latest value {value}",
+      "empty": "No data yet"
+    },
+    "project": {
+      "title": "Resource usage",
+      "emptyTitle": "No resource usage data yet",
+      "emptyHint": "Metrics are collected only for projects with a running container. Deploy, then wait about 15 seconds.",
+      "notRunning": "The container is not running. The numbers below are the last values measured before it stopped.",
+      "peak": "Peak {value}",
+      "cpuBasis": "Relative to 1 core = 100%",
+      "memLimit": "Limit {size}",
+      "memUnlimited": "Unlimited",
+      "memOfLimit": "{percent} of limit",
+      "noMemLimit": "No memory limit set",
+      "containerStatus": "Container status",
+      "running": "Running",
+      "stopped": "Stopped",
+      "restarts": "Total restarts",
+      "restartsInRange": "(+{n} in this range)",
+      "lastMeasured": "Last measured"
+    },
+    "server": {
+      "subtitle": "Resources of the server running Zixploy",
+      "stale": "Latest data is from {time}. The deploy worker may have stopped, check the worker status in the left sidebar.",
+      "emptyTitle": "No metrics data yet",
+      "emptyHint": "The deploy worker takes a sample every 15 seconds. Wait a moment and reload. If nothing appears, check that the worker is running.",
+      "cores": "{n} core | {n} cores",
+      "memUsed": "{used} used of {total}",
+      "diskFree": "{size} free",
+      "loadWindow": "1 / 5 / 15 min",
+      "overloaded": "Over capacity",
+      "loadOfCores": "{percent}% of {n} core | {percent}% of {n} cores",
+      "footSampling": "Sampled every {n} second | Sampled every {n} seconds",
+      "footUpdated": "updated {time}",
+      "footPoints": "showing {n} point | showing {n} points"
+    },
+    "cleanup": {
+      "title": "Free up disk space",
+      "desc": "Removes build cache older than 7 days and images nothing uses anymore. Images of deployments that can be rolled back and stopped databases are not touched.",
+      "action": "Clean cache",
+      "running": "Cleaning…",
+      "inProgress": "Cleaning. This may take a moment, deploys keep working normally meanwhile.",
+      "failed": "Could not start the cleanup",
+      "lastDone": "Last cleanup {time}, reclaimed {size}",
+      "lastFailed": "Last cleanup {time} failed: {message}"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "deploy": {
+    "deploying": "Deploying…",
+    "busy": "Working…",
+    "redeployTitle": "Builds commit {sha} again. It does not pull the latest code from the branch (if you just pushed new code, use Deploy)",
+    "needSource": "Set up the Source repository before you can deploy",
+    "actionOk": "{action} succeeded",
+    "autoDeploy": {
+      "onHint": "A push to {branch} is built and deployed automatically",
+      "offHint": "A push to {branch} currently does {not} trigger anything. Use Deploy yourself",
+      "offHintNot": "not",
+      "needRepo": "Connect a repository before turning on auto deploy"
+    },
+    "envChanged": "Environment variables were changed after the latest deploy. The running app still uses the old values. Press {deploy} to apply the new ones",
+    "history": {
+      "title": "Deployment history",
+      "prune": "Clear history",
+      "empty": "Never deployed",
+      "deleteItem": "Delete this entry",
+      "deleted": "Deleted",
+      "range": "Showing {start}–{end} of {total}",
+      "prev": "Previous",
+      "next": "Next",
+      "pruneTitle": "Clear deployment history",
+      "pruneMessage": "Deletes all history together with the build logs, except the version currently in service and entries still in progress, which are kept automatically. The running app is not affected",
+      "pruned": "Deleted {n} history entry | Deleted {n} history entries",
+      "prunedSkipped": "Deleted {deleted}, kept {skipped} that cannot be deleted (in service or in progress)"
+    },
+    "error": {
+      "generic": "Something went wrong",
+      "list": "Could not load the deployment list",
+      "deploy": "Deploy failed",
+      "redeploy": "Redeploy failed",
+      "restart": "Restart failed",
+      "stop": "Stop failed",
+      "rollback": "Rollback failed",
+      "cancel": "Cancel failed",
+      "prune": "Could not clear the history"
+    }
+  }
+}

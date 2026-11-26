@@ -1,0 +1,90 @@
+{
+  "domains": {
+    "subtitle": "ชี้ domain มาที่ server นี้แล้วเลือกวิธีจัดการ HTTPS",
+    "add": "เพิ่ม domain",
+    "adding": "กำลังเพิ่ม…",
+    "firstWeb": "web ตัวแรก",
+    "disabledBadge": "ปิดอยู่",
+    "httpsSettings": "ตั้งค่า HTTPS",
+    "enable": "เปิดใช้งาน",
+    "disable": "ปิดใช้งาน",
+    "error": {
+      "load": "โหลด domains ไม่ได้",
+      "add": "เพิ่ม domain ไม่สำเร็จ"
+    },
+    "dnsHint": {
+      "createARecord": "สร้าง A record ชี้มาที่",
+      "cloudflareOk": "เปิด Cloudflare proxy ได้ — ระบบรองรับ"
+    },
+    "form": {
+      "pathPrefixNote": "(ไม่บังคับ — เว้นว่าง = ทั้ง host)",
+      "pathPrefixHelp": "เฉพาะ request ที่ path ขึ้นต้นด้วยค่านี้ — ชนะแถว \"ทั้ง host\" ของ hostname เดียวกันเสมอ",
+      "component": "ส่ง traffic ไปที่ component",
+      "firstWebOption": "web ตัวแรก ({name})",
+      "containerPort": "Port ของ container",
+      "enableHttps": "เปิด HTTPS",
+      "forceRedirect": "บังคับ HTTP → HTTPS",
+      "externalProxy": "TLS จัดการโดย proxy ภายนอก (เช่น Nginx Proxy Manager, Cloudflare, load balancer)",
+      "externalProxyNote": "proxy ภายนอกเป็นคน terminate TLS — Zixploy จะเสิร์ฟ HTTP ให้ proxy ตรง ๆ (การเปิด HTTPS/redirect ที่นี่จะทำให้เกิด redirect วนซ้ำ)"
+    },
+    "empty": {
+      "title": "ยังไม่มี domain",
+      "hint": "เพิ่ม domain เพื่อรับ traffic จากภายนอก"
+    },
+    "dns": {
+      "check": "ตรวจ DNS",
+      "checking": "กำลังตรวจ…",
+      "checkFailed": "เรียกตรวจ DNS ไม่สำเร็จ — ลองรีเฟรชหน้าแล้วลองใหม่",
+      "lastChecked": "ตรวจล่าสุด {time}",
+      "neverChecked": "ยังไม่เคยตรวจ",
+      "resolved": "resolve ได้: {addresses}",
+      "proxyLoopWarning": "DNS ของ domain นี้ชี้ผ่าน proxy/CDN — ถ้า TLS ถูก terminate ที่ proxy การเปิด HTTPS/Redirect ที่นี่จะทำให้ redirect วนซ้ำ พิจารณาใช้โหมด \"TLS จัดการโดย proxy ภายนอก\" ในปุ่มตั้งค่า HTTPS",
+      "status": {
+        "valid": {
+          "label": "ชี้มาที่ server แล้ว",
+          "hint": "domain พร้อมรับ traffic"
+        },
+        "proxied": {
+          "label": "ผ่าน Cloudflare",
+          "hint": "Cloudflare proxy เปิดอยู่ — DDoS protection ทำงาน traffic วิ่งผ่าน Cloudflare มาที่ server นี้"
+        },
+        "mismatch": {
+          "label": "ชี้ไปที่อื่น",
+          "hint": "A record ปัจจุบันไม่ได้ชี้มาที่ server นี้ และไม่ใช่ Cloudflare — แก้ที่ผู้ให้บริการ DNS"
+        },
+        "unknown": {
+          "label": "resolve ไม่ได้",
+          "hint": "ยังไม่มี DNS record หรือ propagate ไม่เสร็จ (รอ 5–30 นาทีหลังสร้าง record)"
+        },
+        "pending": {
+          "label": "ยังไม่ได้ตรวจ",
+          "hint": "กด \"ตรวจ DNS\" เพื่อตรวจสอบ"
+        }
+      }
+    },
+    "tls": {
+      "title": "ใบรับรอง TLS",
+      "custom": "ใบรับรองของคุณ",
+      "letsEncrypt": "Let's Encrypt (อัตโนมัติ)",
+      "letsEncryptHint": "ระบบขอและต่ออายุใบรับรองให้อัตโนมัติ — ต้องให้ port 80 เข้าถึงได้จากภายนอก",
+      "expires": "หมดอายุ",
+      "customHint": "ใบรับรองที่อัปโหลดเองไม่ต่ออายุอัตโนมัติ — ต้องอัปโหลดใบใหม่ก่อนหมดอายุ",
+      "replace": "เปลี่ยนใบรับรอง",
+      "upload": "อัปโหลดใบรับรองเอง",
+      "backToLetsEncrypt": "กลับไปใช้ Let's Encrypt",
+      "pasteHint": "วาง PEM ทั้งสองช่อง — ใบรับรองต้องครอบ {hostname} และ private key ต้องไม่มี passphrase",
+      "save": "บันทึกใบรับรอง",
+      "uploadFailed": "อัปโหลด certificate ไม่สำเร็จ",
+      "expiry": {
+        "expired": "หมดอายุแล้ว {n} วัน — อัปโหลดใบใหม่",
+        "today": "หมดอายุวันนี้ — อัปโหลดใบใหม่",
+        "soon": "เหลืออีก {n} วัน — เตรียมอัปโหลดใบใหม่",
+        "left": "เหลืออีก {n} วัน"
+      }
+    },
+    "delete": {
+      "confirm": "ลบ domain {hostname}? traffic ที่เข้ามาจะไม่ถูก route อีก",
+      "confirmButton": "ยืนยันลบ"
+    }
+  }
+}

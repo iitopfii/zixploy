@@ -118,10 +118,10 @@ export class RealGitHubAppRegistry implements GitHubAppRegistry {
 
   private requireMasterKeys(): MasterKeys {
     if (!this.options.masterKeys) {
-      throw new AppError(
-        "GITHUB_UNAVAILABLE",
-        "Master key ยังไม่ได้ configure — ตั้งค่า ZIXPLOY_MASTER_KEY_FILE ก่อนสร้าง GitHub App",
-      );
+      throw new AppError("GITHUB_UNAVAILABLE", {
+        th: "Master key ยังไม่ได้ configure — ตั้งค่า ZIXPLOY_MASTER_KEY_FILE ก่อนสร้าง GitHub App",
+        en: "Master key is not configured. Set ZIXPLOY_MASTER_KEY_FILE before creating a GitHub App",
+      });
     }
     return this.options.masterKeys;
   }
@@ -147,7 +147,10 @@ export class RealGitHubAppRegistry implements GitHubAppRegistry {
     if (!trimmed || trimmed.length > MAX_APP_NAME_LENGTH) {
       throw new AppError(
         "VALIDATION_ERROR",
-        `ชื่อ app ต้องยาว 1-${MAX_APP_NAME_LENGTH} ตัวอักษร (GitHub limit)`,
+        {
+          th: `ชื่อ app ต้องยาว 1-${MAX_APP_NAME_LENGTH} ตัวอักษร (GitHub limit)`,
+          en: `App name must be 1-${MAX_APP_NAME_LENGTH} characters long (GitHub limit)`,
+        },
         { field: "name" },
       );
     }
@@ -181,7 +184,10 @@ export class RealGitHubAppRegistry implements GitHubAppRegistry {
 
     const pending = this.pendingManifests.get(state);
     if (!pending || Date.now() - pending.createdAt > MANIFEST_STATE_TTL_MS) {
-      throw new AppError("VALIDATION_ERROR", "manifest state ไม่ถูกต้องหรือหมดอายุ — เริ่มสร้าง app ใหม่");
+      throw new AppError("VALIDATION_ERROR", {
+        th: "manifest state ไม่ถูกต้องหรือหมดอายุ — เริ่มสร้าง app ใหม่",
+        en: "Manifest state is invalid or expired. Start creating the app again",
+      });
     }
     // one-time use
     this.pendingManifests.delete(state);
@@ -252,7 +258,10 @@ export class RealGitHubAppRegistry implements GitHubAppRegistry {
   deleteApp(id: string): void {
     const app = this.getApp(id);
     if (!app) {
-      throw new AppError("INSTALLATION_NOT_FOUND", "ไม่พบ GitHub App นี้");
+      throw new AppError("INSTALLATION_NOT_FOUND", {
+        th: "ไม่พบ GitHub App นี้",
+        en: "GitHub App not found",
+      });
     }
 
     const now = Date.now();

@@ -200,10 +200,10 @@ export class RealGitHubService implements GitHubService {
     } catch (err) {
       if (err instanceof AppError && err.code === "INSTALLATION_NOT_FOUND") {
         // Re-throw with clearer message about the branch specifically
-        throw new AppError(
-          "INSTALLATION_NOT_FOUND",
-          `ไม่พบ branch "${branchName}" ใน repository "${repoFullName}"`,
-        );
+        throw new AppError("INSTALLATION_NOT_FOUND", {
+          th: `ไม่พบ branch "${branchName}" ใน repository "${repoFullName}"`,
+          en: `Branch "${branchName}" not found in repository "${repoFullName}"`,
+        });
       }
       throw err;
     }

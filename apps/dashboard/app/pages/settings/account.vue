@@ -7,6 +7,7 @@
  */
 const api = useApi();
 const session = useSession();
+const { t } = useI18n();
 
 const form = reactive({ current: "", next: "", confirm: "" });
 const show = reactive({ current: false, next: false });
@@ -19,11 +20,11 @@ const MIN_LENGTH = 12;
 
 /** ตรวจฝั่ง client เพื่อบอกทันทีที่พิมพ์ — server ตรวจซ้ำเสมออยู่แล้ว */
 const problem = computed(() => {
-  if (!form.current) return "ต้องกรอกรหัสผ่านปัจจุบัน";
-  if (form.next.length < MIN_LENGTH) return `รหัสผ่านใหม่ต้องยาวอย่างน้อย ${MIN_LENGTH} ตัวอักษร`;
-  if (form.next === form.current) return "รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสผ่านเดิม";
-  if (form.confirm && form.next !== form.confirm) return "ยืนยันรหัสผ่านไม่ตรงกัน";
-  if (!form.confirm) return "ต้องยืนยันรหัสผ่านใหม่";
+  if (!form.current) return t("auth.account.problem.current");
+  if (form.next.length < MIN_LENGTH) return t("auth.account.problem.tooShort", { n: MIN_LENGTH });
+  if (form.next === form.current) return t("auth.account.problem.same");
+  if (form.confirm && form.next !== form.confirm) return t("auth.account.problem.mismatch");
+  if (!form.confirm) return t("auth.account.problem.confirm");
   return null;
 });
 
@@ -38,9 +39,9 @@ const strength = computed(() => {
   if (/\d/.test(p)) score++;
   if (/[^A-Za-z0-9]/.test(p)) score++;
 
-  if (score <= 2) return { label: "อ่อน", tone: "bad", pct: 33 };
-  if (score <= 3) return { label: "พอใช้", tone: "warn", pct: 66 };
-  return { label: "แข็งแรง", tone: "ok", pct: 100 };
+  if (score <= 2) return { label: t("auth.account.strength.weak"), tone: "bad", pct: 33 };
+  if (score <= 3) return { label: t("auth.account.strength.fair"), tone: "warn", pct: 66 };
+  return { label: t("auth.account.strength.strong"), tone: "ok", pct: 100 };
 });
 
 async function submit() {
@@ -54,8 +55,7 @@ async function submit() {
       newPassword: form.next,
     });
     if (error) {
-      const body = error.value as { error?: { message?: string } } | null;
-      errorMsg.value = body?.error?.message ?? "เปลี่ยนรหัสผ่านไม่สำเร็จ";
+      errorMsg.value = apiErrorMessage(error, "auth.account.failed");
       return;
     }
     // session ใหม่มากับ response แล้ว — อัปเดต state ให้ตรง ไม่ต้อง login ซ้ำ
@@ -63,9 +63,9 @@ async function submit() {
     form.current = "";
     form.next = "";
     form.confirm = "";
-    okMsg.value = "เปลี่ยนรหัสผ่านแล้ว — อุปกรณ์อื่นทั้งหมดถูกออกจากระบบ";
+    okMsg.value = t("auth.account.changed");
   } catch {
-    errorMsg.value = "ติดต่อ API ไม่ได้";
+    errorMsg.value = t("common.apiUnreachable");
   } finally {
     saving.value = false;
   }
@@ -75,31 +75,30 @@ async function submit() {
 <template>
   <div class="stack-lg">
     <header>
-      <h1>บัญชีผู้ใช้</h1>
-      <p class="muted small">จัดการข้อมูลการเข้าสู่ระบบของคุณ</p>
+      <h1>{{ $t("auth.account.title") }}</h1>
+      <p class="muted small">{{ $t("auth.account.subtitle") }}</p>
     </header>
 
     <section class="card stack">
       <div>
-        <h2 class="section-title">ข้อมูลบัญชี</h2>
+        <h2 class="section-title">{{ $t("auth.account.info") }}</h2>
         <dl class="kv account-kv">
-          <dt>ชื่อผู้ใช้</dt>
+          <dt>{{ $t("auth.account.username") }}</dt>
           <dd>{{ session.username ?? "—" }}</dd>
+          <dt>{{ $t("auth.account.role") }}</dt>
+          <dd>{{ session.role ? $t(`nav.role.${session.role}`) : "—" }}</dd>
         </dl>
       </div>
     </section>
 
     <form class="card stack" @submit.prevent="submit">
       <div>
-        <h2 class="section-title">เปลี่ยนรหัสผ่าน</h2>
-        <p class="muted small hint">
-          หลังเปลี่ยนแล้ว อุปกรณ์อื่นที่ล็อกอินค้างไว้จะถูกออกจากระบบทั้งหมด
-          ส่วนเครื่องนี้ยังใช้งานต่อได้ตามปกติ
-        </p>
+        <h2 class="section-title">{{ $t("auth.account.changePassword") }}</h2>
+        <p class="muted small hint">{{ $t("auth.account.changeHint") }}</p>
       </div>
 
       <label>
-        <span>รหัสผ่านปัจจุบัน</span>
+        <span>{{ $t("auth.account.current") }}</span>
         <div class="pw-field">
           <input
             v-model="form.current"
@@ -111,16 +110,16 @@ async function submit() {
             type="button"
             class="ghost small pw-toggle"
             tabindex="-1"
-            :aria-label="show.current ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'"
+            :aria-label="show.current ? $t('auth.login.hidePassword') : $t('auth.login.showPassword')"
             @click="show.current = !show.current"
           >
-            {{ show.current ? "ซ่อน" : "แสดง" }}
+            {{ show.current ? $t("common.hide") : $t("common.show") }}
           </button>
         </div>
       </label>
 
       <label>
-        <span>รหัสผ่านใหม่</span>
+        <span>{{ $t("auth.account.next") }}</span>
         <div class="pw-field">
           <input
             v-model="form.next"
@@ -132,10 +131,10 @@ async function submit() {
             type="button"
             class="ghost small pw-toggle"
             tabindex="-1"
-            :aria-label="show.next ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'"
+            :aria-label="show.next ? $t('auth.login.hidePassword') : $t('auth.login.showPassword')"
             @click="show.next = !show.next"
           >
-            {{ show.next ? "ซ่อน" : "แสดง" }}
+            {{ show.next ? $t("common.hide") : $t("common.show") }}
           </button>
         </div>
 
@@ -145,11 +144,11 @@ async function submit() {
           </div>
           <span class="tiny" :class="`text-${strength.tone}`">{{ strength.label }}</span>
         </div>
-        <span class="field-hint">อย่างน้อย {{ MIN_LENGTH }} ตัวอักษร</span>
+        <span class="field-hint">{{ $t("auth.account.minLength", { n: MIN_LENGTH }) }}</span>
       </label>
 
       <label>
-        <span>ยืนยันรหัสผ่านใหม่</span>
+        <span>{{ $t("auth.account.confirm") }}</span>
         <input
           v-model="form.confirm"
           type="password"
@@ -173,7 +172,7 @@ async function submit() {
         </span>
         <button class="primary" type="submit" :disabled="saving || !!problem">
           <span v-if="saving" class="spinner" />
-          {{ saving ? "กำลังบันทึก…" : "เปลี่ยนรหัสผ่าน" }}
+          {{ saving ? $t("common.saving") : $t("auth.account.changePassword") }}
         </button>
       </div>
     </form>

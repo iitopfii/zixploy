@@ -1,0 +1,34 @@
+{
+  "environment": {
+    "check": {
+      "title": "Check that the saved values can still be decrypted with the current master key",
+      "action": "Check decryption",
+      "working": "Checking…",
+      "none": "No environment variables to check yet",
+      "allOk": "Checked {n} variable, it decrypts correctly | Checked {n} variables, all decrypt correctly",
+      "broken": "{broken} of {total} cannot be decrypted (the master key may have changed). Deploys will not get these values. Enter new values and save to encrypt them again:",
+      "brokenInComponent": "{key} (component: {name})",
+      "failed": "Check failed"
+    },
+    "scope": {
+      "label": "Scope",
+      "project": "Whole project (project-wide)",
+      "component": "component: {name}",
+      "componentHint": "This env applies only to the selected component (overrides project-level values)",
+      "projectHint": "This env applies to every component"
+    },
+    "import": {
+      "hint": "Paste .env content (KEY=VALUE). Review it before saving.",
+      "working": "Parsing…",
+      "failed": "Could not parse",
+      "warnings": "Warning: {list}"
+    },
+    "unchanged": "(unchanged)",
+    "removeRow": "Remove this row",
+    "empty": "No environment variables yet",
+    "addVariable": "Add variable",
+    "error": {
+      "load": "Could not load env vars"
+    }
+  }
+}

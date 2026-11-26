@@ -23,6 +23,8 @@ const props = defineProps<{
 const emit = defineEmits<{ changed: [] }>();
 
 const api = useApi();
+const { t } = useI18n();
+const { isAdmin, canWrite } = usePermissions();
 
 // ---------------------------------------------------------------------------
 // Types
@@ -92,12 +94,12 @@ async function fetchComponents() {
   try {
     const { data, error } = await api.api.v1.projects({ id: props.projectId }).components.get();
     if (error) {
-      loadError.value = "โหลด components ไม่ได้";
+      loadError.value = t("components.error.load");
       return;
     }
     components.value = (data?.items ?? []) as Component[];
   } catch {
-    loadError.value = "ติดต่อ API ไม่ได้";
+    loadError.value = t("common.apiUnreachable");
   } finally {
     loading.value = false;
   }
@@ -239,8 +241,8 @@ function toggleDep(name: string, checked: boolean) {
 
 /** "" → null, ไม่งั้นเป็น Number (ให้ API validate ช่วงค่าเอง) */
 function toNum(s: string): number | null {
-  const t = s.trim();
-  return t === "" ? null : Number(t);
+  const trimmed = s.trim();
+  return trimmed === "" ? null : Number(trimmed);
 }
 
 function buildPayload() {
@@ -309,7 +311,7 @@ async function submitForm() {
         .projects({ id: props.projectId })
         .components.post({ ...payload, sourceKind: form.sourceKind });
       if (error) {
-        formError.value = apiMessage(error) ?? "เพิ่ม component ไม่สำเร็จ";
+        formError.value = apiErrorMessage(error, "components.error.create");
         return;
       }
     } else if (editingId.value) {
@@ -318,14 +320,14 @@ async function submitForm() {
         .components({ componentId: editingId.value })
         .patch(payload);
       if (error) {
-        formError.value = apiMessage(error) ?? "บันทึกไม่สำเร็จ";
+        formError.value = apiErrorMessage(error, "common.saveFailed");
         return;
       }
     }
     closeForm();
     await fetchComponents();
   } catch {
-    formError.value = "ติดต่อ API ไม่ได้";
+    formError.value = t("common.apiUnreachable");
   } finally {
     saving.value = false;
   }
@@ -363,13 +365,13 @@ async function removeComponent(id: string) {
       .components({ componentId: id })
       .delete();
     if (error) {
-      deleteError.value = apiMessage(error) ?? "ลบไม่สำเร็จ";
+      deleteError.value = apiErrorMessage(error, "common.deleteFailed");
       return;
     }
     confirmDeleteId.value = null;
     await fetchComponents();
   } catch {
-    deleteError.value = "ติดต่อ API ไม่ได้";
+    deleteError.value = t("common.apiUnreachable");
   } finally {
     deleting.value = false;
   }
@@ -391,13 +393,13 @@ async function promote() {
   try {
     const { error } = await api.api.v1.projects({ id: props.projectId }).compose.promote.post();
     if (error) {
-      promoteError.value = apiMessage(error) ?? "เปลี่ยนเป็น compose ไม่สำเร็จ";
+      promoteError.value = apiErrorMessage(error, "components.error.promote");
       return;
     }
     await fetchComponents();
     emit("changed"); // ให้ parent refresh project เพื่ออัปเดต mode badge
   } catch {
-    promoteError.value = "ติดต่อ API ไม่ได้";
+    promoteError.value = t("common.apiUnreachable");
   } finally {
     promoting.value = false;
   }
@@ -406,10 +408,6 @@ async function promote() {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function apiMessage(error: unknown): string | undefined {
-  return (error as { value?: { error?: { message?: string } } } | null)?.value?.error?.message;
-}
 
 const ROLE_TONE: Record<string, string> = {
   web: "tone-ok",
@@ -443,12 +441,10 @@ function sourceSummary(c: Component): string {
     <div class="row-between wrap">
       <div class="stack-sm">
         <h2 class="section-title">Components</h2>
-        <p class="muted small">
-          รันหลาย container ต่อโปรเจกต์ (เว็บ + worker + database) แบบ compose
-        </p>
+        <p class="muted small">{{ $t("components.subtitle") }}</p>
       </div>
       <span class="badge" :class="mode === 'compose' ? 'tone-ok' : 'tone-idle'">
-        โหมด: {{ mode === "compose" ? "compose (multi-container)" : "single container" }}
+        {{ mode === "compose" ? $t("components.mode.compose") : $t("components.mode.single") }}
       </span>
     </div>
 
@@ -456,11 +452,8 @@ function sourceSummary(c: Component): string {
     <div v-if="mode === 'single'" class="alert alert-warn">
       <AppIcon name="info" :size="16" />
       <div class="stack-sm">
-        <strong>โปรเจกต์นี้ยังรันแบบ container เดียว</strong>
-        <span class="muted small">
-          กำหนด component ด้านล่างให้ครบ (ต้องมีอย่างน้อย 1 ตัวที่เป็น web) แล้วกด
-          "เปลี่ยนเป็น compose" — deploy ครั้งถัดไปจะรันแบบหลาย container
-        </span>
+        <strong>{{ $t("components.singleIntro.title") }}</strong>
+        <span class="muted small">{{ $t("components.singleIntro.body") }}</span>
       </div>
     </div>
 
@@ -477,8 +470,8 @@ function sourceSummary(c: Component): string {
       <!-- Component list -->
       <div v-if="components.length === 0 && formMode !== 'create'" class="empty">
         <span class="empty-icon"><AppIcon name="box" :size="20" /></span>
-        <span class="empty-title">ยังไม่มี component</span>
-        <p class="small">เพิ่ม component แรก (เช่น เว็บแอปของคุณ) เพื่อเริ่มต้น</p>
+        <span class="empty-title">{{ $t("components.empty.title") }}</span>
+        <p class="small">{{ $t("components.empty.hint") }}</p>
       </div>
 
       <ul v-else-if="components.length > 0" class="cmp-list">
@@ -488,7 +481,7 @@ function sourceSummary(c: Component): string {
             <span class="badge" :class="roleTone(c.role)">{{ c.role }}</span>
             <span class="badge">{{ SOURCE_LABEL[c.sourceKind] }}</span>
             <span v-if="c.isWeb" class="badge tone-ok">web · :{{ c.webPort ?? "?" }}</span>
-            <span v-if="!c.enabled" class="badge tone-idle">ปิดใช้งาน</span>
+            <span v-if="!c.enabled" class="badge tone-idle">{{ $t("components.disabledBadge") }}</span>
           </div>
 
           <dl class="kv">
@@ -509,10 +502,10 @@ function sourceSummary(c: Component): string {
             </template>
           </dl>
 
-          <div v-if="!archived" class="cmp-actions">
+          <div v-if="canWrite && !archived" class="cmp-actions">
             <button class="secondary small" @click="openEdit(c)">
               <AppIcon name="settings" :size="13" />
-              แก้ไข
+              {{ $t("common.edit") }}
             </button>
             <button
               class="secondary small"
@@ -520,17 +513,21 @@ function sourceSummary(c: Component): string {
               @click="toggleEnabled(c)"
             >
               <span v-if="togglingId === c.id" class="spinner" />
-              {{ c.enabled ? "ปิดใช้งาน" : "เปิดใช้งาน" }}
+              {{ c.enabled ? $t("components.action.disable") : $t("components.action.enable") }}
             </button>
             <button class="danger small" @click="confirmDeleteId = c.id; deleteError = ''">
               <AppIcon name="trash" :size="13" />
-              ลบ
+              {{ $t("common.delete") }}
             </button>
           </div>
 
           <!-- inline delete confirm -->
-          <div v-if="confirmDeleteId === c.id" class="confirm-delete">
-            <p class="warn-text small">ลบ component <strong>{{ c.name }}</strong>? (ลบแค่นิยาม ไม่ลบข้อมูล)</p>
+          <div v-if="confirmDeleteId === c.id && canWrite" class="confirm-delete">
+            <i18n-t scope="global" keypath="components.confirmDelete.message" tag="p" class="warn-text small">
+              <template #name>
+                <strong>{{ c.name }}</strong>
+              </template>
+            </i18n-t>
             <p v-if="deleteError" class="alert alert-bad small">
               <AppIcon name="alert" :size="13" />
               <span>{{ deleteError }}</span>
@@ -538,34 +535,42 @@ function sourceSummary(c: Component): string {
             <div class="confirm-actions">
               <button class="danger small" :disabled="deleting" @click="removeComponent(c.id)">
                 <span v-if="deleting" class="spinner" />
-                {{ deleting ? "กำลังลบ…" : "ยืนยันลบ" }}
+                {{ deleting ? $t("common.deleting") : $t("components.confirmDelete.confirm") }}
               </button>
-              <button class="secondary small" @click="confirmDeleteId = null">ยกเลิก</button>
+              <button class="secondary small" @click="confirmDeleteId = null">
+                {{ $t("common.cancel") }}
+              </button>
             </div>
           </div>
         </li>
       </ul>
 
       <!-- Add button -->
-      <div v-if="!archived && formMode === null">
+      <div v-if="canWrite && !archived && formMode === null">
         <button class="primary small" @click="openCreate">
           <AppIcon name="plus" :size="14" />
-          เพิ่ม component
+          {{ $t("components.add") }}
         </button>
       </div>
 
       <!-- Create/Edit form -->
-      <div v-if="formMode !== null" class="inset stack cmp-form">
-        <h3 class="form-title">{{ formMode === "create" ? "เพิ่ม component" : `แก้ไข ${form.name}` }}</h3>
+      <div v-if="formMode !== null && canWrite" class="inset stack cmp-form">
+        <h3 class="form-title">
+          {{
+            formMode === "create"
+              ? $t("components.add")
+              : $t("components.form.editTitle", { name: form.name })
+          }}
+        </h3>
 
         <div class="form-grid">
           <label>
-            <span>ชื่อ (DNS alias)</span>
+            <span>{{ $t("components.form.name") }}</span>
             <input v-model="form.name" class="mono" placeholder="web, api, cache" :disabled="formMode === 'edit'" />
-            <small class="muted">a-z, 0-9, ขีดกลาง — ใช้เป็นชื่อให้ container อื่นเรียกถึง</small>
+            <small class="muted">{{ $t("components.form.nameHint") }}</small>
           </label>
           <label>
-            <span>ประเภท (role)</span>
+            <span>{{ $t("components.form.role") }}</span>
             <select v-model="form.role">
               <option value="web">web</option>
               <option value="worker">worker</option>
@@ -578,13 +583,17 @@ function sourceSummary(c: Component): string {
         </div>
 
         <label>
-          <span>ที่มาของ image</span>
+          <span>{{ $t("components.form.source") }}</span>
           <select v-model="form.sourceKind" :disabled="formMode === 'edit'">
-            <option value="build">Build จาก Dockerfile</option>
-            <option value="image">Image สำเร็จรูป (registry)</option>
-            <option value="managed_ref">อ้าง managed database</option>
+            <option value="build">{{ $t("components.form.sourceBuild") }}</option>
+            <option value="image">{{ $t("components.form.sourceImage") }}</option>
+            <option v-if="isAdmin || formMode === 'edit'" value="managed_ref">
+              {{ $t("components.form.sourceManaged") }}
+            </option>
           </select>
-          <small v-if="formMode === 'edit'" class="muted">เปลี่ยนที่มาไม่ได้หลังสร้าง — ลบแล้วสร้างใหม่</small>
+          <small v-if="formMode === 'edit'" class="muted">
+            {{ $t("components.form.sourceLocked") }}
+          </small>
         </label>
 
         <!-- build: repo ของ component (ไม่ตั้ง = repo ของ project) -->
@@ -594,24 +603,30 @@ function sourceSummary(c: Component): string {
             <span v-if="form.gitSource" class="mono">
               {{ form.gitSource.repoFullName }} @ {{ form.gitSource.branch }}
             </span>
-            <span v-else class="muted">ใช้ repo ของ project</span>
+            <span v-else class="muted">{{ $t("components.repo.useProject") }}</span>
             <button
               type="button"
               class="secondary small"
               :disabled="!installations || installations.length === 0"
               @click="pickingRepo = !pickingRepo"
             >
-              {{ pickingRepo ? "ยกเลิก" : form.gitSource ? "เปลี่ยน repo" : "ใช้ repo อื่น" }}
+              {{
+                pickingRepo
+                  ? $t("common.cancel")
+                  : form.gitSource
+                    ? $t("components.repo.change")
+                    : $t("components.repo.other")
+              }}
             </button>
             <button v-if="form.gitSource" type="button" class="secondary small" @click="useProjectRepo">
-              กลับไปใช้ repo ของ project
+              {{ $t("components.repo.backToProject") }}
             </button>
           </div>
           <small v-if="!installations || installations.length === 0" class="muted">
-            ต้องเชื่อม GitHub App ก่อนถึงเลือก repo อื่นได้
+            {{ $t("components.repo.needGithub") }}
           </small>
           <small v-else class="muted">
-            deploy จะ build commit ล่าสุดของ branch นี้ · redeploy ใช้ commit เดิม
+            {{ $t("components.repo.hint") }}
           </small>
           <RepositoryPicker
             v-if="pickingRepo && installations && installations.length > 0"
@@ -631,7 +646,7 @@ function sourceSummary(c: Component): string {
             <input v-model="form.buildContext" class="mono" placeholder="." />
           </label>
           <label>
-            <span>Target stage (ไม่บังคับ)</span>
+            <span>{{ $t("components.form.targetStage") }}</span>
             <input v-model="form.targetStage" class="mono" placeholder="production" />
           </label>
         </div>
@@ -640,21 +655,21 @@ function sourceSummary(c: Component): string {
         <label v-if="form.sourceKind === 'image'">
           <span>Image reference</span>
           <input v-model="form.imageRef" class="mono" placeholder="redis:7-alpine" />
-          <small class="muted">ต้องระบุ tag หรือ digest — ห้ามใช้ latest</small>
+          <small class="muted">{{ $t("components.form.imageHint") }}</small>
         </label>
 
         <!-- managed_ref field -->
         <label v-if="form.sourceKind === 'managed_ref'">
           <span>Managed database</span>
-          <select v-model="form.managedServiceId">
-            <option value="">— เลือก service —</option>
+          <select v-model="form.managedServiceId" :disabled="!isAdmin">
+            <option value="">{{ $t("components.form.selectService") }}</option>
             <option v-for="s in services" :key="s.id" :value="s.id">{{ s.name }} ({{ s.type }})</option>
           </select>
           <small v-if="services.length === 0" class="muted">
-            ยังไม่มี managed database — สร้างที่หน้า Databases ก่อน
+            {{ $t("components.form.noServices") }}
           </small>
           <small v-else class="muted">
-            component ที่ตั้ง depends_on มาที่ตัวนี้จะได้ env เชื่อมต่อฉีดอัตโนมัติ:
+            {{ $t("components.form.managedEnvHint") }}
             <code>{{ (form.name || "db").toUpperCase().replace(/-/g, "_") }}_URL</code>,
             <code>_HOST</code>, <code>_PORT</code>, <code>_USERNAME</code>, <code>_PASSWORD</code>,
             <code>_DATABASE</code>
@@ -665,7 +680,7 @@ function sourceSummary(c: Component): string {
         <template v-if="form.sourceKind !== 'managed_ref'">
           <div class="check-row">
             <input id="cmp-isweb" v-model="form.isWeb" type="checkbox" />
-            <label for="cmp-isweb">เป็น web (public) — route ผ่าน domain ของโปรเจกต์</label>
+            <label for="cmp-isweb">{{ $t("components.form.isWeb") }}</label>
           </div>
 
           <div class="form-grid">
@@ -674,18 +689,18 @@ function sourceSummary(c: Component): string {
               <input v-model="form.webPort" class="mono" placeholder="3000" inputmode="numeric" />
             </label>
             <label>
-              <span>Internal port (สำหรับ health check)</span>
+              <span>{{ $t("components.form.internalPort") }}</span>
               <input v-model="form.internalPort" class="mono" placeholder="3000" inputmode="numeric" />
             </label>
             <label>
-              <span>Health check path (ไม่บังคับ)</span>
+              <span>{{ $t("components.form.healthPath") }}</span>
               <input v-model="form.healthCheckPath" class="mono" placeholder="/health" />
             </label>
           </div>
 
           <div class="form-grid">
             <label>
-              <span>Health interval (วินาที)</span>
+              <span>{{ $t("components.form.healthInterval") }}</span>
               <input
                 v-model="form.healthCheckIntervalSec"
                 class="mono"
@@ -694,7 +709,7 @@ function sourceSummary(c: Component): string {
               />
             </label>
             <label>
-              <span>Health timeout (วินาที)</span>
+              <span>{{ $t("components.form.healthTimeout") }}</span>
               <input
                 v-model="form.healthCheckTimeoutSec"
                 class="mono"
@@ -712,36 +727,32 @@ function sourceSummary(c: Component): string {
               />
             </label>
           </div>
-          <small class="muted">
-            deploy รอ health check ได้นานสุดประมาณ interval × retries วินาที — service ที่ start ช้า
-            (เช่น โหลดโมเดล) ให้เพิ่ม retries
-          </small>
+          <small class="muted">{{ $t("components.form.healthWaitHint") }}</small>
 
           <label>
-            <span>Health command (ไม่บังคับ)</span>
+            <span>{{ $t("components.form.healthCmd") }}</span>
             <input v-model="form.healthCmd" class="mono" placeholder="redis-cli ping" />
-            <small class="muted">
-              คำสั่งตรวจสุขภาพในคอนเทนเนอร์ (Docker HEALTHCHECK) — จำเป็นถ้ามี component อื่นตั้ง
-              depends_on แบบ "healthy" มาที่ตัวนี้ (เช่น <code>pg_isready -U app</code>, <code>redis-cli ping</code>)
-            </small>
+            <i18n-t scope="global" keypath="components.form.healthCmdHint" tag="small" class="muted">
+              <template #a><code>pg_isready -U app</code></template>
+              <template #b><code>redis-cli ping</code></template>
+            </i18n-t>
           </label>
 
           <label>
-            <span>Command (ไม่บังคับ)</span>
+            <span>{{ $t("components.form.command") }}</span>
             <input v-model="form.command" class="mono" placeholder="node server.js" />
-            <small class="muted">
-              เว้นวรรคคั่น argument (ใช้ "..." หรือ '...' ครอบค่าที่มีเว้นวรรค) — ไม่ผ่าน shell
-              ถ้าต้องการ shell ให้เขียน <code>sh -c "..."</code>
-            </small>
+            <i18n-t scope="global" keypath="components.form.commandHint" tag="small" class="muted">
+              <template #example><code>sh -c "..."</code></template>
+            </i18n-t>
           </label>
 
           <div class="form-grid">
             <label>
-              <span>CPU limit (ไม่บังคับ)</span>
+              <span>{{ $t("components.form.cpuLimit") }}</span>
               <input v-model="form.cpuLimit" class="mono" placeholder="0.5" inputmode="decimal" />
             </label>
             <label>
-              <span>Memory limit MB (ไม่บังคับ)</span>
+              <span>{{ $t("components.form.memoryLimit") }}</span>
               <input v-model="form.memoryLimitMb" class="mono" placeholder="512" inputmode="numeric" />
             </label>
             <label>
@@ -754,34 +765,36 @@ function sourceSummary(c: Component): string {
               </select>
             </label>
             <label>
-              <span>Memory + swap MB (ไม่บังคับ)</span>
+              <span>{{ $t("components.form.memorySwap") }}</span>
               <input
                 v-model="form.memorySwapMb"
                 class="mono"
-                placeholder="เท่ากับ memory = ไม่ให้ swap"
+                :placeholder="$t('components.form.memorySwapPlaceholder')"
                 inputmode="numeric"
               />
             </label>
             <label>
-              <span>PID limit (ไม่บังคับ)</span>
+              <span>{{ $t("components.form.pidsLimit") }}</span>
               <input v-model="form.pidsLimit" class="mono" placeholder="512" inputmode="numeric" />
             </label>
           </div>
           <div class="check-row">
             <input id="comp-cap-drop" v-model="form.capDropAll" type="checkbox" />
-            <label for="comp-cap-drop">ตัด Linux capability ทั้งหมด (<code>--cap-drop ALL</code>)</label>
+            <i18n-t scope="global" keypath="components.form.capDropAll" tag="label" for="comp-cap-drop">
+              <template #flag><code>--cap-drop ALL</code></template>
+            </i18n-t>
           </div>
           <div class="check-row">
             <input id="comp-nnp" v-model="form.noNewPrivileges" type="checkbox" />
-            <label for="comp-nnp">
-              ห้ามยกระดับสิทธิ์ใน container (<code>no-new-privileges</code>)
-            </label>
+            <i18n-t scope="global" keypath="components.form.noNewPrivileges" tag="label" for="comp-nnp">
+              <template #flag><code>no-new-privileges</code></template>
+            </i18n-t>
           </div>
         </template>
 
         <!-- dependsOn -->
         <div v-if="dependableComponents.length > 0" class="stack-sm">
-          <span class="field-label">Depends on (เริ่มหลัง component เหล่านี้)</span>
+          <span class="field-label">{{ $t("components.form.dependsOn") }}</span>
           <div v-for="dc in dependableComponents" :key="dc.id" class="dep-row">
             <div class="check-row">
               <input
@@ -797,8 +810,8 @@ function sourceSummary(c: Component): string {
               v-model="depSelections[dc.name]"
               class="dep-cond"
             >
-              <option value="started">started (แค่เริ่มแล้ว)</option>
-              <option value="healthy">healthy (ผ่าน health check)</option>
+              <option value="started">{{ $t("components.form.depStarted") }}</option>
+              <option value="healthy">{{ $t("components.form.depHealthy") }}</option>
             </select>
           </div>
         </div>
@@ -811,29 +824,37 @@ function sourceSummary(c: Component): string {
         <div class="form-actions">
           <button class="primary small" :disabled="saving || !form.name.trim()" @click="submitForm">
             <span v-if="saving" class="spinner" />
-            {{ saving ? "กำลังบันทึก…" : formMode === "create" ? "เพิ่ม" : "บันทึก" }}
+            {{
+              saving
+                ? $t("common.saving")
+                : formMode === "create"
+                  ? $t("common.add")
+                  : $t("common.save")
+            }}
           </button>
-          <button class="secondary small" :disabled="saving" @click="closeForm">ยกเลิก</button>
+          <button class="secondary small" :disabled="saving" @click="closeForm">
+            {{ $t("common.cancel") }}
+          </button>
         </div>
       </div>
 
       <!-- Promote to compose -->
-      <div v-if="mode === 'single' && !archived" class="promote-panel inset">
+      <div v-if="mode === 'single' && canWrite && !archived" class="promote-panel inset">
         <div class="row-between wrap">
           <div class="stack-sm">
-            <strong>เปลี่ยนเป็น multi-container (compose)</strong>
+            <strong>{{ $t("components.promote.title") }}</strong>
             <span class="muted small">
               <template v-if="canPromote">
-                พร้อมแล้ว — deploy ครั้งถัดไปจะรัน {{ components.length }} component
+                {{ $t("components.promote.ready", { n: components.length }, components.length) }}
               </template>
               <template v-else>
-                ต้องมีอย่างน้อย 1 component และอย่างน้อย 1 ตัวที่เป็น web ก่อนถึงจะเปลี่ยนได้
+                {{ $t("components.promote.notReady") }}
               </template>
             </span>
           </div>
           <button class="primary small" :disabled="!canPromote || promoting" @click="promote">
             <span v-if="promoting" class="spinner" />
-            {{ promoting ? "กำลังเปลี่ยน…" : "เปลี่ยนเป็น compose" }}
+            {{ promoting ? $t("components.promote.working") : $t("components.promote.action") }}
           </button>
         </div>
         <p v-if="promoteError" class="alert alert-bad small">
@@ -844,7 +865,7 @@ function sourceSummary(c: Component): string {
 
       <p class="muted small note">
         <AppIcon name="info" :size="13" />
-        การเปลี่ยนแปลง component จะมีผลเมื่อ deploy ครั้งถัดไป
+        {{ $t("components.note") }}
       </p>
     </template>
   </div>

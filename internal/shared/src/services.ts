@@ -13,6 +13,8 @@
  *   (ไม่งั้นกลายเป็นช่องรัน container อะไรก็ได้บน host)
  */
 
+import { LocalizedError, type LocalizedText } from "./i18n";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -70,7 +72,7 @@ export interface ServiceTemplate {
   type: ServiceType;
   displayName: string;
   /** อธิบายสั้น ๆ ว่าเหมาะกับงานแบบไหน — แสดงในการ์ดเลือก template */
-  tagline: string;
+  tagline: LocalizedText;
   category: ServiceCategory;
   /** image repository ไม่รวม tag */
   image: string;
@@ -129,7 +131,10 @@ export interface ServiceTemplate {
 const POSTGRES: ServiceTemplate = {
   type: "postgres",
   displayName: "PostgreSQL",
-  tagline: "ฐานข้อมูลเชิงสัมพันธ์ที่ครบเครื่องที่สุด เหมาะกับงานทั่วไป",
+  tagline: {
+    th: "ฐานข้อมูลเชิงสัมพันธ์ที่ครบเครื่องที่สุด เหมาะกับงานทั่วไป",
+    en: "The most full-featured relational database, good for general use",
+  },
   category: "sql",
   image: "postgres",
   versions: ["17-alpine", "16-alpine", "15-alpine"],
@@ -160,7 +165,10 @@ const POSTGRES: ServiceTemplate = {
 const MYSQL: ServiceTemplate = {
   type: "mysql",
   displayName: "MySQL",
-  tagline: "มาตรฐานที่ app ส่วนใหญ่รองรับ เหมาะกับ Laravel/WordPress",
+  tagline: {
+    th: "มาตรฐานที่ app ส่วนใหญ่รองรับ เหมาะกับ Laravel/WordPress",
+    en: "The standard most apps support, good for Laravel/WordPress",
+  },
   category: "sql",
   image: "mysql",
   versions: ["8.4", "8.0"],
@@ -194,7 +202,10 @@ const MYSQL: ServiceTemplate = {
 const MARIADB: ServiceTemplate = {
   type: "mariadb",
   displayName: "MariaDB",
-  tagline: "ทางเลือกแทน MySQL ที่เบากว่าและเป็น open source เต็มตัว",
+  tagline: {
+    th: "ทางเลือกแทน MySQL ที่เบากว่าและเป็น open source เต็มตัว",
+    en: "A lighter, fully open source alternative to MySQL",
+  },
   category: "sql",
   image: "mariadb",
   versions: ["11.4", "10.11"],
@@ -227,7 +238,10 @@ const MARIADB: ServiceTemplate = {
 const REDIS: ServiceTemplate = {
   type: "redis",
   displayName: "Redis",
-  tagline: "in-memory store สำหรับ cache, session และ queue",
+  tagline: {
+    th: "in-memory store สำหรับ cache, session และ queue",
+    en: "In-memory store for cache, sessions and queues",
+  },
   category: "cache",
   image: "redis",
   versions: ["7-alpine", "8-alpine"],
@@ -250,7 +264,10 @@ const REDIS: ServiceTemplate = {
 const MONGODB: ServiceTemplate = {
   type: "mongodb",
   displayName: "MongoDB",
-  tagline: "document database เหมาะกับข้อมูลที่ schema ยืดหยุ่น",
+  tagline: {
+    th: "document database เหมาะกับข้อมูลที่ schema ยืดหยุ่น",
+    en: "Document database, good for data with a flexible schema",
+  },
   category: "nosql",
   image: "mongo",
   versions: ["8", "7"],
@@ -288,7 +305,10 @@ const MONGODB: ServiceTemplate = {
 const LIBSQL: ServiceTemplate = {
   type: "libsql",
   displayName: "libSQL",
-  tagline: "SQLite ที่ต่อผ่านเครือข่ายได้ เบามาก เหมาะกับ app ขนาดเล็ก-กลาง",
+  tagline: {
+    th: "SQLite ที่ต่อผ่านเครือข่ายได้ เบามาก เหมาะกับ app ขนาดเล็ก-กลาง",
+    en: "SQLite you can reach over the network, very light, good for small to medium apps",
+  },
   category: "sql",
   image: "ghcr.io/tursodatabase/libsql-server",
   versions: ["latest"],
@@ -321,7 +341,10 @@ const PGVECTOR: ServiceTemplate = {
   ...POSTGRES,
   type: "pgvector",
   displayName: "PostgreSQL + pgvector",
-  tagline: "PostgreSQL ที่มี extension vector ในตัว เหมาะกับ embedding/AI search",
+  tagline: {
+    th: "PostgreSQL ที่มี extension vector ในตัว เหมาะกับ embedding/AI search",
+    en: "PostgreSQL with the vector extension built in, good for embeddings/AI search",
+  },
   image: "pgvector/pgvector",
   versions: ["pg17", "pg16"],
 };
@@ -329,7 +352,10 @@ const PGVECTOR: ServiceTemplate = {
 const MINIO: ServiceTemplate = {
   type: "minio",
   displayName: "MinIO",
-  tagline: "object storage ที่ใช้ S3 API ได้ เก็บไฟล์ที่ผู้ใช้อัปโหลด",
+  tagline: {
+    th: "object storage ที่ใช้ S3 API ได้ เก็บไฟล์ที่ผู้ใช้อัปโหลด",
+    en: "S3-compatible object storage for files your users upload",
+  },
   category: "storage",
   // MinIO หยุดปล่อย image บน Docker Hub แล้ว — ใช้ build จาก source ของ pgsty ที่ปักเวอร์ชัน
   image: "pgsty/minio",
@@ -356,7 +382,10 @@ const MINIO: ServiceTemplate = {
 const CLAMAV: ServiceTemplate = {
   type: "clamav",
   displayName: "ClamAV",
-  tagline: "สแกนไวรัสไฟล์ที่อัปโหลดผ่าน clamd (TCP 3310)",
+  tagline: {
+    th: "สแกนไวรัสไฟล์ที่อัปโหลดผ่าน clamd (TCP 3310)",
+    en: "Virus scanning for uploaded files through clamd (TCP 3310)",
+  },
   category: "security",
   image: "clamav/clamav-debian",
   versions: ["1.5", "1.4"],
@@ -439,9 +468,10 @@ export function resolveVersion(type: ServiceType, version?: string | null): stri
   const template = getTemplate(type);
   if (!version) return template.versions[0] as string;
   if (!template.versions.includes(version)) {
-    throw new Error(
-      `version "${version}" ไม่รองรับสำหรับ ${template.displayName} — ใช้ได้: ${template.versions.join(", ")}`,
-    );
+    throw new LocalizedError({
+      th: `version "${version}" ไม่รองรับสำหรับ ${template.displayName} — ใช้ได้: ${template.versions.join(", ")}`,
+      en: `Version "${version}" is not supported for ${template.displayName}. Available: ${template.versions.join(", ")}`,
+    });
   }
   return version;
 }

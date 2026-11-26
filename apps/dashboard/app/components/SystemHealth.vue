@@ -8,6 +8,7 @@
 withDefaults(defineProps<{ compact?: boolean }>(), { compact: false });
 
 const api = useApi();
+const { t } = useI18n();
 
 const { data: health, refresh } = await useAsyncData(
   "system-health",
@@ -31,21 +32,21 @@ const tone = computed(() => {
 });
 
 const label = computed(() => {
-  if (!health.value) return "กำลังตรวจ…";
-  if (allOk.value) return "ระบบปกติ";
+  if (!health.value) return t("system.health.checking");
+  if (allOk.value) return t("system.health.ok");
   const down = [!dbOk.value && "database", !workerOk.value && "worker"].filter(Boolean);
-  return `ขัดข้อง: ${down.join(", ")}`;
+  return t("system.health.down", { components: down.join(", ") });
 });
 </script>
 
 <template>
   <span v-if="compact" class="status" :class="tone" :title="label">
-    {{ allOk ? "ปกติ" : "ขัดข้อง" }}
+    {{ allOk ? $t("system.health.okShort") : $t("system.health.downShort") }}
   </span>
 
   <div v-else class="health">
     <div class="health-head">
-      <span class="eyebrow">สถานะระบบ</span>
+      <span class="eyebrow">{{ $t("system.health.title") }}</span>
       <span class="status" :class="tone">{{ label }}</span>
     </div>
     <div class="checks">

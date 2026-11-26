@@ -1,0 +1,61 @@
+{
+  "members": {
+    "title": "Members",
+    "subtitle": "Add members, set their role and choose the projects each one can reach",
+    "add": "Add member",
+    "empty": "There are no other members yet",
+    "col": {
+      "username": "Username",
+      "role": "Role",
+      "projects": "Projects",
+      "lastSeen": "Last active",
+      "status": "Status"
+    },
+    "you": "You",
+    "active": "Active",
+    "disabled": "Disabled",
+    "never": "Never signed in",
+    "allProjects": "All projects",
+    "projectCount": "{n} project | {n} projects",
+    "noProjects": "No projects yet",
+    "roleHelp": {
+      "admin": "Can do everything, including member management and system settings. Sees every project",
+      "developer": "Can deploy and edit, only in the selected projects",
+      "viewer": "Read-only, only in the selected projects"
+    },
+    "form": {
+      "createTitle": "Add member",
+      "editTitle": "Edit member {name}",
+      "username": "Username",
+      "usernameHint": "3–64 letters, digits, dots, hyphens or underscores",
+      "password": "Initial password",
+      "newPassword": "Set a new password",
+      "passwordHint": "At least {n} characters. Send it over a secure channel and ask the member to change it on the Account page",
+      "newPasswordHint": "Leave empty to keep the current one. Setting a new password signs the member out everywhere",
+      "role": "Role",
+      "projects": "Projects they can reach",
+      "projectsAdmin": "An admin already sees every project",
+      "projectsEmpty": "There are no projects to choose from yet",
+      "selfNote": "This is your own account. You cannot change your own role or disable it"
+    },
+    "action": {
+      "edit": "Edit",
+      "disable": "Disable",
+      "enable": "Enable",
+      "delete": "Delete"
+    },
+    "confirmDisable": {
+      "title": "Disable {name}",
+      "message": "The member is signed out at once and cannot sign in until the account is enabled again. Their data and access stay as they are"
+    },
+    "confirmDelete": {
+      "title": "Delete member {name}",
+      "message": "This permanently deletes the account and cannot be undone. Their history stays in the audit log with the username"
+    },
+    "error": {
+      "load": "Could not load the members",
+      "save": "Could not save the member",
+      "delete": "Could not delete the member"
+    }
+  }
+}

@@ -17,12 +17,12 @@
  */
 
 import type { Database } from "bun:sqlite";
-import { AppError, type DeploymentStatus, isTerminal } from "@zixploy/shared";
+import { AppError, type DeploymentStatus, isTerminal, type LocalizedText } from "@zixploy/shared";
 
 export interface DeleteResult {
   deleted: number;
   /** จำนวนที่ข้ามเพราะลบไม่ได้ พร้อมเหตุผล — คืนให้ UI บอกผู้ใช้ตรง ๆ */
-  skipped: Array<{ id: string; reason: string }>;
+  skipped: Array<{ id: string; reason: string; reasonText: LocalizedText }>;
 }
 
 interface Row {
@@ -50,12 +50,18 @@ export function activeDeploymentId(db: Database, projectId: string): string | nu
 }
 
 /** เหตุผลที่ลบแถวนี้ไม่ได้ — null = ลบได้ */
-function blockReason(row: Row, activeId: string | null): string | null {
+function blockReason(row: Row, activeId: string | null): LocalizedText | null {
   if (!isTerminal(row.status as DeploymentStatus)) {
-    return "กำลังทำงานอยู่ — ยกเลิกก่อนจึงจะลบได้";
+    return {
+      th: "กำลังทำงานอยู่ — ยกเลิกก่อนจึงจะลบได้",
+      en: "it is still running. Cancel it before deleting",
+    };
   }
   if (row.id === activeId) {
-    return "เป็นเวอร์ชันที่ให้บริการอยู่ — ลบแล้ว restart/rollback จะใช้ไม่ได้";
+    return {
+      th: "เป็นเวอร์ชันที่ให้บริการอยู่ — ลบแล้ว restart/rollback จะใช้ไม่ได้",
+      en: "it is the version currently serving. Deleting it would break restart/rollback",
+    };
   }
   return null;
 }
@@ -82,10 +88,19 @@ export function deleteDeployment(
     )
     .get(deploymentId, projectId);
 
-  if (!row) throw new AppError("DEPLOYMENT_NOT_FOUND", "ไม่พบ deployment นี้");
+  if (!row)
+    throw new AppError("DEPLOYMENT_NOT_FOUND", {
+      th: "ไม่พบ deployment นี้",
+      en: "Deployment not found",
+    });
 
   const reason = blockReason(row, activeDeploymentId(db, projectId));
-  if (reason) throw new AppError("INVALID_STATE_TRANSITION", `ลบไม่ได้: ${reason}`);
+  if (reason) {
+    throw new AppError("INVALID_STATE_TRANSITION", {
+      th: `ลบไม่ได้: ${reason.th}`,
+      en: `Cannot delete: ${reason.en}`,
+    });
+  }
 
   deleteRow(db, deploymentId);
   return { deleted: 1, skipped: [] };
@@ -108,7 +123,7 @@ export function pruneDeploymentHistory(db: Database, projectId: string, keep = 0
     )
     .all(projectId);
 
-  const skipped: Array<{ id: string; reason: string }> = [];
+  const skipped: DeleteResult["skipped"] = [];
   let deleted = 0;
 
   rows.forEach((row, index) => {
@@ -116,7 +131,7 @@ export function pruneDeploymentHistory(db: Database, projectId: string, keep = 0
 
     const reason = blockReason(row, activeId);
     if (reason) {
-      skipped.push({ id: row.id, reason });
+      skipped.push({ id: row.id, reason: reason.th, reasonText: reason });
       return;
     }
     deleteRow(db, row.id);

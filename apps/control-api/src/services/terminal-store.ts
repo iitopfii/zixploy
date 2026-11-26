@@ -47,7 +47,11 @@ export function requireSession(db: Database, sessionId: string): TerminalSession
   const row = db
     .query<TerminalSessionRow, [string]>(`SELECT ${SELECT_ALL} FROM terminal_sessions WHERE id = ?`)
     .get(sessionId);
-  if (!row) throw new AppError("TERMINAL_SESSION_NOT_FOUND", "ไม่พบ terminal session นี้");
+  if (!row)
+    throw new AppError("TERMINAL_SESSION_NOT_FOUND", {
+      th: "ไม่พบ terminal session นี้",
+      en: "Terminal session not found",
+    });
   return row;
 }
 

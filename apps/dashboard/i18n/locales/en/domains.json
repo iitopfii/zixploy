@@ -1,0 +1,90 @@
+{
+  "domains": {
+    "subtitle": "Point a domain at this server, then choose how HTTPS is handled",
+    "add": "Add domain",
+    "adding": "Adding…",
+    "firstWeb": "first web component",
+    "disabledBadge": "Disabled",
+    "httpsSettings": "HTTPS settings",
+    "enable": "Enable",
+    "disable": "Disable",
+    "error": {
+      "load": "Could not load domains",
+      "add": "Could not add the domain"
+    },
+    "dnsHint": {
+      "createARecord": "Create an A record pointing to",
+      "cloudflareOk": "Cloudflare proxy can be turned on, it is supported"
+    },
+    "form": {
+      "pathPrefixNote": "(optional, leave empty for the whole host)",
+      "pathPrefixHelp": "Only requests whose path starts with this value. It always wins over the \"whole host\" row of the same hostname.",
+      "component": "Send traffic to component",
+      "firstWebOption": "first web component ({name})",
+      "containerPort": "Container port",
+      "enableHttps": "Enable HTTPS",
+      "forceRedirect": "Force HTTP → HTTPS",
+      "externalProxy": "TLS is handled by an external proxy (e.g. Nginx Proxy Manager, Cloudflare, load balancer)",
+      "externalProxyNote": "The external proxy terminates TLS and Zixploy serves plain HTTP to it (turning on HTTPS/redirect here would cause a redirect loop)"
+    },
+    "empty": {
+      "title": "No domains yet",
+      "hint": "Add a domain to receive traffic from outside"
+    },
+    "dns": {
+      "check": "Check DNS",
+      "checking": "Checking…",
+      "checkFailed": "Could not run the DNS check. Refresh the page and try again.",
+      "lastChecked": "Last checked: {time}",
+      "neverChecked": "never",
+      "resolved": "Resolves to: {addresses}",
+      "proxyLoopWarning": "DNS for this domain goes through a proxy/CDN. If TLS is terminated at the proxy, turning on HTTPS/redirect here causes a redirect loop. Consider the \"TLS is handled by an external proxy\" mode under HTTPS settings.",
+      "status": {
+        "valid": {
+          "label": "Points to this server",
+          "hint": "The domain is ready to receive traffic"
+        },
+        "proxied": {
+          "label": "Behind Cloudflare",
+          "hint": "Cloudflare proxy is on. DDoS protection is active and traffic reaches this server through Cloudflare."
+        },
+        "mismatch": {
+          "label": "Points elsewhere",
+          "hint": "The current A record does not point to this server and is not Cloudflare. Fix it at your DNS provider."
+        },
+        "unknown": {
+          "label": "Does not resolve",
+          "hint": "No DNS record yet, or it has not propagated (wait 5–30 minutes after creating the record)"
+        },
+        "pending": {
+          "label": "Not checked yet",
+          "hint": "Click \"Check DNS\" to verify"
+        }
+      }
+    },
+    "tls": {
+      "title": "TLS certificate",
+      "custom": "Your certificate",
+      "letsEncrypt": "Let's Encrypt (automatic)",
+      "letsEncryptHint": "Certificates are requested and renewed automatically. Port 80 must be reachable from outside.",
+      "expires": "Expires",
+      "customHint": "An uploaded certificate is not renewed automatically. Upload a new one before it expires.",
+      "replace": "Replace certificate",
+      "upload": "Upload your own certificate",
+      "backToLetsEncrypt": "Switch back to Let's Encrypt",
+      "pasteHint": "Paste PEM into both fields. The certificate must cover {hostname} and the private key must have no passphrase.",
+      "save": "Save certificate",
+      "uploadFailed": "Could not upload the certificate",
+      "expiry": {
+        "expired": "Expired {n} day ago, upload a new one | Expired {n} days ago, upload a new one",
+        "today": "Expires today, upload a new one",
+        "soon": "{n} day left, prepare a new one | {n} days left, prepare a new one",
+        "left": "{n} day left | {n} days left"
+      }
+    },
+    "delete": {
+      "confirm": "Delete domain {hostname}? Incoming traffic will no longer be routed.",
+      "confirmButton": "Confirm delete"
+    }
+  }
+}

@@ -11,22 +11,31 @@
  */
 const api = useApi();
 const route = useRoute();
+const { t } = useI18n();
 
 const githubParam = computed(() => route.query.github as string | undefined);
 const callbackMessage = computed(() => {
   if (githubParam.value === "app-created") {
     const name = route.query.app as string | undefined;
-    return { ok: true, text: name ? `สร้าง GitHub App "${name}" สำเร็จ` : "สร้าง GitHub App สำเร็จ" };
+    return {
+      ok: true,
+      text: name ? t("github.callback.appCreatedNamed", { name }) : t("github.callback.appCreated"),
+    };
   }
   if (githubParam.value === "installed") {
     const account = route.query.account as string | undefined;
-    return { ok: true, text: account ? `ติดตั้งกับ ${account} สำเร็จ` : "ติดตั้ง GitHub App สำเร็จ" };
+    return {
+      ok: true,
+      text: account
+        ? t("github.callback.installedNamed", { account })
+        : t("github.callback.installed"),
+    };
   }
   if (githubParam.value === "manifest-error") {
-    return { ok: false, text: "สร้าง GitHub App ไม่สำเร็จ — code หมดอายุหรือถูกใช้ไปแล้ว ลองใหม่" };
+    return { ok: false, text: t("github.callback.manifestError") };
   }
   if (githubParam.value === "error") {
-    return { ok: false, text: "เกิดข้อผิดพลาด — ลองใหม่อีกครั้ง" };
+    return { ok: false, text: t("github.callback.error") };
   }
   return null;
 });
@@ -82,11 +91,11 @@ async function createApp() {
   createError.value = "";
   const name = newAppName.value.trim();
   if (!name) {
-    createError.value = "กรุณาระบุชื่อ app";
+    createError.value = t("github.error.nameRequired");
     return;
   }
   if (name.length > 34) {
-    createError.value = "ชื่อ app ต้องไม่เกิน 34 ตัวอักษร (GitHub limit)";
+    createError.value = t("github.error.nameTooLong");
     return;
   }
 
@@ -97,8 +106,7 @@ async function createApp() {
       org ? { name, organization: org } : { name },
     );
     if (error || !data) {
-      const body = error?.value as { error?: { message?: string } } | null;
-      createError.value = body?.error?.message ?? "สร้าง manifest ไม่สำเร็จ";
+      createError.value = apiErrorMessage(error, "github.error.manifest");
       return;
     }
 
@@ -114,7 +122,7 @@ async function createApp() {
     document.body.appendChild(form);
     form.submit();
   } catch {
-    createError.value = "ติดต่อ API ไม่ได้";
+    createError.value = t("common.apiUnreachable");
   } finally {
     creating.value = false;
   }
@@ -128,12 +136,12 @@ async function installApp(appId: string) {
   try {
     const { data, error } = await api.api.v1.github.apps({ id: appId })["install-url"].get();
     if (error || !data?.url) {
-      installError.value = "ไม่สามารถสร้าง install URL ได้";
+      installError.value = t("github.error.installUrl");
       return;
     }
     window.location.href = data.url;
   } catch {
-    installError.value = "ติดต่อ API ไม่ได้";
+    installError.value = t("common.apiUnreachable");
   }
 }
 
@@ -154,14 +162,13 @@ async function deleteApp() {
   try {
     const { error } = await api.api.v1.github.apps({ id }).delete();
     if (error) {
-      const body = error.value as { error?: { message?: string } } | null;
-      deleteError.value = body?.error?.message ?? "ลบไม่สำเร็จ";
+      deleteError.value = apiErrorMessage(error, "common.deleteFailed");
       return;
     }
     confirmDeleteId.value = null;
     await Promise.all([refreshApps(), refreshInstallations(), refreshStatus()]);
   } catch {
-    deleteError.value = "ติดต่อ API ไม่ได้";
+    deleteError.value = t("common.apiUnreachable");
   } finally {
     deleting.value = false;
   }
@@ -174,10 +181,10 @@ async function deleteApp() {
       <div>
         <NuxtLink to="/" class="crumb">
           <AppIcon name="arrowLeft" :size="14" />
-          Projects
+          {{ $t("nav.projects") }}
         </NuxtLink>
-        <h1>GitHub Apps</h1>
-        <p class="muted small">จัดการ GitHub App ที่ใช้เชื่อมต่อ repository เข้ากับ project</p>
+        <h1>{{ $t("nav.github") }}</h1>
+        <p class="muted small">{{ $t("github.subtitle") }}</p>
       </div>
     </header>
 
@@ -195,12 +202,10 @@ async function deleteApp() {
       <div class="alert alert-warn no-border">
         <AppIcon name="key" :size="16" />
         <div class="stack-sm">
-          <strong>Master key ยังไม่ได้ configure</strong>
-          <span>
-            GitHub App credentials ต้องเข้ารหัสก่อนเก็บลงฐานข้อมูล —
-            ตั้งค่า <code>ZIXPLOY_MASTER_KEY_FILE</code> ชี้ไฟล์ที่มี key ขนาด 32 byte (base64)
-            แล้ว restart Control API
-          </span>
+          <strong>{{ $t("github.masterKey.title") }}</strong>
+          <i18n-t scope="global" keypath="github.masterKey.body" tag="span">
+            <template #file><code>ZIXPLOY_MASTER_KEY_FILE</code></template>
+          </i18n-t>
         </div>
       </div>
       <pre class="log-box hint-box">openssl rand -base64 32 &gt; /etc/zixploy/master.key
@@ -211,34 +216,33 @@ chmod 600 /etc/zixploy/master.key</pre>
       <!-- รายการ apps -->
       <div class="card">
         <div class="row-between card-head">
-          <h2 class="section-title">GitHub Apps ของคุณ</h2>
+          <h2 class="section-title">{{ $t("github.apps.yours") }}</h2>
           <button v-if="!showCreateForm" class="primary small" @click="showCreateForm = true">
             <AppIcon name="plus" :size="14" />
-            สร้าง GitHub App
+            {{ $t("github.apps.create") }}
           </button>
         </div>
 
         <!-- ฟอร์มสร้าง app -->
         <div v-if="showCreateForm" class="inset create-form">
           <p class="muted small">
-            ระบบจะสร้าง GitHub App ให้อัตโนมัติ — GitHub จะถามยืนยันแล้วส่ง credentials กลับมา
-            (เก็บแบบเข้ารหัส ไม่ต้องคัดลอก key เอง)
+            {{ $t("github.apps.createIntro") }}
           </p>
           <label>
-            <span>ชื่อ App</span>
+            <span>{{ $t("github.apps.name") }}</span>
             <input
               v-model="newAppName"
               type="text"
               maxlength="34"
-              placeholder="เช่น Zixploy Deploy"
+              :placeholder="$t('github.apps.namePlaceholder')"
               @keyup.enter="createApp"
             />
             <span class="field-hint">
-              {{ newAppName.length }}/34 — ชื่อต้องไม่ซ้ำกับ App อื่นบน GitHub
+              {{ $t("github.apps.nameHint", { n: newAppName.length }) }}
             </span>
           </label>
           <label>
-            <span>Organization (ไม่ระบุ = personal account)</span>
+            <span>{{ $t("github.apps.organization") }}</span>
             <input v-model="newAppOrg" type="text" placeholder="my-org" />
           </label>
 
@@ -250,14 +254,14 @@ chmod 600 /etc/zixploy/master.key</pre>
           <div class="actions">
             <button class="primary" :disabled="creating" @click="createApp">
               <span v-if="creating" class="spinner" />
-              {{ creating ? "กำลังเปิด GitHub…" : "สร้างบน GitHub" }}
+              {{ creating ? $t("github.apps.opening") : $t("github.apps.createOnGithub") }}
             </button>
             <button
               class="secondary"
               :disabled="creating"
               @click="showCreateForm = false; createError = ''"
             >
-              ยกเลิก
+              {{ $t("common.cancel") }}
             </button>
           </div>
         </div>
@@ -269,8 +273,8 @@ chmod 600 /etc/zixploy/master.key</pre>
 
         <div v-else-if="apps.length === 0 && !showCreateForm" class="empty">
           <span class="empty-icon"><AppIcon name="github" :size="20" /></span>
-          <span class="empty-title">ยังไม่มี GitHub App</span>
-          <p class="small">สร้าง app แรกเพื่อเชื่อมต่อ repository</p>
+          <span class="empty-title">{{ $t("github.apps.empty") }}</span>
+          <p class="small">{{ $t("github.apps.emptyHint") }}</p>
         </div>
 
         <ul v-else-if="apps.length > 0" class="app-list">
@@ -279,7 +283,7 @@ chmod 600 /etc/zixploy/master.key</pre>
               <div class="app-title">
                 <strong>{{ app.name }}</strong>
                 <a :href="app.htmlUrl" target="_blank" rel="noopener noreferrer" class="app-link">
-                  บน GitHub
+                  {{ $t("github.apps.onGithub") }}
                   <AppIcon name="external" :size="11" />
                 </a>
               </div>
@@ -315,14 +319,23 @@ chmod 600 /etc/zixploy/master.key</pre>
                   <span v-else class="status status-running">Active</span>
                 </div>
               </div>
-              <p v-else class="muted small no-install">ยังไม่ได้ติดตั้งกับ account ใด</p>
+              <p v-else class="muted small no-install">{{ $t("github.apps.notInstalled") }}</p>
             </div>
 
             <div class="app-actions">
               <button class="secondary small" @click="installApp(app.id)">
-                {{ installationsFor(app.id).length > 0 ? "เพิ่ม installation" : "Install" }}
+                {{
+                  installationsFor(app.id).length > 0
+                    ? $t("github.apps.addInstallation")
+                    : $t("github.apps.install")
+                }}
               </button>
-              <button class="danger small icon" title="ลบ" aria-label="ลบ" @click="confirmDeleteId = app.id">
+              <button
+                class="danger small icon"
+                :title="$t('common.delete')"
+                :aria-label="$t('common.delete')"
+                @click="confirmDeleteId = app.id"
+              >
                 <AppIcon name="trash" :size="14" />
               </button>
             </div>
@@ -342,9 +355,9 @@ chmod 600 /etc/zixploy/master.key</pre>
 
     <ConfirmDialog
       :open="confirmDeleteId !== null"
-      title="ลบ GitHub App"
-      message="ลบ app นี้ออกจาก Zixploy — installations ที่ผูกอยู่จะถูกตัดการเชื่อมต่อและ auto deploy ของ projects ที่เกี่ยวข้องจะถูกปิด (app บน GitHub ยังอยู่ ต้องลบเองผ่าน GitHub settings)"
-      confirm-label="ลบ"
+      :title="$t('github.apps.deleteTitle')"
+      :message="$t('github.apps.deleteMessage')"
+      :confirm-label="$t('common.delete')"
       :require-typed="appPendingDelete?.name ?? ''"
       :busy="deleting"
       @cancel="confirmDeleteId = null"

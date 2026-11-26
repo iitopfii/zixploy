@@ -1,0 +1,63 @@
+{
+  "monitoring": {
+    "reload": "โหลดใหม่",
+    "memory": "หน่วยความจำ",
+    "disk": "ดิสก์",
+    "range": {
+      "label": "ช่วงเวลา",
+      "h1": "1 ชม.",
+      "h6": "6 ชม.",
+      "h24": "24 ชม."
+    },
+    "error": {
+      "load": "โหลด metrics ไม่สำเร็จ"
+    },
+    "chart": {
+      "ariaLabel": "กราฟ {count} จุด ค่าล่าสุด {value}",
+      "empty": "ยังไม่มีข้อมูล"
+    },
+    "project": {
+      "title": "การใช้ทรัพยากร",
+      "emptyTitle": "ยังไม่มีข้อมูลการใช้ทรัพยากร",
+      "emptyHint": "เก็บได้เฉพาะ project ที่มี container ทำงานอยู่ — deploy แล้วรอประมาณ 15 วินาที",
+      "notRunning": "container ไม่ได้ทำงานอยู่ — ตัวเลขด้านล่างเป็นค่าล่าสุดที่วัดได้ก่อนหยุด",
+      "peak": "สูงสุด {value}",
+      "cpuBasis": "เทียบกับ 1 core = 100%",
+      "memLimit": "จำกัด {size}",
+      "memUnlimited": "ไม่จำกัด",
+      "memOfLimit": "{percent} ของ limit",
+      "noMemLimit": "ไม่ได้ตั้ง memory limit",
+      "containerStatus": "สถานะ container",
+      "running": "ทำงานอยู่",
+      "stopped": "หยุดแล้ว",
+      "restarts": "Restart สะสม",
+      "restartsInRange": "(+{n} ในช่วงที่ดู)",
+      "lastMeasured": "วัดล่าสุด"
+    },
+    "server": {
+      "subtitle": "ทรัพยากรของเซิร์ฟเวอร์ที่รัน Zixploy",
+      "stale": "ข้อมูลล่าสุดเมื่อ {time} — deploy worker อาจหยุดทำงาน ตรวจสอบสถานะ worker ที่แถบด้านซ้าย",
+      "emptyTitle": "ยังไม่มีข้อมูล metrics",
+      "emptyHint": "deploy worker เก็บตัวอย่างทุก 15 วินาที — รอสักครู่แล้วโหลดใหม่ ถ้ายังไม่ขึ้น ให้ตรวจว่า worker ทำงานอยู่",
+      "cores": "{n} core",
+      "memUsed": "ใช้ {used} จาก {total}",
+      "diskFree": "เหลือ {size} ว่าง",
+      "loadWindow": "1 / 5 / 15 นาที",
+      "overloaded": "เกินกำลังเครื่อง",
+      "loadOfCores": "{percent}% ของ {n} core",
+      "footSampling": "เก็บตัวอย่างทุก {n} วินาที",
+      "footUpdated": "อัปเดตล่าสุด {time}",
+      "footPoints": "แสดง {n} จุด"
+    },
+    "cleanup": {
+      "title": "ล้างพื้นที่ดิสก์",
+      "desc": "ลบ build cache ที่เก่ากว่า 7 วัน และ image ที่ไม่มีอะไรใช้แล้ว — ไม่แตะ image ของ deployment ที่ rollback ได้ และไม่แตะ database ที่หยุดอยู่",
+      "action": "ล้าง cache",
+      "running": "กำลังล้าง…",
+      "inProgress": "กำลังล้าง — อาจใช้เวลาสักครู่ ระหว่างนี้ deploy ยังทำงานได้ปกติ",
+      "failed": "สั่งล้างไม่สำเร็จ",
+      "lastDone": "ล้างล่าสุด {time} — คืนพื้นที่ได้ {size}",
+      "lastFailed": "ล้างล่าสุด {time} ไม่สำเร็จ — {message}"
+    }
+  }
+}

@@ -6,6 +6,7 @@
  * ตัวตรวจอยู่ฝั่ง server และ cache ไว้ 30 นาที — component นี้แค่แสดงผล
  */
 const api = useApi();
+const { t } = useI18n();
 
 const { data, refresh } = await useAsyncData(
   "system-version",
@@ -29,7 +30,7 @@ const updating = computed(() => starting.value || data.value?.updating === true)
  */
 const publishedSuffix = computed(() => {
   const at = data.value?.latestPublishedAt;
-  return at ? ` (เผยแพร่ ${fullDateTime(at)})` : "";
+  return at ? ` ${t("system.update.published", { date: fullDateTime(at) })}` : "";
 });
 
 onMounted(() => {
@@ -52,15 +53,14 @@ async function startUpdate() {
   try {
     const { error } = await api.api.v1.system.update.post({});
     if (error) {
-      const body = error.value as { error?: { message?: string } } | null;
-      errorMsg.value = body?.error?.message ?? "สั่งอัปเดตไม่สำเร็จ";
+      errorMsg.value = apiErrorMessage(error, "system.update.startFailed");
       starting.value = false;
       return;
     }
     confirmUpdate.value = false;
     await refresh();
   } catch {
-    errorMsg.value = "ติดต่อ API ไม่ได้";
+    errorMsg.value = t("common.apiUnreachable");
     starting.value = false;
   }
 }
@@ -71,18 +71,18 @@ async function startUpdate() {
     <!-- กำลังอัปเดต -->
     <div v-if="updating" class="row-updating">
       <span class="spinner" />
-      <span class="tiny">กำลังอัปเดต… ระบบจะรีสตาร์ทเอง</span>
+      <span class="tiny">{{ $t("system.update.updating") }}</span>
     </div>
 
     <!-- มีเวอร์ชันใหม่ -->
     <button
       v-else-if="data.updateAvailable"
       class="update-btn"
-      :title="`อัปเดตเป็น ${data.latest}${publishedSuffix}`"
+      :title="$t('system.update.updateTo', { version: data.latest, published: publishedSuffix })"
       @click="confirmUpdate = true"
     >
       <AppIcon name="refresh" :size="14" />
-      <span>มีอัปเดตใหม่</span>
+      <span>{{ $t("system.update.available") }}</span>
       <span class="dot" aria-hidden="true" />
     </button>
 
@@ -90,14 +90,20 @@ async function startUpdate() {
 
     <p class="version tiny muted" :title="data.error ?? undefined">
       Version {{ data.current }}
-      <span v-if="data.error" class="warn-text">· ตรวจอัปเดตไม่ได้</span>
+      <span v-if="data.error" class="warn-text">· {{ $t("system.update.checkFailed") }}</span>
     </p>
 
     <ConfirmDialog
       :open="confirmUpdate"
-      title="อัปเดต Zixploy"
-      :message="`อัปเดตจาก ${data.current} เป็น ${data.latest}${publishedSuffix} — ระบบจะรีสตาร์ทและใช้ไม่ได้ประมาณ 1-2 นาที แอปที่ deploy ไว้ยังทำงานต่อตามปกติ ไม่ถูกแตะ`"
-      confirm-label="อัปเดตเลย"
+      :title="$t('system.update.confirmTitle')"
+      :message="
+        $t('system.update.confirmMessage', {
+          current: data.current,
+          latest: data.latest,
+          published: publishedSuffix,
+        })
+      "
+      :confirm-label="$t('system.update.confirmLabel')"
       :busy="starting"
       @cancel="confirmUpdate = false"
       @confirm="startUpdate"

@@ -11,7 +11,7 @@
  */
 
 import type { Database } from "bun:sqlite";
-import { API_PREFIX, AppError, isUlid, normalizeRegistryHost } from "@zixploy/shared";
+import { API_PREFIX, AppError, errorText, isUlid, normalizeRegistryHost } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
 import { getClientIp, recordAuditEvent } from "../audit/log";
 import type { MasterKeys } from "../crypto/master-key";
@@ -46,16 +46,17 @@ const updateBody = t.Object({
 
 function requireEncryption(masterKeys: MasterKeys | null): MasterKeys {
   if (!masterKeys) {
-    throw new AppError(
-      "REGISTRY_ENCRYPTION_NOT_CONFIGURED",
-      "ยังไม่ได้ตั้งค่า master key — ตั้ง ZIXPLOY_MASTER_KEY_FILE ก่อนเก็บ credential ของ registry",
-    );
+    throw new AppError("REGISTRY_ENCRYPTION_NOT_CONFIGURED", {
+      th: "ยังไม่ได้ตั้งค่า master key — ตั้ง ZIXPLOY_MASTER_KEY_FILE ก่อนเก็บ credential ของ registry",
+      en: "The master key is not configured. Set ZIXPLOY_MASTER_KEY_FILE before storing registry credentials",
+    });
   }
   return masterKeys;
 }
 
 function requireId(id: string): string {
-  if (!isUlid(id)) throw new AppError("REGISTRY_NOT_FOUND", "ไม่พบ registry นี้");
+  if (!isUlid(id))
+    throw new AppError("REGISTRY_NOT_FOUND", { th: "ไม่พบ registry นี้", en: "Registry not found" });
   return id;
 }
 
@@ -79,7 +80,7 @@ export function registryRoutes(db: Database, masterKeys: MasterKeys | null = nul
         } catch (err) {
           throw new AppError(
             "REGISTRY_INVALID",
-            err instanceof Error ? err.message : "registry ไม่ถูกต้อง",
+            errorText(err, { th: "registry ไม่ถูกต้อง", en: "Invalid registry" }),
             { field: "registry" },
           );
         }

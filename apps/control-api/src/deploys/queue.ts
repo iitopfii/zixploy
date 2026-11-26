@@ -178,7 +178,10 @@ export function enqueueManualJob(
 ): { deploymentId: string } {
   const active = activeJobFor(db, params.projectId);
   if (active) {
-    throw new AppError("DEPLOY_ALREADY_ACTIVE", "มี deploy กำลังทำงานอยู่แล้วสำหรับ project นี้");
+    throw new AppError("DEPLOY_ALREADY_ACTIVE", {
+      th: "มี deploy กำลังทำงานอยู่แล้วสำหรับ project นี้",
+      en: "A deploy is already running for this project",
+    });
   }
 
   const now = Date.now();
@@ -227,7 +230,10 @@ export function enqueueOperation(
 ): { jobId: string; deploymentId: string } {
   const active = activeJobFor(db, projectId);
   if (active) {
-    throw new AppError("DEPLOY_ALREADY_ACTIVE", "มี deploy กำลังทำงานอยู่แล้วสำหรับ project นี้");
+    throw new AppError("DEPLOY_ALREADY_ACTIVE", {
+      th: "มี deploy กำลังทำงานอยู่แล้วสำหรับ project นี้",
+      en: "A deploy is already running for this project",
+    });
   }
 
   const activeDeployment = db
@@ -236,9 +242,13 @@ export function enqueueOperation(
     )
     .get(projectId);
   if (!activeDeployment) {
-    throw new AppError("VALIDATION_ERROR", `ไม่มี deployment ที่ succeeded ให้ ${kind}`, {
-      field: "projectId",
-    });
+    throw new AppError(
+      "VALIDATION_ERROR",
+      { th: `ไม่มี deployment ที่ succeeded ให้ ${kind}`, en: `No succeeded deployment to ${kind}` },
+      {
+        field: "projectId",
+      },
+    );
   }
 
   const now = Date.now();

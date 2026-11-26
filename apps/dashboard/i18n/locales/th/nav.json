@@ -1,0 +1,21 @@
+{
+  "nav": {
+    "heading": "จัดการ",
+    "mainLabel": "หลัก",
+    "openMenu": "เปิดเมนู",
+    "projects": "Projects",
+    "databases": "Databases",
+    "monitoring": "Monitoring",
+    "docker": "Docker",
+    "github": "GitHub Apps",
+    "members": "สมาชิก",
+    "system": "ตั้งค่าระบบ",
+    "account": "ตั้งค่าบัญชี",
+    "logout": "ออกจากระบบ",
+    "role": {
+      "admin": "Admin",
+      "developer": "Developer",
+      "viewer": "Viewer"
+    }
+  }
+}

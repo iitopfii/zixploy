@@ -24,7 +24,7 @@ async function submit() {
     if (apiError) {
       // แสดงข้อความจาก API ตาม code — ไม่เดาสาเหตุเอง
       const body = apiError.value as { error?: { message?: string } } | null;
-      error.value = body?.error?.message ?? "เข้าสู่ระบบไม่สำเร็จ";
+      error.value = body?.error?.message ?? tr("auth.login.failed");
       password.value = "";
       return;
     }
@@ -50,12 +50,12 @@ async function submit() {
 
     <form class="card auth-card" @submit.prevent="submit">
       <div class="auth-head">
-        <h2 class="section-title">เข้าสู่ระบบ</h2>
-        <p class="muted small">ใช้บัญชีผู้ดูแลระบบเพื่อจัดการ deployment</p>
+        <h2 class="section-title">{{ $t("auth.login.title") }}</h2>
+        <p class="muted small">{{ $t("auth.login.subtitle") }}</p>
       </div>
 
       <label>
-        <span>ชื่อผู้ใช้</span>
+        <span>{{ $t("auth.login.username") }}</span>
         <input
           v-model="username"
           autocomplete="username"
@@ -67,7 +67,7 @@ async function submit() {
       </label>
 
       <label>
-        <span>รหัสผ่าน</span>
+        <span>{{ $t("auth.login.password") }}</span>
         <div class="pw-field">
           <input
             v-model="password"
@@ -80,11 +80,11 @@ async function submit() {
           <button
             type="button"
             class="ghost small pw-toggle"
-            :aria-label="showPassword ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'"
+            :aria-label="showPassword ? $t('auth.login.hidePassword') : $t('auth.login.showPassword')"
             tabindex="-1"
             @click="showPassword = !showPassword"
           >
-            {{ showPassword ? "ซ่อน" : "แสดง" }}
+            {{ showPassword ? $t("common.hide") : $t("common.show") }}
           </button>
         </div>
       </label>
@@ -96,14 +96,18 @@ async function submit() {
 
       <button class="primary block" type="submit" :disabled="busy || !username || !password">
         <span v-if="busy" class="spinner" />
-        {{ busy ? "กำลังเข้าสู่ระบบ…" : "เข้าสู่ระบบ" }}
+        {{ busy ? $t("auth.login.submitting") : $t("auth.login.submit") }}
       </button>
     </form>
 
     <p class="foot-note tiny muted">
       <AppIcon name="lock" :size="12" />
-      การเชื่อมต่อถูกป้องกันด้วย session cookie และ CSRF token
+      {{ $t("auth.login.footnote") }}
     </p>
+
+    <div class="locale-row">
+      <LocaleSwitch />
+    </div>
   </div>
 </template>
 
@@ -171,6 +175,11 @@ async function submit() {
   right: 4px;
   height: 26px;
   color: var(--text-muted);
+}
+
+.locale-row {
+  display: flex;
+  justify-content: center;
 }
 
 .foot-note {

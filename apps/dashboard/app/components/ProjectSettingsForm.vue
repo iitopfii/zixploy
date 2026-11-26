@@ -21,6 +21,8 @@ const props = defineProps<{ project: EditableProject }>();
 const emit = defineEmits<{ saved: [] }>();
 
 const api = useApi();
+const { t } = useI18n();
+const { isAdmin, canWrite } = usePermissions();
 
 const form = reactive({
   name: "",
@@ -72,6 +74,8 @@ watch(
 );
 
 const disabled = computed(() => props.project.archivedAt !== null);
+/** แก้ไขไม่ได้: project ถูก archive หรือบัญชีเป็น viewer (API ตรวจสิทธิ์จริงอีกชั้น) */
+const readOnly = computed(() => disabled.value || !canWrite.value);
 
 const dirty = computed(
   () =>
@@ -93,41 +97,42 @@ const isCompose = computed(() => props.project.mode === "compose");
 function validate(): boolean {
   const errors: Record<string, string> = {};
 
-  if (!form.name.trim()) errors.name = "ต้องระบุชื่อ project";
-  else if (form.name.trim().length > 100) errors.name = "ชื่อยาวเกิน 100 ตัวอักษร";
+  if (!form.name.trim()) errors.name = t("projects.settings.error.nameRequired");
+  else if (form.name.trim().length > 100) errors.name = t("projects.settings.error.nameTooLong");
 
-  if (!form.dockerfilePath.trim()) errors.dockerfilePath = "ต้องระบุ Dockerfile path";
-  if (!form.buildContext.trim()) errors.buildContext = "ต้องระบุ build context";
+  if (!form.dockerfilePath.trim())
+    errors.dockerfilePath = t("projects.settings.error.dockerfileRequired");
+  if (!form.buildContext.trim()) errors.buildContext = t("projects.settings.error.contextRequired");
 
   for (const field of ["dockerfilePath", "buildContext"] as const) {
     const value = form[field].replaceAll("\\", "/");
     if (!value) continue;
     if (value.startsWith("/") || /^[A-Za-z]:/.test(value)) {
-      errors[field] = "ต้องเป็น relative path";
+      errors[field] = t("projects.settings.error.relativePath");
     } else if (value.split("/").includes("..")) {
-      errors[field] = 'ต้องไม่มี ".."';
+      errors[field] = t("projects.settings.error.noParentDir");
     }
   }
 
   if (form.internalPort !== "") {
     const port = Number(form.internalPort);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      errors.internalPort = "port ต้องเป็นจำนวนเต็มระหว่าง 1–65535";
+      errors.internalPort = t("projects.settings.error.portRange");
     }
   }
 
   if (form.exposedPort !== "") {
     const port = Number(form.exposedPort);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      errors.exposedPort = "port ต้องเป็นจำนวนเต็มระหว่าง 1–65535";
+      errors.exposedPort = t("projects.settings.error.portRange");
     } else if (form.internalPort === "") {
-      errors.exposedPort = "ต้องระบุ internal port ก่อนจึงจะ expose port ออก host ได้";
+      errors.exposedPort = t("projects.settings.error.exposedNeedsInternal");
     }
   }
 
   const link = form.linkNetwork.trim();
   if (link !== "" && !/^[a-z0-9][a-z0-9-]{0,39}$/.test(link)) {
-    errors.linkNetwork = 'ใช้ได้เฉพาะ a-z 0-9 และ "-" ยาวไม่เกิน 40 ตัว ขึ้นต้นด้วยตัวอักษรหรือตัวเลข';
+    errors.linkNetwork = t("projects.settings.error.linkNetworkFormat");
   }
 
   fieldErrors.value = errors;
@@ -142,7 +147,7 @@ const composeResult = ref<ReturnType<typeof parseComposeForBuildConfig> | null>(
 function parseCompose() {
   composeResult.value = composeText.value.trim()
     ? parseComposeForBuildConfig(composeText.value)
-    : { ok: false, error: "วางเนื้อหา docker-compose.yml ก่อน" };
+    : { ok: false, error: t("projects.settings.pasteFirst") };
 }
 
 function applyComposeResult() {
@@ -171,21 +176,21 @@ async function save() {
       exposedPort: form.exposedPort === "" ? null : Number(form.exposedPort),
       healthCheckPath: form.healthCheckPath.trim() === "" ? null : form.healthCheckPath.trim(),
       autoDeploy: form.autoDeploy,
-      ...(isCompose.value
+      // linkNetwork แก้ได้เฉพาะ admin — API ปฏิเสธถ้าคนอื่นส่งมา จึงไม่ใส่ใน body เลย
+      ...(isCompose.value && isAdmin.value
         ? { linkNetwork: form.linkNetwork.trim() === "" ? null : form.linkNetwork.trim() }
         : {}),
     });
 
     if (error) {
-      const body = error.value as { error?: { code?: string; message?: string } } | null;
-      saveError.value = body?.error?.message ?? "บันทึกไม่สำเร็จ";
+      saveError.value = apiErrorMessage(error, "common.saveFailed");
       return;
     }
 
     saved.value = true;
     emit("saved");
   } catch {
-    saveError.value = "ติดต่อ API ไม่ได้";
+    saveError.value = t("common.apiUnreachable");
   } finally {
     saving.value = false;
   }
@@ -196,12 +201,12 @@ async function save() {
   <form class="settings stack" @submit.prevent="save">
     <p v-if="disabled" class="alert alert-warn">
       <AppIcon name="info" :size="15" />
-      <span>project ถูก archive แล้ว — แก้ไขไม่ได้</span>
+      <span>{{ $t("projects.settings.archivedNote") }}</span>
     </p>
 
     <label>
-      <span>ชื่อ project</span>
-      <input v-model="form.name" :disabled="disabled" maxlength="100" />
+      <span>{{ $t("projects.settings.name") }}</span>
+      <input v-model="form.name" :disabled="readOnly" maxlength="100" />
       <em v-if="fieldErrors.name" class="field-error">{{ fieldErrors.name }}</em>
     </label>
 
@@ -209,18 +214,21 @@ async function save() {
       <button
         type="button"
         class="ghost small"
-        :disabled="disabled"
+        :disabled="readOnly"
         @click="showComposeImport = !showComposeImport"
       >
         <AppIcon :name="showComposeImport ? 'chevronDown' : 'chevronRight'" :size="13" />
-        นำเข้าจาก docker-compose.yml
+        {{ $t("projects.settings.importCompose") }}
       </button>
 
-      <div v-if="showComposeImport" class="compose-import-panel">
+      <div v-if="showComposeImport && !readOnly" class="compose-import-panel">
         <p class="muted small">
-          วางเนื้อหา docker-compose.yml — ระบบจะดึง <code>build.dockerfile</code>,
-          <code>build.context</code> และ port แรกใน <code>ports:</code> จาก service แรกที่มี
-          <code>build:</code> มาเติมให้ (ใช้ได้ 1 container ต่อ project เท่านั้น)
+          <i18n-t scope="global" keypath="projects.settings.importHint" tag="span">
+            <template #dockerfile><code>build.dockerfile</code></template>
+            <template #context><code>build.context</code></template>
+            <template #ports><code>ports:</code></template>
+            <template #build><code>build:</code></template>
+          </i18n-t>
         </p>
         <textarea
           v-model="composeText"
@@ -230,7 +238,9 @@ async function save() {
           placeholder="services:&#10;  web:&#10;    build:&#10;      context: .&#10;      dockerfile: Dockerfile&#10;    ports:&#10;      - &quot;8080:80&quot;"
         />
         <div class="actions-end">
-          <button type="button" class="secondary small" @click="parseCompose">แยกค่า</button>
+          <button type="button" class="secondary small" @click="parseCompose">
+            {{ $t("projects.settings.parse") }}
+          </button>
         </div>
 
         <p v-if="composeResult && !composeResult.ok" class="alert alert-bad">
@@ -249,7 +259,7 @@ async function save() {
               <dt>Internal port</dt>
               <dd>
                 <code v-if="composeResult.value.internalPort">{{ composeResult.value.internalPort }}</code>
-                <span v-else class="muted">ไม่พบ — ต้องระบุเอง</span>
+                <span v-else class="muted">{{ $t("projects.settings.portNotFound") }}</span>
               </dd>
             </dl>
           </div>
@@ -259,7 +269,7 @@ async function save() {
           </p>
           <div class="actions-end">
             <button type="button" class="primary small" @click="applyComposeResult">
-              ใช้ค่านี้เติมฟอร์ม
+              {{ $t("projects.settings.applyParsed") }}
             </button>
           </div>
         </template>
@@ -268,53 +278,65 @@ async function save() {
 
     <label>
       <span>Dockerfile path</span>
-      <input v-model="form.dockerfilePath" :disabled="disabled" placeholder="Dockerfile" />
+      <input v-model="form.dockerfilePath" :disabled="readOnly" placeholder="Dockerfile" />
       <em v-if="fieldErrors.dockerfilePath" class="field-error">{{ fieldErrors.dockerfilePath }}</em>
     </label>
 
     <label>
       <span>Build context</span>
-      <input v-model="form.buildContext" :disabled="disabled" placeholder="." />
+      <input v-model="form.buildContext" :disabled="readOnly" placeholder="." />
       <em v-if="fieldErrors.buildContext" class="field-error">{{ fieldErrors.buildContext }}</em>
     </label>
 
     <label>
-      <span>Internal port (ว่างไว้ได้ถ้ายังไม่กำหนด)</span>
-      <input v-model="form.internalPort" :disabled="disabled" inputmode="numeric" placeholder="8080" />
+      <span>{{ $t("projects.settings.internalPort") }}</span>
+      <input v-model="form.internalPort" :disabled="readOnly" inputmode="numeric" placeholder="8080" />
       <em v-if="fieldErrors.internalPort" class="field-error">{{ fieldErrors.internalPort }}</em>
     </label>
 
     <label>
-      <span>Exposed port — เปิด port บนเครื่อง server ให้เข้าถึง container ตรง ๆ (ว่าง = ผ่าน domain เท่านั้น)</span>
-      <input v-model="form.exposedPort" :disabled="disabled" inputmode="numeric" placeholder="3100" />
+      <span>{{ $t("projects.settings.exposedPort") }}</span>
+      <input v-model="form.exposedPort" :disabled="readOnly" inputmode="numeric" placeholder="3100" />
       <em v-if="fieldErrors.exposedPort" class="field-error">{{ fieldErrors.exposedPort }}</em>
       <em v-if="form.exposedPort !== '' && !fieldErrors.exposedPort" class="field-hint-inline">
-        เข้าถึงได้ที่ <code>&lt;IP เซิร์ฟเวอร์&gt;:{{ form.exposedPort }}</code> → container:{{ form.internalPort || "?" }}
-        — deploy ครั้งถัดไปจะมี downtime สั้น ๆ ระหว่างสลับ container (host port ผูกได้ทีละตัว)
-        · ถ้าเข้าใช้งานผ่าน domain (Traefik) อยู่แล้ว <strong>ไม่จำเป็นต้องตั้งค่านี้</strong> —
-        เว้นว่างไว้ deploy จะไม่มี downtime และระบบคืนเวอร์ชันเก่าให้อัตโนมัติเมื่อ deploy ล้มเหลว
-        (ตั้ง port นี้แล้วจะเสียกลไกกู้คืนอัตโนมัตินั้นไป)
+        <i18n-t scope="global" keypath="projects.settings.exposedHint" tag="span">
+          <template #address>
+            <code>&lt;{{ $t("projects.settings.serverIp") }}&gt;:{{ form.exposedPort }}</code>
+          </template>
+          <template #port>{{ form.internalPort || "?" }}</template>
+          <template #notNeeded>
+            <strong>{{ $t("projects.settings.exposedHintNotNeeded") }}</strong>
+          </template>
+        </i18n-t>
       </em>
     </label>
 
     <label>
       <span>Health check path</span>
-      <input v-model="form.healthCheckPath" :disabled="disabled" placeholder="/healthz" />
+      <input v-model="form.healthCheckPath" :disabled="readOnly" placeholder="/healthz" />
     </label>
 
     <label v-if="isCompose">
-      <span>Link network — project compose ที่ตั้งชื่อเดียวกันเรียก component ของกันได้ด้วยชื่อ component (ว่าง = ไม่ต่อ)</span>
-      <input v-model="form.linkNetwork" :disabled="disabled" maxlength="40" placeholder="sealand" />
+      <span>{{ $t("projects.settings.linkNetwork") }}</span>
+      <input
+        v-model="form.linkNetwork"
+        :disabled="readOnly || !isAdmin"
+        maxlength="40"
+        placeholder="sealand"
+      />
       <em v-if="fieldErrors.linkNetwork" class="field-error">{{ fieldErrors.linkNetwork }}</em>
       <em v-else-if="form.linkNetwork.trim() !== ''" class="field-hint-inline">
-        ทุก component ต่อ network <code>zx-link-{{ form.linkNetwork.trim() }}</code> เมื่อ deploy ครั้งถัดไป
-        · ชื่อ component ต้องไม่ซ้ำกับ project อื่นใน link เดียวกัน
+        <i18n-t scope="global" keypath="projects.settings.linkNetworkHint" tag="span">
+          <template #network>
+            <code>zx-link-{{ form.linkNetwork.trim() }}</code>
+          </template>
+        </i18n-t>
       </em>
     </label>
 
     <div class="check-row">
-      <input id="auto-deploy" v-model="form.autoDeploy" type="checkbox" :disabled="disabled" />
-      <label for="auto-deploy">Auto deploy เมื่อมี push (ทำงานจริงเมื่อเชื่อม repository)</label>
+      <input id="auto-deploy" v-model="form.autoDeploy" type="checkbox" :disabled="readOnly" />
+      <label for="auto-deploy">{{ $t("projects.settings.autoDeploy") }}</label>
     </div>
 
     <p v-if="saveError" class="alert alert-bad">
@@ -323,16 +345,16 @@ async function save() {
     </p>
     <p v-else-if="saved && !dirty" class="alert alert-ok">
       <AppIcon name="check" :size="15" />
-      <span>บันทึกแล้ว</span>
+      <span>{{ $t("common.saved") }}</span>
     </p>
 
-    <div class="actions-end form-footer">
+    <div v-if="canWrite" class="actions-end form-footer">
       <button type="button" class="secondary" :disabled="disabled || !dirty || saving" @click="discardChanges">
-        ยกเลิกการแก้ไข
+        {{ $t("projects.settings.discard") }}
       </button>
       <button class="primary" type="submit" :disabled="disabled || !dirty || saving">
         <span v-if="saving" class="spinner" />
-        {{ saving ? "กำลังบันทึก…" : "บันทึก" }}
+        {{ saving ? $t("common.saving") : $t("common.save") }}
       </button>
     </div>
   </form>

@@ -31,6 +31,8 @@ import {
   credentialModeFor,
   getTemplate,
   isUlid,
+  localeFromHeaders,
+  localize,
   SERVICE_BACKUP_SETTINGS,
   SERVICE_CATALOG,
   SERVICE_SETTINGS,
@@ -174,7 +176,8 @@ const catalogEntrySchema = t.Object({
 // ---------------------------------------------------------------------------
 
 function requireUlid(id: string): void {
-  if (!isUlid(id)) throw new AppError("SERVICE_NOT_FOUND", "ไม่พบ service นี้");
+  if (!isUlid(id))
+    throw new AppError("SERVICE_NOT_FOUND", { th: "ไม่พบ service นี้", en: "Service not found" });
 }
 
 /** DTO + busy flag — busy คำนวณจาก service_jobs ทุกครั้งที่อ่าน */
@@ -196,22 +199,25 @@ export function serviceRoutes(db: Database, masterKeys: MasterKeys | null) {
       // GET /service-catalog — template ที่เลือกได้
       .get(
         "/service-catalog",
-        () => ({
-          items: SERVICE_TYPES.map((type) => {
-            const tpl = SERVICE_CATALOG[type];
-            return {
-              type,
-              displayName: tpl.displayName,
-              tagline: tpl.tagline,
-              category: tpl.category,
-              versions: [...tpl.versions],
-              defaultVersion: tpl.versions[0] as string,
-              internalPort: tpl.internalPort,
-              credentialMode: credentialModeFor(type),
-              defaultMemoryMb: tpl.defaultMemoryMb ?? SERVICE_SETTINGS.defaultMemoryMb,
-            };
-          }),
-        }),
+        ({ request }) => {
+          const locale = localeFromHeaders(request.headers);
+          return {
+            items: SERVICE_TYPES.map((type) => {
+              const tpl = SERVICE_CATALOG[type];
+              return {
+                type,
+                displayName: tpl.displayName,
+                tagline: localize(tpl.tagline, locale),
+                category: tpl.category,
+                versions: [...tpl.versions],
+                defaultVersion: tpl.versions[0] as string,
+                internalPort: tpl.internalPort,
+                credentialMode: credentialModeFor(type),
+                defaultMemoryMb: tpl.defaultMemoryMb ?? SERVICE_SETTINGS.defaultMemoryMb,
+              };
+            }),
+          };
+        },
         { response: t.Object({ items: t.Array(catalogEntrySchema) }) },
       )
 
@@ -421,7 +427,10 @@ export function serviceRoutes(db: Database, masterKeys: MasterKeys | null) {
           requireService(db, params.id);
           const row = requireBackupRow(db, params.id, params.backupId);
           if (row.status !== "succeeded") {
-            throw new AppError("SERVICE_BACKUP_NOT_READY", "backup นี้ยังไม่พร้อมสำหรับ restore");
+            throw new AppError("SERVICE_BACKUP_NOT_READY", {
+              th: "backup นี้ยังไม่พร้อมสำหรับ restore",
+              en: "This backup is not ready to restore yet",
+            });
           }
           enqueueServiceJob(db, params.id, "restore", { backupId: params.backupId });
           set.status = 202;

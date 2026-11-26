@@ -12,6 +12,8 @@ const props = defineProps<{
 const emit = defineEmits<{ saved: [] }>();
 
 const api = useApi();
+const { t } = useI18n();
+const { canWrite } = usePermissions();
 
 const content = ref(props.initialContent ?? "");
 const saveError = ref("");
@@ -40,11 +42,11 @@ async function save() {
   saveError.value = "";
   saved.value = false;
   if (!content.value.trim()) {
-    saveError.value = "ต้องวางเนื้อหา Dockerfile";
+    saveError.value = t("components.dockerfile.error.empty");
     return;
   }
   if (tooLarge.value) {
-    saveError.value = `เนื้อหาใหญ่เกิน ${MAX_BYTES / 1024}KB`;
+    saveError.value = t("components.dockerfile.error.tooLarge", { n: MAX_BYTES / 1024 });
     return;
   }
 
@@ -54,14 +56,13 @@ async function save() {
       .projects({ id: props.projectId })
       .source.dockerfile.post({ dockerfile: content.value });
     if (error) {
-      const body = error.value as { error?: { message?: string } } | null;
-      saveError.value = body?.error?.message ?? "บันทึกไม่สำเร็จ";
+      saveError.value = apiErrorMessage(error, "common.saveFailed");
       return;
     }
     saved.value = true;
     emit("saved");
   } catch {
-    saveError.value = "ติดต่อ API ไม่ได้";
+    saveError.value = t("common.apiUnreachable");
   } finally {
     saving.value = false;
   }
@@ -71,22 +72,21 @@ async function save() {
 <template>
   <div class="stack">
     <p class="muted small">
-      วาง Dockerfile ตรง ๆ แทนการเชื่อม repository — ระบบจะ build จากเนื้อหานี้ทุกครั้งที่ deploy
-      โดยไม่มีการ git clone เลย เหมาะกับโปรเจกต์เล็ก ๆ ที่ไม่มี repo หรืออยากทดลองเร็ว ๆ
+      {{ $t("components.dockerfile.intro") }}
     </p>
 
     <label>
-      <span>เนื้อหา Dockerfile</span>
+      <span>{{ $t("components.dockerfile.label") }}</span>
       <textarea
         v-model="content"
-        :disabled="archived"
+        :disabled="archived || !canWrite"
         rows="14"
         spellcheck="false"
         class="mono"
         placeholder="FROM node:20-alpine&#10;WORKDIR /app&#10;COPY . .&#10;RUN npm install&#10;CMD [&quot;node&quot;, &quot;index.js&quot;]"
       />
       <em class="char-count" :class="{ warn: tooLarge }">
-        {{ byteSize.toLocaleString() }} / {{ (MAX_BYTES / 1024).toFixed(0) }}KB
+        {{ byteSize.toLocaleString(localeTag()) }} / {{ (MAX_BYTES / 1024).toFixed(0) }}KB
       </em>
     </label>
 
@@ -96,10 +96,10 @@ async function save() {
     </p>
     <p v-else-if="saved && !dirty" class="alert alert-ok">
       <AppIcon name="check" :size="15" />
-      <span>บันทึกแล้ว</span>
+      <span>{{ $t("common.saved") }}</span>
     </p>
 
-    <div class="actions-end">
+    <div v-if="canWrite" class="actions-end">
       <button
         v-if="!isNew"
         type="button"
@@ -107,11 +107,17 @@ async function save() {
         :disabled="archived || !dirty || saving"
         @click="discard"
       >
-        ยกเลิกการแก้ไข
+        {{ $t("components.dockerfile.discard") }}
       </button>
       <button class="primary" :disabled="archived || !dirty || saving" @click="save">
         <span v-if="saving" class="spinner" />
-        {{ saving ? "กำลังบันทึก…" : isNew ? "ใช้เป็น source" : "บันทึก" }}
+        {{
+          saving
+            ? $t("common.saving")
+            : isNew
+              ? $t("components.dockerfile.useAsSource")
+              : $t("common.save")
+        }}
       </button>
     </div>
   </div>

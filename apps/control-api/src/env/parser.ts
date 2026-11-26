@@ -14,7 +14,7 @@
  * ไม่แตะ DB — parse/preview เท่านั้น
  */
 
-import { ENV_VAR_KEY_RE } from "@zixploy/shared";
+import { ENV_VAR_KEY_RE, type LocalizedText } from "@zixploy/shared";
 
 export interface ParsedEnvVar {
   key: string;
@@ -25,12 +25,14 @@ export interface ParsedEnvVar {
 export interface ParseResult {
   vars: ParsedEnvVar[];
   warnings: string[];
+  /** warnings ชุดเดียวกัน (ลำดับตรงกัน) แบบสองภาษา — route เลือกภาษาด้วย localize() */
+  warningTexts: LocalizedText[];
 }
 
 export function parseEnvContent(content: string): ParseResult {
   const lines = content.split(/\r?\n/);
   const vars: ParsedEnvVar[] = [];
-  const warnings: string[] = [];
+  const warningTexts: LocalizedText[] = [];
   const seenKeys = new Map<string, number>(); // key → first line number
 
   let i = 0;
@@ -48,7 +50,10 @@ export function parseEnvContent(content: string): ParseResult {
 
     const eqIdx = withoutExport.indexOf("=");
     if (eqIdx === -1) {
-      warnings.push(`บรรทัด ${lineNumber}: ข้ามเพราะไม่พบ '=' — ต้องเป็นรูปแบบ KEY=VALUE`);
+      warningTexts.push({
+        th: `บรรทัด ${lineNumber}: ข้ามเพราะไม่พบ '=' — ต้องเป็นรูปแบบ KEY=VALUE`,
+        en: `Line ${lineNumber}: skipped because '=' was not found. Expected KEY=VALUE`,
+      });
       continue;
     }
 
@@ -57,7 +62,10 @@ export function parseEnvContent(content: string): ParseResult {
 
     // validate key format
     if (!ENV_VAR_KEY_RE.test(key)) {
-      warnings.push(`บรรทัด ${lineNumber}: ข้าม key "${key}" — ต้องขึ้นต้นด้วยตัวอักษรหรือ underscore`);
+      warningTexts.push({
+        th: `บรรทัด ${lineNumber}: ข้าม key "${key}" — ต้องขึ้นต้นด้วยตัวอักษรหรือ underscore`,
+        en: `Line ${lineNumber}: skipped key "${key}". It must start with a letter or underscore`,
+      });
       continue;
     }
 
@@ -81,7 +89,10 @@ export function parseEnvContent(content: string): ParseResult {
 
     // duplicate key check
     if (seenKeys.has(key)) {
-      warnings.push(`บรรทัด ${lineNumber}: key "${key}" ซ้ำกับบรรทัด ${seenKeys.get(key)} — ใช้ค่าใหม่`);
+      warningTexts.push({
+        th: `บรรทัด ${lineNumber}: key "${key}" ซ้ำกับบรรทัด ${seenKeys.get(key)} — ใช้ค่าใหม่`,
+        en: `Line ${lineNumber}: key "${key}" duplicates line ${seenKeys.get(key)}. Using the new value`,
+      });
       // replace previous entry
       const idx = vars.findIndex((v) => v.key === key);
       if (idx !== -1) vars.splice(idx, 1);
@@ -90,7 +101,7 @@ export function parseEnvContent(content: string): ParseResult {
     vars.push({ key, value, lineNumber });
   }
 
-  return { vars, warnings };
+  return { vars, warnings: warningTexts.map((w) => w.th), warningTexts };
 }
 
 // ---------------------------------------------------------------------------

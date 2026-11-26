@@ -1,0 +1,39 @@
+{
+  "volumes": {
+    "create": "Create volume",
+    "empty": "No volumes yet",
+    "note": "Volumes are mounted on every deploy. Redeploy for changes to take effect.",
+    "component": {
+      "unbound": "Not attached, compose does not mount it",
+      "deleted": "Deleted component"
+    },
+    "form": {
+      "name": "Name",
+      "component": "Mount on component",
+      "selectComponent": "Select a component",
+      "hostPath": "Host path (bind mount), optional",
+      "hostPathHint": "Leave empty to let Docker manage the storage (recommended) · Set a path such as /home/mydata to keep the data in that folder on the server. The folder must already exist, and the path cannot be changed later.",
+      "sharedSafe": "shared-safe (recommended)",
+      "singleWriter": "single-writer (downtime during deploy)"
+    },
+    "status": {
+      "missing": "The Docker volume is missing. It may have been removed by hand. See the runbook for recovery.",
+      "deletionPending": "Waiting for the worker to remove the Docker volume…"
+    },
+    "detach": {
+      "working": "Detaching…",
+      "first": "Detach before deleting"
+    },
+    "confirmDelete": {
+      "prompt": "Type the volume name {name} to confirm deletion",
+      "warning": "The data in the volume will be lost permanently and cannot be recovered",
+      "placeholder": "Volume name",
+      "confirm": "Confirm delete"
+    },
+    "error": {
+      "load": "Could not load volumes",
+      "create": "Could not create the volume",
+      "detach": "Could not detach"
+    }
+  }
+}

@@ -100,11 +100,19 @@ const SELECT_ALL = `id, container_id, container_name, status, image, command, re
   env_keys, ports, mounts, project_name, project_id, failure_message, created_at, updated_at`;
 
 function requireImport(db: Database, id: string): ImportRow {
-  if (!isUlid(id)) throw new AppError("VALIDATION_ERROR", "ไม่พบคำขอนำเข้านี้");
+  if (!isUlid(id))
+    throw new AppError("VALIDATION_ERROR", {
+      th: "ไม่พบคำขอนำเข้านี้",
+      en: "Import request not found",
+    });
   const row = db
     .query<ImportRow, [string]>(`SELECT ${SELECT_ALL} FROM container_imports WHERE id = ?`)
     .get(id);
-  if (!row) throw new AppError("VALIDATION_ERROR", "ไม่พบคำขอนำเข้านี้");
+  if (!row)
+    throw new AppError("VALIDATION_ERROR", {
+      th: "ไม่พบคำขอนำเข้านี้",
+      en: "Import request not found",
+    });
   return row;
 }
 
@@ -121,7 +129,10 @@ export function containerImportRoutes(db: Database) {
           const containerId = params.containerId;
           // container ID ของ Docker เป็น hex เท่านั้น — กันค่าแปลกปลอมตั้งแต่ต้นทาง
           if (!/^[0-9a-f]{12,64}$/i.test(containerId)) {
-            throw new AppError("VALIDATION_ERROR", "container id ไม่ถูกต้อง");
+            throw new AppError("VALIDATION_ERROR", {
+              th: "container id ไม่ถูกต้อง",
+              en: "Invalid container id",
+            });
           }
 
           const known = db
@@ -130,16 +141,16 @@ export function containerImportRoutes(db: Database) {
             )
             .get(containerId);
           if (!known) {
-            throw new AppError(
-              "VALIDATION_ERROR",
-              "ไม่พบ container นี้ในรายการล่าสุด — รอ worker กวาดข้อมูลรอบถัดไปแล้วลองใหม่",
-            );
+            throw new AppError("VALIDATION_ERROR", {
+              th: "ไม่พบ container นี้ในรายการล่าสุด — รอ worker กวาดข้อมูลรอบถัดไปแล้วลองใหม่",
+              en: "Container not found in the latest inventory. Wait for the next worker scan and try again",
+            });
           }
           if (known.is_managed === 1) {
-            throw new AppError(
-              "VALIDATION_ERROR",
-              "container นี้ถูกจัดการโดย Zixploy อยู่แล้ว ไม่ต้องนำเข้า",
-            );
+            throw new AppError("VALIDATION_ERROR", {
+              th: "container นี้ถูกจัดการโดย Zixploy อยู่แล้ว ไม่ต้องนำเข้า",
+              en: "This container is already managed by Zixploy and does not need to be imported",
+            });
           }
 
           const id = ulid();
@@ -166,14 +177,17 @@ export function containerImportRoutes(db: Database) {
         ({ params, body, set }) => {
           const row = requireImport(db, params.id);
           if (row.status !== "inspected") {
-            throw new AppError(
-              "VALIDATION_ERROR",
-              `ยืนยันได้เฉพาะคำขอที่อ่าน config เสร็จแล้ว (สถานะตอนนี้: ${row.status})`,
-            );
+            throw new AppError("VALIDATION_ERROR", {
+              th: `ยืนยันได้เฉพาะคำขอที่อ่าน config เสร็จแล้ว (สถานะตอนนี้: ${row.status})`,
+              en: `Only a request whose config has been read can be confirmed (current status: ${row.status})`,
+            });
           }
           const name = body.projectName?.trim();
           if (name && name.length > 100) {
-            throw new AppError("VALIDATION_ERROR", "ชื่อ project ยาวเกิน 100 ตัวอักษร");
+            throw new AppError("VALIDATION_ERROR", {
+              th: "ชื่อ project ยาวเกิน 100 ตัวอักษร",
+              en: "Project name is longer than 100 characters",
+            });
           }
 
           db.query(

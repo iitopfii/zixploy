@@ -11,6 +11,7 @@
 import type { Database } from "bun:sqlite";
 import {
   AppError,
+  errorText,
   getTemplate,
   resolveUsername,
   resolveVersion,
@@ -185,7 +186,8 @@ export function getServiceRow(db: Database, id: string): ServiceRow | null {
 
 export function requireService(db: Database, id: string): ServiceRow {
   const row = getServiceRow(db, id);
-  if (!row) throw new AppError("SERVICE_NOT_FOUND", "ไม่พบ service นี้");
+  if (!row)
+    throw new AppError("SERVICE_NOT_FOUND", { th: "ไม่พบ service นี้", en: "Service not found" });
   return row;
 }
 
@@ -196,7 +198,10 @@ export async function decryptPassword(
 ): Promise<string> {
   if (!row.password_enc) return "";
   if (!masterKeys) {
-    throw new AppError("ENV_ENCRYPTION_NOT_CONFIGURED", "ยังไม่ได้ตั้งค่า master key");
+    throw new AppError("ENV_ENCRYPTION_NOT_CONFIGURED", {
+      th: "ยังไม่ได้ตั้งค่า master key",
+      en: "Master key is not configured",
+    });
   }
   return decryptEnvelope(masterKeys, new Uint8Array(row.password_enc), aad(row.id));
 }
@@ -221,13 +226,16 @@ export function assertExposedPortUsable(
   excludeServiceId?: string,
 ): void {
   if (port < SERVICE_SETTINGS.exposedPortMin || port > SERVICE_SETTINGS.exposedPortMax) {
-    throw new AppError(
-      "SERVICE_PORT_OUT_OF_RANGE",
-      `port ต้องอยู่ระหว่าง ${SERVICE_SETTINGS.exposedPortMin}-${SERVICE_SETTINGS.exposedPortMax}`,
-    );
+    throw new AppError("SERVICE_PORT_OUT_OF_RANGE", {
+      th: `port ต้องอยู่ระหว่าง ${SERVICE_SETTINGS.exposedPortMin}-${SERVICE_SETTINGS.exposedPortMax}`,
+      en: `Port must be between ${SERVICE_SETTINGS.exposedPortMin} and ${SERVICE_SETTINGS.exposedPortMax}`,
+    });
   }
   if (SERVICE_SETTINGS.reservedPorts.includes(port)) {
-    throw new AppError("SERVICE_PORT_RESERVED", `port ${port} ถูกระบบใช้อยู่ — เลือก port อื่น`);
+    throw new AppError("SERVICE_PORT_RESERVED", {
+      th: `port ${port} ถูกระบบใช้อยู่ — เลือก port อื่น`,
+      en: `Port ${port} is used by the system. Choose another port`,
+    });
   }
 
   const conflict = db
@@ -236,7 +244,10 @@ export function assertExposedPortUsable(
     )
     .get(port);
   if (conflict && conflict.id !== excludeServiceId) {
-    throw new AppError("SERVICE_PORT_IN_USE", `port ${port} ถูกใช้โดย service "${conflict.name}"`);
+    throw new AppError("SERVICE_PORT_IN_USE", {
+      th: `port ${port} ถูกใช้โดย service "${conflict.name}"`,
+      en: `Port ${port} is used by service "${conflict.name}"`,
+    });
   }
 }
 
@@ -259,14 +270,18 @@ export async function createService(
   input: CreateServiceInput,
 ): Promise<ServiceDto> {
   if (!masterKeys) {
-    throw new AppError(
-      "ENV_ENCRYPTION_NOT_CONFIGURED",
-      "ยังไม่ได้ตั้งค่า master key — ตั้งค่าก่อนจึงจะสร้าง database ได้",
-    );
+    throw new AppError("ENV_ENCRYPTION_NOT_CONFIGURED", {
+      th: "ยังไม่ได้ตั้งค่า master key — ตั้งค่าก่อนจึงจะสร้าง database ได้",
+      en: "Master key is not configured. Configure it before creating a database",
+    });
   }
 
   const name = input.name.trim();
-  if (!name) throw new AppError("VALIDATION_ERROR", "ต้องระบุชื่อ service");
+  if (!name)
+    throw new AppError("VALIDATION_ERROR", {
+      th: "ต้องระบุชื่อ service",
+      en: "Service name is required",
+    });
 
   let version: string;
   try {
@@ -274,7 +289,7 @@ export async function createService(
   } catch (err) {
     throw new AppError(
       "SERVICE_VERSION_INVALID",
-      err instanceof Error ? err.message : "version ไม่ถูกต้อง",
+      errorText(err, { th: "version ไม่ถูกต้อง", en: "Invalid version" }),
     );
   }
 
@@ -318,9 +333,15 @@ export async function createService(
       // exposed_port ถูกตรวจไปแล้วด้านบน — UNIQUE ที่ชนตรงนี้จึงเป็น name เกือบเสมอ
       // (ยกเว้น race ที่สอง request สร้าง port เดียวกันพร้อมกัน ซึ่ง DB กันให้)
       if (err.message.includes("exposed_port")) {
-        throw new AppError("SERVICE_PORT_IN_USE", `port ${input.exposedPort} ถูกใช้ไปแล้ว`);
+        throw new AppError("SERVICE_PORT_IN_USE", {
+          th: `port ${input.exposedPort} ถูกใช้ไปแล้ว`,
+          en: `Port ${input.exposedPort} is already in use`,
+        });
       }
-      throw new AppError("SERVICE_DUPLICATE_NAME", `ชื่อ "${name}" ถูกใช้แล้ว`);
+      throw new AppError("SERVICE_DUPLICATE_NAME", {
+        th: `ชื่อ "${name}" ถูกใช้แล้ว`,
+        en: `Name "${name}" is already in use`,
+      });
     }
     throw err;
   }
@@ -356,10 +377,10 @@ export function updateService(db: Database, id: string, input: UpdateServiceInpu
     input.cpuLimit !== undefined;
 
   if (changesRuntime && row.status !== "stopped" && row.status !== "failed") {
-    throw new AppError(
-      "SERVICE_NOT_STOPPED",
-      "ต้องหยุด service ก่อนจึงจะแก้ port หรือ resource limit ได้",
-    );
+    throw new AppError("SERVICE_NOT_STOPPED", {
+      th: "ต้องหยุด service ก่อนจึงจะแก้ port หรือ resource limit ได้",
+      en: "Stop the service before changing its port or resource limits",
+    });
   }
 
   if (input.exposedPort != null) assertExposedPortUsable(db, input.exposedPort, id);
@@ -370,9 +391,16 @@ export function updateService(db: Database, id: string, input: UpdateServiceInpu
   const intervalAfterUpdate =
     input.backupIntervalHours !== undefined ? input.backupIntervalHours : row.backup_interval_hours;
   if (enabledAfterUpdate && intervalAfterUpdate == null) {
-    throw new AppError("VALIDATION_ERROR", "ต้องเลือกความถี่ backup ก่อนเปิดใช้งานตั้งเวลา", {
-      field: "backupIntervalHours",
-    });
+    throw new AppError(
+      "VALIDATION_ERROR",
+      {
+        th: "ต้องเลือกความถี่ backup ก่อนเปิดใช้งานตั้งเวลา",
+        en: "Choose a backup frequency before enabling scheduled backups",
+      },
+      {
+        field: "backupIntervalHours",
+      },
+    );
   }
   if (
     input.backupIntervalHours != null &&
@@ -382,7 +410,10 @@ export function updateService(db: Database, id: string, input: UpdateServiceInpu
   ) {
     throw new AppError(
       "VALIDATION_ERROR",
-      `backupIntervalHours ต้องเป็นหนึ่งใน: ${SERVICE_BACKUP_SETTINGS.allowedIntervalHours.join(", ")}`,
+      {
+        th: `backupIntervalHours ต้องเป็นหนึ่งใน: ${SERVICE_BACKUP_SETTINGS.allowedIntervalHours.join(", ")}`,
+        en: `backupIntervalHours must be one of: ${SERVICE_BACKUP_SETTINGS.allowedIntervalHours.join(", ")}`,
+      },
       { field: "backupIntervalHours" },
     );
   }
@@ -393,7 +424,10 @@ export function updateService(db: Database, id: string, input: UpdateServiceInpu
   ) {
     throw new AppError(
       "VALIDATION_ERROR",
-      `backupRetentionCount ต้องอยู่ระหว่าง ${SERVICE_BACKUP_SETTINGS.retentionMin}-${SERVICE_BACKUP_SETTINGS.retentionMax}`,
+      {
+        th: `backupRetentionCount ต้องอยู่ระหว่าง ${SERVICE_BACKUP_SETTINGS.retentionMin}-${SERVICE_BACKUP_SETTINGS.retentionMax}`,
+        en: `backupRetentionCount must be between ${SERVICE_BACKUP_SETTINGS.retentionMin} and ${SERVICE_BACKUP_SETTINGS.retentionMax}`,
+      },
       { field: "backupRetentionCount" },
     );
   }
@@ -424,9 +458,15 @@ export function updateService(db: Database, id: string, input: UpdateServiceInpu
     } catch (err) {
       if (err instanceof Error && err.message.includes("UNIQUE")) {
         if (err.message.includes("exposed_port")) {
-          throw new AppError("SERVICE_PORT_IN_USE", "port นี้ถูกใช้ไปแล้ว");
+          throw new AppError("SERVICE_PORT_IN_USE", {
+            th: "port นี้ถูกใช้ไปแล้ว",
+            en: "This port is already in use",
+          });
         }
-        throw new AppError("SERVICE_DUPLICATE_NAME", "ชื่อนี้ถูกใช้แล้ว");
+        throw new AppError("SERVICE_DUPLICATE_NAME", {
+          th: "ชื่อนี้ถูกใช้แล้ว",
+          en: "This name is already in use",
+        });
       }
       throw err;
     }

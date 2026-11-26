@@ -15,10 +15,23 @@
 
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { API_PREFIX, AppError, type DeploymentStatus, isUlid } from "@zixploy/shared";
+import {
+  API_PREFIX,
+  AppError,
+  type DeploymentStatus,
+  isUlid,
+  type Locale,
+  localeFromHeaders,
+  localize,
+} from "@zixploy/shared";
 import { Elysia, t } from "elysia";
 import { getClientIp, recordAuditEvent } from "../audit/log";
-import { countDeployments, deleteDeployment, pruneDeploymentHistory } from "../deploys/history";
+import {
+  countDeployments,
+  type DeleteResult,
+  deleteDeployment,
+  pruneDeploymentHistory,
+} from "../deploys/history";
 import {
   cancelDeployment,
   type DeployJobPayload,
@@ -64,6 +77,17 @@ const SELECT_COLUMNS = `id, project_id, status, trigger, commit_sha, commit_mess
   image_tag, image_digest, container_id, failure_code, failure_message,
   queued_at, started_at, finished_at, cloning_at, building_at, starting_at, health_checking_at, activating_at,
   component_commits, created_at, updated_at`;
+
+/** เหตุผลใน skipped ตอบเป็น string ตามภาษาของ request (reasonText จาก deploys/history.ts) */
+function localizeDeleteResult(result: DeleteResult, locale: Locale) {
+  return {
+    deleted: result.deleted,
+    skipped: result.skipped.map((item) => ({
+      id: item.id,
+      reason: localize(item.reasonText, locale),
+    })),
+  };
+}
 
 /** ผลของการลบ — skipped บอกเหตุผลรายตัวเพื่อให้ UI อธิบายได้ว่าทำไมบางอันยังอยู่ */
 const deleteResultSchema = t.Object({
@@ -156,11 +180,19 @@ function parseComponentCommits(raw: string | null): Record<string, string> | nul
 }
 
 function loadDeployment(db: Database, id: string): DeploymentRow {
-  if (!isUlid(id)) throw new AppError("DEPLOYMENT_NOT_FOUND", "ไม่พบ deployment นี้");
+  if (!isUlid(id))
+    throw new AppError("DEPLOYMENT_NOT_FOUND", {
+      th: "ไม่พบ deployment นี้",
+      en: "Deployment not found",
+    });
   const row = db
     .query<DeploymentRow, [string]>(`SELECT ${SELECT_COLUMNS} FROM deployments WHERE id = ?`)
     .get(id);
-  if (!row) throw new AppError("DEPLOYMENT_NOT_FOUND", "ไม่พบ deployment นี้");
+  if (!row)
+    throw new AppError("DEPLOYMENT_NOT_FOUND", {
+      th: "ไม่พบ deployment นี้",
+      en: "Deployment not found",
+    });
   return row;
 }
 
@@ -177,16 +209,21 @@ interface ProjectSourceRow {
 }
 
 function loadProjectForDeploy(db: Database, id: string): ProjectSourceRow {
-  if (!isUlid(id)) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+  if (!isUlid(id))
+    throw new AppError("PROJECT_NOT_FOUND", { th: "ไม่พบ project นี้", en: "Project not found" });
   const row = db
     .query<ProjectSourceRow, [string]>(
       `SELECT id, archived_at, source_type, installation_id, repo_id, repo_full_name, branch, dockerfile_content, mode
        FROM projects WHERE id = ?`,
     )
     .get(id);
-  if (!row) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+  if (!row)
+    throw new AppError("PROJECT_NOT_FOUND", { th: "ไม่พบ project นี้", en: "Project not found" });
   if (row.archived_at !== null) {
-    throw new AppError("PROJECT_ARCHIVED", "project นี้ถูก archive แล้ว");
+    throw new AppError("PROJECT_ARCHIVED", {
+      th: "project นี้ถูก archive แล้ว",
+      en: "This project is archived",
+    });
   }
   return row;
 }
@@ -210,7 +247,10 @@ function assertProjectHasSource(
     if (!project.dockerfile_content) {
       throw new AppError(
         "VALIDATION_ERROR",
-        "project นี้ยังไม่ได้วาง Dockerfile — ตั้งค่าที่ Source tab ก่อน",
+        {
+          th: "project นี้ยังไม่ได้วาง Dockerfile — ตั้งค่าที่ Source tab ก่อน",
+          en: "This project has no Dockerfile yet. Set it up in the Source tab first",
+        },
         { field: "source" },
       );
     }
@@ -219,7 +259,10 @@ function assertProjectHasSource(
   if (!project.installation_id || !project.repo_full_name || !project.branch) {
     throw new AppError(
       "VALIDATION_ERROR",
-      "project นี้ยังไม่ได้เชื่อมต่อ repository — ตั้งค่าที่ Source tab ก่อน",
+      {
+        th: "project นี้ยังไม่ได้เชื่อมต่อ repository — ตั้งค่าที่ Source tab ก่อน",
+        en: "This project is not connected to a repository yet. Set it up in the Source tab first",
+      },
       {
         field: "source",
       },
@@ -267,7 +310,10 @@ async function resolveBuildSource(
   const { installationId } = loadInstallationForProject(db, project.installation_id);
   const service = await registry.getServiceForInstallation(installationId);
   if (!service) {
-    throw new AppError("GITHUB_UNAVAILABLE", "GitHub App ของ installation นี้ไม่พร้อมใช้งาน");
+    throw new AppError("GITHUB_UNAVAILABLE", {
+      th: "GitHub App ของ installation นี้ไม่พร้อมใช้งาน",
+      en: "The GitHub App for this installation is unavailable",
+    });
   }
   const branch = await service.validateBranch(
     installationId,
@@ -292,12 +338,16 @@ function loadInstallationForProject(db: Database, installationRowId: string): In
       "SELECT installation_id, status FROM github_installations WHERE id = ?",
     )
     .get(installationRowId);
-  if (!row) throw new AppError("INSTALLATION_NOT_FOUND", "ไม่พบ GitHub installation ของ project นี้");
+  if (!row)
+    throw new AppError("INSTALLATION_NOT_FOUND", {
+      th: "ไม่พบ GitHub installation ของ project นี้",
+      en: "GitHub installation for this project not found",
+    });
   if (row.status !== "active") {
-    throw new AppError(
-      "GITHUB_UNAVAILABLE",
-      "GitHub installation ไม่ได้ active — reinstall หรือ unsuspend ก่อน deploy",
-    );
+    throw new AppError("GITHUB_UNAVAILABLE", {
+      th: "GitHub installation ไม่ได้ active — reinstall หรือ unsuspend ก่อน deploy",
+      en: "The GitHub installation is not active. Reinstall or unsuspend it before deploying",
+    });
   }
   return { installationId: row.installation_id, status: row.status };
 }
@@ -402,7 +452,10 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
           )
           .get(params.id);
         if (!last) {
-          throw new AppError("VALIDATION_ERROR", "ยังไม่เคย deploy project นี้มาก่อน — ใช้ deploy แทน");
+          throw new AppError("VALIDATION_ERROR", {
+            th: "ยังไม่เคย deploy project นี้มาก่อน — ใช้ deploy แทน",
+            en: "This project has never been deployed. Use deploy instead",
+          });
         }
 
         // source แบบ dockerfile-paste ไม่มี "commit เก่า" ให้ reuse เหมือน GitHub — redeploy คือ build
@@ -511,10 +564,10 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
           .get(body.targetDeploymentId, params.id);
 
         if (!target || target.status !== "succeeded" || !target.image_tag || !target.image_digest) {
-          throw new AppError(
-            "ROLLBACK_TARGET_UNAVAILABLE",
-            "deployment เป้าหมายไม่พร้อมสำหรับ rollback — ต้องเป็น deployment ที่ succeeded และมี image อยู่",
-          );
+          throw new AppError("ROLLBACK_TARGET_UNAVAILABLE", {
+            th: "deployment เป้าหมายไม่พร้อมสำหรับ rollback — ต้องเป็น deployment ที่ succeeded และมี image อยู่",
+            en: "The target deployment is not available for rollback. It must be a succeeded deployment that still has its image",
+          });
         }
 
         const payload: DeployJobPayload = {
@@ -605,7 +658,10 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
         const session = requireSession();
         loadProjectForDeploy(db, params.id);
         if (!isUlid(params.deploymentId)) {
-          throw new AppError("DEPLOYMENT_NOT_FOUND", "ไม่พบ deployment นี้");
+          throw new AppError("DEPLOYMENT_NOT_FOUND", {
+            th: "ไม่พบ deployment นี้",
+            en: "Deployment not found",
+          });
         }
 
         const result = deleteDeployment(db, params.id, params.deploymentId);
@@ -617,7 +673,7 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
           metadata: { projectId: params.id },
           ip: getClientIp(request),
         });
-        return result;
+        return localizeDeleteResult(result, localeFromHeaders(request.headers));
       },
       { response: deleteResultSchema },
     )
@@ -638,7 +694,7 @@ export function deploymentRoutes(db: Database, registry: GitHubAppRegistry) {
           metadata: { deleted: result.deleted, keep: body?.keep ?? 0 },
           ip: getClientIp(request),
         });
-        return result;
+        return localizeDeleteResult(result, localeFromHeaders(request.headers));
       },
       {
         body: t.Optional(t.Object({ keep: t.Optional(t.Integer({ minimum: 0, maximum: 100 })) })),

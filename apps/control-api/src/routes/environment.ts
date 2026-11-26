@@ -11,7 +11,14 @@
  */
 
 import type { Database } from "bun:sqlite";
-import { API_PREFIX, AppError, ENV_VAR_KEY_RE, isUlid } from "@zixploy/shared";
+import {
+  API_PREFIX,
+  AppError,
+  ENV_VAR_KEY_RE,
+  isUlid,
+  localeFromHeaders,
+  localize,
+} from "@zixploy/shared";
 import { Elysia, t } from "elysia";
 import type { MasterKeys } from "../crypto/master-key";
 import { parseEnvContent } from "../env/parser";
@@ -64,11 +71,13 @@ const validateBodySchema = t.Object({
 // ---------------------------------------------------------------------------
 
 function requireProject(db: Database, projectId: string): void {
-  if (!isUlid(projectId)) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+  if (!isUlid(projectId))
+    throw new AppError("PROJECT_NOT_FOUND", { th: "ไม่พบ project นี้", en: "Project not found" });
   const row = db
     .query<{ id: string }, [string]>("SELECT id FROM projects WHERE id = ? AND archived_at IS NULL")
     .get(projectId);
-  if (!row) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+  if (!row)
+    throw new AppError("PROJECT_NOT_FOUND", { th: "ไม่พบ project นี้", en: "Project not found" });
 }
 
 /** ตรวจ componentId (ถ้ามี) ว่าอยู่ในโปรเจกต์นี้ — คืน null = project-wide scope (Phase 18 · F) */
@@ -78,22 +87,30 @@ function resolveComponentScope(
   componentId: string | undefined,
 ): string | null {
   if (!componentId) return null;
-  if (!isUlid(componentId)) throw new AppError("COMPONENT_NOT_FOUND", "ไม่พบ component นี้");
+  if (!isUlid(componentId))
+    throw new AppError("COMPONENT_NOT_FOUND", {
+      th: "ไม่พบ component นี้",
+      en: "Component not found",
+    });
   const row = db
     .query<{ id: string }, [string, string]>(
       "SELECT id FROM project_components WHERE id = ? AND project_id = ?",
     )
     .get(componentId, projectId);
-  if (!row) throw new AppError("COMPONENT_NOT_FOUND", "ไม่พบ component นี้");
+  if (!row)
+    throw new AppError("COMPONENT_NOT_FOUND", {
+      th: "ไม่พบ component นี้",
+      en: "Component not found",
+    });
   return componentId;
 }
 
 function requireEncryption(masterKeys: MasterKeys | null): MasterKeys {
   if (!masterKeys) {
-    throw new AppError(
-      "ENV_ENCRYPTION_NOT_CONFIGURED",
-      "ยังไม่ได้ตั้งค่า master key — ตั้ง ZIXPLOY_MASTER_KEY_FILE ก่อนจัดการ environment variables",
-    );
+    throw new AppError("ENV_ENCRYPTION_NOT_CONFIGURED", {
+      th: "ยังไม่ได้ตั้งค่า master key — ตั้ง ZIXPLOY_MASTER_KEY_FILE ก่อนจัดการ environment variables",
+      en: "The master key is not configured. Set ZIXPLOY_MASTER_KEY_FILE before managing environment variables",
+    });
   }
   return masterKeys;
 }
@@ -143,17 +160,18 @@ export function environmentRoutes(db: Database, masterKeys: MasterKeys | null) {
       // POST /projects/:id/environment/import — parse .env, no DB change
       .post(
         "/import",
-        ({ params, body }) => {
+        ({ params, body, request }) => {
           requireProject(db, params.id);
           // masterKeys ไม่จำเป็นสำหรับ parse-only — แต่ผู้เรียก PUT ต้องมี key เองก่อน save จริง
-          const { vars, warnings } = parseEnvContent(body.content);
+          const { vars, warningTexts } = parseEnvContent(body.content);
+          const locale = localeFromHeaders(request.headers);
           return {
             parsed: vars.map((v) => ({
               key: v.key,
               value: v.value,
               lineNumber: v.lineNumber,
             })),
-            warnings,
+            warnings: warningTexts.map((w) => localize(w, locale)),
           };
         },
         {
@@ -170,8 +188,9 @@ export function environmentRoutes(db: Database, masterKeys: MasterKeys | null) {
       // POST /projects/:id/environment/validate — validate key format + duplicates
       .post(
         "/validate",
-        ({ params, body }) => {
+        ({ params, body, request }) => {
           requireProject(db, params.id);
+          const locale = localeFromHeaders(request.headers);
           const errors: Array<{ key: string; message: string }> = [];
           const seen = new Set<string>();
 
@@ -179,10 +198,19 @@ export function environmentRoutes(db: Database, masterKeys: MasterKeys | null) {
             if (!ENV_VAR_KEY_RE.test(v.key)) {
               errors.push({
                 key: v.key,
-                message: `ต้องขึ้นต้นด้วยตัวอักษรหรือ underscore และมีเฉพาะ [A-Za-z0-9_]`,
+                message: localize(
+                  {
+                    th: `ต้องขึ้นต้นด้วยตัวอักษรหรือ underscore และมีเฉพาะ [A-Za-z0-9_]`,
+                    en: "Must start with a letter or underscore and contain only [A-Za-z0-9_]",
+                  },
+                  locale,
+                ),
               });
             } else if (seen.has(v.key)) {
-              errors.push({ key: v.key, message: "key ซ้ำ" });
+              errors.push({
+                key: v.key,
+                message: localize({ th: "key ซ้ำ", en: "Duplicate key" }, locale),
+              });
             }
             seen.add(v.key);
           }

@@ -10,6 +10,8 @@
  * - Router/service ชื่อ generate จาก hostname ที่ผ่าน validate แล้ว — ไม่ใช้ user input อื่น
  */
 
+import { LocalizedError } from "./i18n";
+
 // ---------------------------------------------------------------------------
 // Hostname validation
 // ---------------------------------------------------------------------------
@@ -65,27 +67,46 @@ function isIPv6(s: string): boolean {
 export function validateHostname(raw: string): string {
   const input = raw.trim();
 
-  if (!input) throw new Error("hostname ต้องไม่ว่าง");
+  if (!input)
+    throw new LocalizedError({
+      th: "hostname ต้องไม่ว่าง",
+      en: "Hostname must not be empty",
+    });
 
   // ห้าม scheme
   if (input.includes("://")) {
-    throw new Error(`hostname ต้องไม่มี scheme (เช่น https://) — ส่งเฉพาะ hostname เท่านั้น`);
+    throw new LocalizedError({
+      th: `hostname ต้องไม่มี scheme (เช่น https://) — ส่งเฉพาะ hostname เท่านั้น`,
+      en: `Hostname must not include a scheme (such as https://). Send the hostname only`,
+    });
   }
   // ห้าม path
   if (input.includes("/")) {
-    throw new Error(`hostname ต้องไม่มี path — ส่งเฉพาะ hostname เท่านั้น`);
+    throw new LocalizedError({
+      th: `hostname ต้องไม่มี path — ส่งเฉพาะ hostname เท่านั้น`,
+      en: `Hostname must not include a path. Send the hostname only`,
+    });
   }
   // ห้าม query
   if (input.includes("?")) {
-    throw new Error(`hostname ต้องไม่มี query string`);
+    throw new LocalizedError({
+      th: `hostname ต้องไม่มี query string`,
+      en: `Hostname must not include a query string`,
+    });
   }
   // ห้าม fragment
   if (input.includes("#")) {
-    throw new Error(`hostname ต้องไม่มี fragment (#)`);
+    throw new LocalizedError({
+      th: `hostname ต้องไม่มี fragment (#)`,
+      en: `Hostname must not include a fragment (#)`,
+    });
   }
   // ห้าม wildcard
   if (input.includes("*")) {
-    throw new Error(`wildcard hostname ไม่รองรับใน MVP`);
+    throw new LocalizedError({
+      th: `wildcard hostname ไม่รองรับใน MVP`,
+      en: `Wildcard hostnames are not supported in the MVP`,
+    });
   }
 
   // แยก port ออก (เช่น example.com:8080)
@@ -93,17 +114,26 @@ export function validateHostname(raw: string): string {
   if (colonIdx !== -1) {
     const afterColon = input.slice(colonIdx + 1);
     if (/^\d+$/.test(afterColon)) {
-      throw new Error(`hostname ต้องไม่มี port — ระบุ port ใน internal_port แทน`);
+      throw new LocalizedError({
+        th: `hostname ต้องไม่มี port — ระบุ port ใน internal_port แทน`,
+        en: `Hostname must not include a port. Set the port in internal_port instead`,
+      });
     }
   }
 
   // ห้าม IPv4
   if (isIPv4(input)) {
-    throw new Error(`IP address ไม่รองรับ — ใช้ hostname เท่านั้น`);
+    throw new LocalizedError({
+      th: `IP address ไม่รองรับ — ใช้ hostname เท่านั้น`,
+      en: `IP addresses are not supported. Use a hostname`,
+    });
   }
   // ห้าม IPv6
   if (isIPv6(input)) {
-    throw new Error(`IPv6 address ไม่รองรับ — ใช้ hostname เท่านั้น`);
+    throw new LocalizedError({
+      th: `IPv6 address ไม่รองรับ — ใช้ hostname เท่านั้น`,
+      en: `IPv6 addresses are not supported. Use a hostname`,
+    });
   }
 
   // ใช้ URL API เพื่อ normalize + punycode IDN
@@ -112,7 +142,10 @@ export function validateHostname(raw: string): string {
     const url = new URL(`http://${input}`);
     normalized = url.hostname; // lowercase + punycode
   } catch {
-    throw new Error(`hostname ไม่ถูกต้อง: "${input}"`);
+    throw new LocalizedError({
+      th: `hostname ไม่ถูกต้อง: "${input}"`,
+      en: `Invalid hostname: "${input}"`,
+    });
   }
 
   // ตรวจ labels
@@ -120,30 +153,48 @@ export function validateHostname(raw: string): string {
 
   // ต้องมีอย่างน้อย 2 labels (เช่น "example.com" ไม่ใช่ "localhost" เดี่ยวๆ)
   if (labels.length < 2) {
-    throw new Error(`hostname ต้องมีอย่างน้อย 2 ส่วน (เช่น "example.com")`);
+    throw new LocalizedError({
+      th: `hostname ต้องมีอย่างน้อย 2 ส่วน (เช่น "example.com")`,
+      en: `Hostname must have at least 2 parts (such as "example.com")`,
+    });
   }
 
   // ตรวจ reserved TLD
   const tld = labels[labels.length - 1] ?? "";
   if (RESERVED_TLDS.has(tld)) {
-    throw new Error(`TLD "${tld}" เป็น reserved hostname — ใช้ public domain เท่านั้น`);
+    throw new LocalizedError({
+      th: `TLD "${tld}" เป็น reserved hostname — ใช้ public domain เท่านั้น`,
+      en: `TLD "${tld}" is a reserved hostname. Use a public domain`,
+    });
   }
 
   // ตรวจแต่ละ label
   for (const label of labels) {
     if (!label) {
-      throw new Error(`hostname มี label ว่าง (เช่น "foo..bar")`);
+      throw new LocalizedError({
+        th: `hostname มี label ว่าง (เช่น "foo..bar")`,
+        en: `Hostname has an empty label (such as "foo..bar")`,
+      });
     }
     if (label.length > 63) {
-      throw new Error(`แต่ละส่วนของ hostname ต้องไม่ยาวเกิน 63 ตัวอักษร (ได้รับ: "${label}")`);
+      throw new LocalizedError({
+        th: `แต่ละส่วนของ hostname ต้องไม่ยาวเกิน 63 ตัวอักษร (ได้รับ: "${label}")`,
+        en: `Each part of the hostname must be at most 63 characters (received: "${label}")`,
+      });
     }
     if (label.startsWith("-") || label.endsWith("-")) {
-      throw new Error(`label ต้องไม่ขึ้นต้นหรือลงท้ายด้วย hyphen: "${label}"`);
+      throw new LocalizedError({
+        th: `label ต้องไม่ขึ้นต้นหรือลงท้ายด้วย hyphen: "${label}"`,
+        en: `A label must not start or end with a hyphen: "${label}"`,
+      });
     }
   }
 
   if (normalized.length > 253) {
-    throw new Error(`hostname ยาวเกิน 253 ตัวอักษร`);
+    throw new LocalizedError({
+      th: `hostname ยาวเกิน 253 ตัวอักษร`,
+      en: `Hostname is longer than 253 characters`,
+    });
   }
 
   return normalized;
@@ -167,20 +218,42 @@ const PATH_SEGMENT = /^[A-Za-z0-9._~-]+$/;
  */
 export function validatePathPrefix(raw: string): string {
   const input = raw.trim();
-  if (!input.startsWith("/")) throw new Error("path prefix ต้องขึ้นต้นด้วย /");
+  if (!input.startsWith("/"))
+    throw new LocalizedError({
+      th: "path prefix ต้องขึ้นต้นด้วย /",
+      en: "Path prefix must start with /",
+    });
   const segments = input.replace(/\/$/, "").split("/").slice(1);
   if (segments.length === 0 || segments[0] === "") {
-    throw new Error('path prefix "/" คือทั้ง host — เว้นช่องนี้ว่างแทน');
+    throw new LocalizedError({
+      th: 'path prefix "/" คือทั้ง host — เว้นช่องนี้ว่างแทน',
+      en: 'Path prefix "/" means the whole host. Leave this field empty instead',
+    });
   }
   for (const seg of segments) {
-    if (seg === "") throw new Error("path prefix ต้องไม่มี segment ว่าง (//)");
-    if (seg === "." || seg === "..") throw new Error('path prefix ต้องไม่มี "." หรือ ".."');
+    if (seg === "")
+      throw new LocalizedError({
+        th: "path prefix ต้องไม่มี segment ว่าง (//)",
+        en: "Path prefix must not contain an empty segment (//)",
+      });
+    if (seg === "." || seg === "..")
+      throw new LocalizedError({
+        th: 'path prefix ต้องไม่มี "." หรือ ".."',
+        en: 'Path prefix must not contain "." or ".."',
+      });
     if (!PATH_SEGMENT.test(seg)) {
-      throw new Error(`path prefix มีตัวอักษรที่ไม่รองรับ: "${seg}" (ใช้ได้เฉพาะ A-Z a-z 0-9 . _ ~ -)`);
+      throw new LocalizedError({
+        th: `path prefix มีตัวอักษรที่ไม่รองรับ: "${seg}" (ใช้ได้เฉพาะ A-Z a-z 0-9 . _ ~ -)`,
+        en: `Path prefix contains unsupported characters: "${seg}" (allowed: A-Z a-z 0-9 . _ ~ -)`,
+      });
     }
   }
   const normalized = `/${segments.join("/")}/`;
-  if (normalized.length > 128) throw new Error("path prefix ยาวเกิน 128 ตัวอักษร");
+  if (normalized.length > 128)
+    throw new LocalizedError({
+      th: "path prefix ยาวเกิน 128 ตัวอักษร",
+      en: "Path prefix is longer than 128 characters",
+    });
   return normalized;
 }
 

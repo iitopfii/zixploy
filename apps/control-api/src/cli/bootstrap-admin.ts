@@ -1,5 +1,5 @@
 /**
- * สร้าง admin คนแรก (docs/phase-01 — single admin bootstrap)
+ * สร้าง admin (คนแรก หรือเพิ่มเพื่อกู้คืนสิทธิ์ — สมาชิกทั่วไปจัดการในหน้า Members)
  *
  *   ZIXPLOY_ADMIN_USERNAME=admin ZIXPLOY_ADMIN_PASSWORD=... bun run bootstrap:admin
  *
@@ -47,23 +47,18 @@ const passwordHash = await hashPassword(password);
 
 if (existing) {
   db.transaction(() => {
-    db.query("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?").run(
-      passwordHash,
-      now,
-      existing.id,
-    );
+    // --reset เป็นทางกู้คืนเมื่อล็อกตัวเองออก: คืนสิทธิ์ admin และเปิดบัญชีที่ถูกปิดด้วย
+    db.query(
+      "UPDATE users SET password_hash = ?, role = 'admin', disabled_at = NULL, updated_at = ? WHERE id = ?",
+    ).run(passwordHash, now, existing.id);
     // password เปลี่ยน = session เดิมต้องใช้ไม่ได้อีก
     revokeAllSessions(db, existing.id, now);
   })();
   console.log(`ตั้ง password ใหม่ให้ "${username}" แล้ว และ revoke ทุก session เดิม`);
 } else {
-  const anyUser = db.query<{ n: number }, []>("SELECT count(*) as n FROM users").get()?.n ?? 0;
-  if (anyUser > 0) {
-    console.error("ระบบรองรับ admin เดียวใน MVP — มี user อยู่แล้วในฐานข้อมูล");
-    process.exit(1);
-  }
+  // มี user อยู่แล้วก็สร้าง admin เพิ่มได้ — ใช้กู้คืนเมื่อไม่เหลือ admin ที่ login ได้
   db.query(
-    "INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO users (id, username, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, 'admin', ?, ?)",
   ).run(ulid(), username, passwordHash, now, now);
   console.log(`สร้าง admin "${username}" เรียบร้อย`);
 }

@@ -21,6 +21,7 @@ import type { Database } from "bun:sqlite";
 import { API_PREFIX, AppError, isUlid } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
 import { getClientIp, recordAuditEvent } from "../audit/log";
+import { assertAdmin } from "../auth/policy";
 import { authPlugin, requireAuthenticated } from "../plugins/auth";
 import {
   createVolume,
@@ -70,11 +71,13 @@ const volumeSchema = t.Object({
 // ---------------------------------------------------------------------------
 
 function requireProject(db: Database, id: string): void {
-  if (!isUlid(id)) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+  if (!isUlid(id))
+    throw new AppError("PROJECT_NOT_FOUND", { th: "ไม่พบ project นี้", en: "Project not found" });
   const row = db
     .query<{ id: string }, [string]>("SELECT id FROM projects WHERE id = ? AND archived_at IS NULL")
     .get(id);
-  if (!row) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+  if (!row)
+    throw new AppError("PROJECT_NOT_FOUND", { th: "ไม่พบ project นี้", en: "Project not found" });
 }
 
 /** volume ของ compose ต้องผูกกับ component ที่รันเป็น container ของโปรเจกต์นี้ (managed_ref ไม่มี container) */
@@ -87,24 +90,32 @@ function requireMountableComponent(db: Database, projectId: string, componentId:
         .get(componentId, projectId)
     : null;
   if (!row) {
-    throw new AppError("COMPONENT_NOT_FOUND", "ไม่พบ component นี้ในโปรเจกต์", {
-      field: "componentId",
-    });
+    throw new AppError(
+      "COMPONENT_NOT_FOUND",
+      { th: "ไม่พบ component นี้ในโปรเจกต์", en: "Component not found in this project" },
+      {
+        field: "componentId",
+      },
+    );
   }
   if (row.source_kind === "managed_ref") {
     throw new AppError(
       "VALIDATION_ERROR",
-      "component แบบ managed database ไม่มี container ให้ mount — จัดการ volume ที่หน้า Databases",
+      {
+        th: "component แบบ managed database ไม่มี container ให้ mount — จัดการ volume ที่หน้า Databases",
+        en: "A managed database component has no container to mount into. Manage its volume on the Databases page",
+      },
       { field: "componentId" },
     );
   }
 }
 
 function requireVolume(db: Database, volumeId: string, projectId: string) {
-  if (!isUlid(volumeId)) throw new AppError("VOLUME_NOT_FOUND", "ไม่พบ volume นี้");
+  if (!isUlid(volumeId))
+    throw new AppError("VOLUME_NOT_FOUND", { th: "ไม่พบ volume นี้", en: "Volume not found" });
   const vol = getVolume(db, volumeId);
   if (!vol || vol.projectId !== projectId) {
-    throw new AppError("VOLUME_NOT_FOUND", "ไม่พบ volume นี้");
+    throw new AppError("VOLUME_NOT_FOUND", { th: "ไม่พบ volume นี้", en: "Volume not found" });
   }
   return vol;
 }
@@ -132,8 +143,15 @@ export function volumeRoutes(db: Database) {
       // POST /api/v1/projects/:id/volumes
       .post(
         `${API_PREFIX}/projects/:id/volumes`,
-        ({ params, body }) => {
+        ({ params, body, requireUser }) => {
           requireProject(db, params.id);
+          // bind mount เปิด path ของ host ให้ container — เกินขอบเขตโปรเจกต์ จึงเป็นของ admin
+          if (body.hostPath !== undefined && body.hostPath !== "") {
+            assertAdmin(requireUser(), {
+              th: "ต้องเป็น admin จึงจะสร้าง volume แบบ bind mount ได้",
+              en: "Only an admin can create a bind-mount volume",
+            });
+          }
           if (body.componentId) requireMountableComponent(db, params.id, body.componentId);
           const vol = createVolume(db, params.id, {
             displayName: body.displayName,

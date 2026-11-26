@@ -21,6 +21,7 @@ import type { Database } from "bun:sqlite";
 import {
   API_PREFIX,
   AppError,
+  errorText,
   isUlid,
   MAX_PEM_BYTES,
   validateHostname,
@@ -126,11 +127,13 @@ const updateBody = t.Object({
 // ---------------------------------------------------------------------------
 
 function requireProject(db: Database, projectId: string): void {
-  if (!isUlid(projectId)) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+  if (!isUlid(projectId))
+    throw new AppError("PROJECT_NOT_FOUND", { th: "ไม่พบ project นี้", en: "Project not found" });
   const row = db
     .query<{ id: string }, [string]>("SELECT id FROM projects WHERE id = ? AND archived_at IS NULL")
     .get(projectId);
-  if (!row) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+  if (!row)
+    throw new AppError("PROJECT_NOT_FOUND", { th: "ไม่พบ project นี้", en: "Project not found" });
 }
 
 function requireDomainBelongsToProject(
@@ -138,10 +141,11 @@ function requireDomainBelongsToProject(
   domainId: string,
   projectId: string,
 ): NonNullable<ReturnType<typeof getDomain>> {
-  if (!isUlid(domainId)) throw new AppError("DOMAIN_NOT_FOUND", "ไม่พบ domain นี้");
+  if (!isUlid(domainId))
+    throw new AppError("DOMAIN_NOT_FOUND", { th: "ไม่พบ domain นี้", en: "Domain not found" });
   const row = getDomain(db, domainId);
   if (!row || row.project_id !== projectId) {
-    throw new AppError("DOMAIN_NOT_FOUND", "ไม่พบ domain นี้");
+    throw new AppError("DOMAIN_NOT_FOUND", { th: "ไม่พบ domain นี้", en: "Domain not found" });
   }
   return row;
 }
@@ -159,18 +163,30 @@ function requireWebComponent(db: Database, projectId: string, componentId: strin
         .get(componentId, projectId)
     : null;
   if (!row)
-    throw new AppError("VALIDATION_ERROR", "ไม่พบ component นี้ในโปรเจกต์", { field: "componentId" });
+    throw new AppError(
+      "VALIDATION_ERROR",
+      { th: "ไม่พบ component นี้ในโปรเจกต์", en: "Component not found in this project" },
+      { field: "componentId" },
+    );
   if (row.is_web !== 1 || row.source_kind === "managed_ref") {
-    throw new AppError("VALIDATION_ERROR", "domain ชี้ได้เฉพาะ web component", {
-      field: "componentId",
-    });
+    throw new AppError(
+      "VALIDATION_ERROR",
+      { th: "domain ชี้ได้เฉพาะ web component", en: "A domain can only point to a web component" },
+      {
+        field: "componentId",
+      },
+    );
   }
 }
 
 /** อ่าน DomainDto กลับหลัง mutation — store คืน Row จึงต้องผ่าน listDomains ที่ map เป็น DTO */
 function loadDomainDto(db: Database, projectId: string, domainId: string) {
   const dto = listDomains(db, projectId).find((d) => d.id === domainId);
-  if (!dto) throw new AppError("INTERNAL_ERROR", "domain หายไประหว่างดำเนินการ");
+  if (!dto)
+    throw new AppError("INTERNAL_ERROR", {
+      th: "domain หายไประหว่างดำเนินการ",
+      en: "The domain disappeared during the operation",
+    });
   return dto;
 }
 
@@ -213,7 +229,7 @@ export function domainRoutes(db: Database, masterKeys: MasterKeys | null = null)
           } catch (err) {
             throw new AppError(
               "DOMAIN_INVALID",
-              err instanceof Error ? err.message : "hostname ไม่ถูกต้อง",
+              errorText(err, { th: "hostname ไม่ถูกต้อง", en: "Invalid hostname" }),
             );
           }
 
@@ -224,7 +240,7 @@ export function domainRoutes(db: Database, masterKeys: MasterKeys | null = null)
             } catch (err) {
               throw new AppError(
                 "DOMAIN_INVALID",
-                err instanceof Error ? err.message : "path prefix ไม่ถูกต้อง",
+                errorText(err, { th: "path prefix ไม่ถูกต้อง", en: "Invalid path prefix" }),
               );
             }
           }
@@ -319,7 +335,10 @@ export function domainRoutes(db: Database, masterKeys: MasterKeys | null = null)
           requireDomainBelongsToProject(db, params.domainId, params.id);
           const info = getCertificateInfo(db, params.domainId);
           if (!info) {
-            throw new AppError("TLS_CERT_NOT_FOUND", "domain นี้ยังไม่มี custom certificate");
+            throw new AppError("TLS_CERT_NOT_FOUND", {
+              th: "domain นี้ยังไม่มี custom certificate",
+              en: "This domain has no custom certificate yet",
+            });
           }
           return info;
         },

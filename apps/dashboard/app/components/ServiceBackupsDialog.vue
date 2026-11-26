@@ -31,6 +31,7 @@ interface BackupItem {
 }
 
 const api = useApi();
+const { t } = useI18n();
 
 // ── ประวัติ backup ──
 const backups = ref<BackupItem[]>([]);
@@ -42,12 +43,12 @@ async function load() {
   try {
     const { data, error } = await api.api.v1.services({ id: props.serviceId }).backups.get();
     if (error) {
-      loadError.value = "โหลดประวัติ backup ไม่สำเร็จ";
+      loadError.value = t("databases.backups.error.load");
       return;
     }
     backups.value = (data?.items ?? []) as BackupItem[];
   } catch {
-    loadError.value = "ติดต่อ API ไม่ได้";
+    loadError.value = t("common.apiUnreachable");
   } finally {
     loading.value = false;
   }
@@ -69,12 +70,10 @@ onMounted(() => {
 
 // ── ตั้งเวลา + retention ──
 // ต้องตรงกับ SERVICE_BACKUP_SETTINGS.allowedIntervalHours (internal/shared/src/constants.ts)
-const INTERVAL_OPTIONS = [
-  { value: 6, label: "ทุก 6 ชั่วโมง" },
-  { value: 12, label: "ทุก 12 ชั่วโมง" },
-  { value: 24, label: "ทุกวัน" },
-  { value: 168, label: "ทุกสัปดาห์" },
-];
+const INTERVAL_HOURS = [6, 12, 24, 168];
+const intervalOptions = computed(() =>
+  INTERVAL_HOURS.map((value) => ({ value, label: t(`databases.interval.h${value}`) })),
+);
 
 const settings = reactive({
   enabled: props.backupEnabled,
@@ -96,16 +95,14 @@ async function saveSettings() {
       backupRetentionCount: settings.retentionCount,
     });
     if (error) {
-      settingsError.value =
-        (error.value as { error?: { message?: string } } | null)?.error?.message ??
-        "บันทึกการตั้งค่าไม่สำเร็จ";
+      settingsError.value = apiErrorMessage(error, "databases.backups.error.saveSettings");
       return;
     }
     settingsSaved.value = true;
     setTimeout(() => (settingsSaved.value = false), 2000);
     emit("updated");
   } catch {
-    settingsError.value = "ติดต่อ API ไม่ได้";
+    settingsError.value = t("common.apiUnreachable");
   } finally {
     savingSettings.value = false;
   }
@@ -121,9 +118,7 @@ async function triggerBackup() {
   try {
     const { error } = await api.api.v1.services({ id: props.serviceId }).backups.post();
     if (error) {
-      triggerError.value =
-        (error.value as { error?: { message?: string } } | null)?.error?.message ??
-        "สั่ง backup ไม่สำเร็จ";
+      triggerError.value = apiErrorMessage(error, "databases.backups.error.trigger");
       return;
     }
     await load();
@@ -174,11 +169,10 @@ function downloadUrl(backupId: string): string {
   return `/api/v1/services/${props.serviceId}/backups/${backupId}/download`;
 }
 
-const STATUS_LABEL: Record<BackupItem["status"], string> = {
-  running: "กำลังสำรอง…",
-  succeeded: "สำเร็จ",
-  failed: "ล้มเหลว",
-};
+// เรียกจาก template — อ่าน locale ตอน render จึงเปลี่ยนตามภาษาเอง
+function statusLabel(status: BackupItem["status"]): string {
+  return t(`databases.backups.status.${status}`);
+}
 // "running" ใช้โทนเดียวกับ deploy ที่กำลังทำงาน (ฟ้า) ไม่ใช่ .status-running (เขียว) ที่หมายถึง
 // service กำลังรันอยู่ปกติ — สื่อความหมายคนละอย่างกันแม้ชื่อ status จะพ้องกัน
 const STATUS_CLASS: Record<BackupItem["status"], string> = {
@@ -186,13 +180,12 @@ const STATUS_CLASS: Record<BackupItem["status"], string> = {
   succeeded: "status-succeeded",
   failed: "status-failed",
 };
-const TRIGGER_LABEL: Record<BackupItem["trigger"], string> = {
-  manual: "สั่งเอง",
-  scheduled: "ตามตารางเวลา",
-};
+function triggerLabel(trigger: BackupItem["trigger"]): string {
+  return t(`databases.backups.trigger.${trigger}`);
+}
 
 function fmtTime(ms: number) {
-  return new Date(ms).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
+  return new Date(ms).toLocaleString(localeTag(), { dateStyle: "short", timeStyle: "short" });
 }
 </script>
 
@@ -202,7 +195,7 @@ function fmtTime(ms: number) {
       <div class="dialog card" role="dialog" aria-modal="true">
         <div class="row-between">
           <h2 class="section-title truncate">Backups — {{ serviceName }}</h2>
-          <button class="ghost icon small" aria-label="ปิด" @click="emit('close')">
+          <button class="ghost icon small" :aria-label="$t('common.close')" @click="emit('close')">
             <AppIcon name="x" :size="15" />
           </button>
         </div>
@@ -212,20 +205,20 @@ function fmtTime(ms: number) {
           <section class="inset stack">
             <div class="check-row">
               <input id="bk-enabled" v-model="settings.enabled" type="checkbox" />
-              <label for="bk-enabled">สำรองข้อมูลอัตโนมัติตามตารางเวลา</label>
+              <label for="bk-enabled">{{ $t("databases.backups.auto") }}</label>
             </div>
 
             <div v-if="settings.enabled" class="settings-grid">
               <label>
-                <span>ความถี่</span>
+                <span>{{ $t("databases.backups.frequency") }}</span>
                 <select v-model.number="settings.intervalHours">
-                  <option v-for="opt in INTERVAL_OPTIONS" :key="opt.value" :value="opt.value">
+                  <option v-for="opt in intervalOptions" :key="opt.value" :value="opt.value">
                     {{ opt.label }}
                   </option>
                 </select>
               </label>
               <label>
-                <span>เก็บไว้ล่าสุดกี่ชุด</span>
+                <span>{{ $t("databases.backups.retention") }}</span>
                 <input v-model.number="settings.retentionCount" type="number" min="1" max="30" />
               </label>
             </div>
@@ -236,21 +229,23 @@ function fmtTime(ms: number) {
             </p>
 
             <div class="actions-end">
-              <span v-if="settingsSaved" class="muted small">บันทึกแล้ว</span>
+              <span v-if="settingsSaved" class="muted small">{{ $t("common.saved") }}</span>
               <button class="secondary small" :disabled="savingSettings" @click="saveSettings">
                 <span v-if="savingSettings" class="spinner" />
-                {{ savingSettings ? "กำลังบันทึก…" : "บันทึกการตั้งค่า" }}
+                {{ savingSettings ? $t("common.saving") : $t("databases.backups.saveSettings") }}
               </button>
             </div>
           </section>
 
           <!-- ── ประวัติ ── -->
           <div class="row-between">
-            <h3 class="section-title small">ประวัติ backup</h3>
+            <h3 class="section-title small">{{ $t("databases.backups.history") }}</h3>
             <button class="primary small" :disabled="triggering" @click="triggerBackup">
               <span v-if="triggering" class="spinner" />
               <AppIcon v-else name="database" :size="13" />
-              {{ triggering ? "กำลังสั่ง…" : "สำรองข้อมูลตอนนี้" }}
+              {{
+                triggering ? $t("databases.backups.triggering") : $t("databases.backups.backupNow")
+              }}
             </button>
           </div>
 
@@ -269,16 +264,16 @@ function fmtTime(ms: number) {
           </p>
           <div v-else-if="backups.length === 0" class="empty">
             <span class="empty-icon"><AppIcon name="database" :size="18" /></span>
-            <span class="empty-title">ยังไม่มี backup</span>
+            <span class="empty-title">{{ $t("databases.backups.empty") }}</span>
           </div>
 
           <ul v-else class="bk-list">
             <li v-for="b in backups" :key="b.id" class="inset bk-item">
               <div class="bk-header">
                 <span class="status" :class="STATUS_CLASS[b.status]">
-                  {{ STATUS_LABEL[b.status] }}
+                  {{ statusLabel(b.status) }}
                 </span>
-                <span class="badge tiny">{{ TRIGGER_LABEL[b.trigger] }}</span>
+                <span class="badge tiny">{{ triggerLabel(b.trigger) }}</span>
                 <span class="spacer" />
                 <span class="muted tiny">{{ fmtTime(b.createdAt) }}</span>
               </div>
@@ -293,7 +288,7 @@ function fmtTime(ms: number) {
                 <span class="spacer" />
                 <a class="secondary small" :href="downloadUrl(b.id)" download>
                   <AppIcon name="download" :size="13" />
-                  ดาวน์โหลด
+                  {{ $t("databases.backups.download") }}
                 </a>
                 <button class="secondary small" @click="confirmRestore = b">
                   <AppIcon name="rotate" :size="13" />
@@ -301,7 +296,7 @@ function fmtTime(ms: number) {
                 </button>
                 <button class="danger small" @click="confirmDelete = b">
                   <AppIcon name="trash" :size="13" />
-                  ลบ
+                  {{ $t("common.delete") }}
                 </button>
               </div>
             </li>
@@ -313,9 +308,9 @@ function fmtTime(ms: number) {
 
   <ConfirmDialog
     :open="!!confirmDelete"
-    title="ลบ backup"
-    message="ไฟล์ backup ชุดนี้จะถูกลบถาวร กู้คืนไม่ได้"
-    confirm-label="ลบถาวร"
+    :title="$t('databases.backups.confirmDelete.title')"
+    :message="$t('databases.backups.confirmDelete.message')"
+    :confirm-label="$t('databases.deletePermanently')"
     :busy="deleting"
     @cancel="confirmDelete = null"
     @confirm="doDelete"
@@ -324,8 +319,8 @@ function fmtTime(ms: number) {
   <ConfirmDialog
     :open="!!confirmRestore"
     title="Restore database"
-    message="ข้อมูลปัจจุบันทั้งหมดใน database นี้จะถูกเขียนทับด้วยข้อมูลจาก backup ชุดนี้ทันที — ย้อนกลับไม่ได้ (แนะนำให้สำรองข้อมูลปัจจุบันไว้ก่อนถ้ายังต้องการ)"
-    confirm-label="เขียนทับและ Restore"
+    :message="$t('databases.backups.confirmRestore.message')"
+    :confirm-label="$t('databases.backups.confirmRestore.confirm')"
     :require-typed="serviceName"
     :busy="restoring"
     @cancel="confirmRestore = null"

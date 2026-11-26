@@ -1,0 +1,50 @@
+{
+  "system": {
+    "subtitle": "domain ของ dashboard, ข้อมูลเครือข่ายของเครื่อง และ credential ของ container registry",
+    "domain": {
+      "intro": "ตั้ง domain ที่ใช้เข้า dashboard นี้ (เช่นชี้ domain ใหม่มาที่เครื่องหลังติดตั้งเสร็จ) — มีผลทันทีไม่ต้อง restart ถ้าไม่ตั้ง ระบบจะยอมรับเฉพาะ host ที่ตัวติดตั้งกำหนดไว้ และการเข้าผ่าน domain อื่นจะถูกปฏิเสธ (INVALID_HOST)",
+      "label": "Domain (ว่าง = ปิดการใช้ domain เพิ่มเติม)",
+      "saved": "บันทึกแล้ว — เข้า dashboard ผ่าน domain นี้ได้ทันที"
+    },
+    "dns": {
+      "title": "A Record สำหรับตั้งค่า DNS",
+      "intro": "ชี้ domain มาที่เครื่องนี้โดยเพิ่ม A record ใน DNS ของผู้ให้บริการ domain — Type {type}, Name เป็นชื่อ domain/subdomain ที่ต้องการ, Value เป็น IP ด้านล่าง",
+      "copyIp": "คัดลอก {ip}",
+      "noIp": "ไม่พบ IP ของเครื่อง — ตั้ง {name} ใน {file} ของการติดตั้งแล้ว restart control-api"
+    },
+    "registries": {
+      "add": "เพิ่ม registry",
+      "intro": "credential สำหรับ pull image ที่เป็น private (เช่น {host}) ของ component แบบ image — ใช้กับทุกโปรเจกต์ที่ pull จาก host นั้น · zixploy ไม่ {login} ค้างไว้บนเครื่อง แต่ส่ง credential ให้การ pull แต่ละครั้งแล้วลบทิ้ง",
+      "ghcrHint": "ghcr.io: ใช้ GitHub personal access token ที่มีแค่ scope {scope}",
+      "empty": "ยังไม่มี — image จาก registry ที่ไม่มี credential จะ pull แบบไม่ login (ใช้ได้กับ image public)",
+      "lastUsed": "ใช้ล่าสุด {time}",
+      "neverUsed": "ยังไม่เคยใช้",
+      "changePassword": "เปลี่ยน password",
+      "newPasswordPlaceholder": "password / token ใหม่",
+      "confirmDelete": "ลบ credential ของ {registry}? deploy ครั้งถัดไปจะ pull แบบไม่ login",
+      "error": {
+        "load": "โหลดรายการ registry ไม่ได้",
+        "add": "เพิ่ม registry ไม่สำเร็จ"
+      }
+    },
+    "update": {
+      "updating": "กำลังอัปเดต… ระบบจะรีสตาร์ทเอง",
+      "published": "(เผยแพร่ {date})",
+      "updateTo": "อัปเดตเป็น {version}{published}",
+      "available": "มีอัปเดตใหม่",
+      "checkFailed": "ตรวจอัปเดตไม่ได้",
+      "confirmTitle": "อัปเดต Zixploy",
+      "confirmMessage": "อัปเดตจาก {current} เป็น {latest}{published} — ระบบจะรีสตาร์ทและใช้ไม่ได้ประมาณ 1-2 นาที แอปที่ deploy ไว้ยังทำงานต่อตามปกติ ไม่ถูกแตะ",
+      "confirmLabel": "อัปเดตเลย",
+      "startFailed": "สั่งอัปเดตไม่สำเร็จ"
+    },
+    "health": {
+      "title": "สถานะระบบ",
+      "checking": "กำลังตรวจ…",
+      "ok": "ระบบปกติ",
+      "down": "ขัดข้อง: {components}",
+      "okShort": "ปกติ",
+      "downShort": "ขัดข้อง"
+    }
+  }
+}

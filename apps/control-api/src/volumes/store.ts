@@ -141,7 +141,7 @@ export function createVolume(
   // Validate mount path
   const pathCheck = validateMountPath(params.mountPath);
   if (!pathCheck.ok) {
-    throw new AppError("VOLUME_INVALID_PATH", pathCheck.reason ?? "invalid mount path", {
+    throw new AppError("VOLUME_INVALID_PATH", pathCheck.reasonText, {
       field: "mountPath",
     });
   }
@@ -151,7 +151,10 @@ export function createVolume(
   if (!(VOLUME_ALLOWED_DRIVERS as readonly string[]).includes(driver)) {
     throw new AppError(
       "VOLUME_DRIVER_NOT_ALLOWED",
-      `driver '${driver}' ไม่ได้รับอนุญาต — ใช้ได้เฉพาะ: ${VOLUME_ALLOWED_DRIVERS.join(", ")}`,
+      {
+        th: `driver '${driver}' ไม่ได้รับอนุญาต — ใช้ได้เฉพาะ: ${VOLUME_ALLOWED_DRIVERS.join(", ")}`,
+        en: `Driver '${driver}' is not allowed. Allowed drivers: ${VOLUME_ALLOWED_DRIVERS.join(", ")}`,
+      },
       { field: "driver", allowed: VOLUME_ALLOWED_DRIVERS },
     );
   }
@@ -163,11 +166,9 @@ export function createVolume(
   if (params.hostPath !== undefined && params.hostPath !== "") {
     const hostCheck = validateHostPath(params.hostPath, installDirsToProtect());
     if (!hostCheck.ok) {
-      throw new AppError(
-        hostCheck.code ?? "VOLUME_INVALID_PATH",
-        hostCheck.reason ?? "invalid host path",
-        { field: "hostPath" },
-      );
+      throw new AppError(hostCheck.code ?? "VOLUME_INVALID_PATH", hostCheck.reasonText, {
+        field: "hostPath",
+      });
     }
     driverOpts = JSON.stringify({
       type: "none",
@@ -189,7 +190,10 @@ export function createVolume(
   if (dup) {
     throw new AppError(
       "VOLUME_DUPLICATE_MOUNT",
-      `mount path '${params.mountPath}' มี active volume อยู่แล้วใน${componentId ? " component" : " project"} นี้`,
+      {
+        th: `mount path '${params.mountPath}' มี active volume อยู่แล้วใน${componentId ? " component" : " project"} นี้`,
+        en: `Mount path '${params.mountPath}' already has an active volume in this ${componentId ? "component" : "project"}`,
+      },
       { mountPath: params.mountPath },
     );
   }
@@ -237,17 +241,20 @@ export function updateVolume(
 ): VolumeDto {
   const vol = getVolume(db, volumeId);
   if (!vol || vol.projectId !== projectId) {
-    throw new AppError("VOLUME_NOT_FOUND", "ไม่พบ volume นี้");
+    throw new AppError("VOLUME_NOT_FOUND", { th: "ไม่พบ volume นี้", en: "Volume not found" });
   }
   if (vol.lifecycle === "deleted") {
-    throw new AppError("VOLUME_NOT_FOUND", "ไม่พบ volume นี้ (ถูกลบแล้ว)");
+    throw new AppError("VOLUME_NOT_FOUND", {
+      th: "ไม่พบ volume นี้ (ถูกลบแล้ว)",
+      en: "Volume not found (already deleted)",
+    });
   }
 
   // Validate new mount path
   if (params.mountPath !== undefined) {
     const pathCheck = validateMountPath(params.mountPath);
     if (!pathCheck.ok) {
-      throw new AppError("VOLUME_INVALID_PATH", pathCheck.reason ?? "invalid mount path", {
+      throw new AppError("VOLUME_INVALID_PATH", pathCheck.reasonText, {
         field: "mountPath",
       });
     }
@@ -263,7 +270,10 @@ export function updateVolume(
       if (dup) {
         throw new AppError(
           "VOLUME_DUPLICATE_MOUNT",
-          `mount path '${params.mountPath}' มี active volume อยู่แล้วใน project นี้`,
+          {
+            th: `mount path '${params.mountPath}' มี active volume อยู่แล้วใน project นี้`,
+            en: `Mount path '${params.mountPath}' already has an active volume in this project`,
+          },
           { mountPath: params.mountPath },
         );
       }
@@ -290,13 +300,13 @@ export function updateVolume(
 export function detachVolume(db: Database, volumeId: string, projectId: string): VolumeDto {
   const vol = getVolume(db, volumeId);
   if (!vol || vol.projectId !== projectId) {
-    throw new AppError("VOLUME_NOT_FOUND", "ไม่พบ volume นี้");
+    throw new AppError("VOLUME_NOT_FOUND", { th: "ไม่พบ volume นี้", en: "Volume not found" });
   }
   if (vol.lifecycle !== "active" && vol.lifecycle !== "error") {
-    throw new AppError(
-      "VOLUME_NOT_DETACHED",
-      `volume อยู่ใน state '${vol.lifecycle}' ไม่สามารถ detach ได้`,
-    );
+    throw new AppError("VOLUME_NOT_DETACHED", {
+      th: `volume อยู่ใน state '${vol.lifecycle}' ไม่สามารถ detach ได้`,
+      en: `Volume is in state '${vol.lifecycle}' and cannot be detached`,
+    });
   }
 
   db.query("UPDATE volumes SET lifecycle = 'detached', updated_at = ? WHERE id = ?").run(
@@ -314,16 +324,19 @@ export function detachVolume(db: Database, volumeId: string, projectId: string):
 export function markVolumeForDeletion(db: Database, volumeId: string, projectId: string): void {
   const vol = getVolume(db, volumeId);
   if (!vol || vol.projectId !== projectId) {
-    throw new AppError("VOLUME_NOT_FOUND", "ไม่พบ volume นี้");
+    throw new AppError("VOLUME_NOT_FOUND", { th: "ไม่พบ volume นี้", en: "Volume not found" });
   }
   if (vol.lifecycle === "active") {
-    throw new AppError(
-      "VOLUME_NOT_DETACHED",
-      "ต้อง detach volume ก่อนจึงจะลบได้ (lifecycle ต้องเป็น detached)",
-    );
+    throw new AppError("VOLUME_NOT_DETACHED", {
+      th: "ต้อง detach volume ก่อนจึงจะลบได้ (lifecycle ต้องเป็น detached)",
+      en: "Detach the volume before deleting it (lifecycle must be detached)",
+    });
   }
   if (vol.lifecycle === "deleted") {
-    throw new AppError("VOLUME_NOT_FOUND", "ไม่พบ volume นี้ (ถูกลบแล้ว)");
+    throw new AppError("VOLUME_NOT_FOUND", {
+      th: "ไม่พบ volume นี้ (ถูกลบแล้ว)",
+      en: "Volume not found (already deleted)",
+    });
   }
 
   db.query("UPDATE volumes SET lifecycle = 'deletion_pending', updated_at = ? WHERE id = ?").run(

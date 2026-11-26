@@ -44,7 +44,10 @@ function traefikTlsDir(): string {
 /** id ต้องเป็น [A-Za-z0-9] ล้วน (ULID) — กัน `..`/separator หลุดเข้า path ถ้ามีบั๊กต้นทาง */
 function assertSafeId(id: string): void {
   if (!/^[A-Za-z0-9]{1,64}$/.test(id)) {
-    throw new AppError("TLS_MATERIALIZE_FAILED", `domain id ไม่ปลอดภัยสำหรับใช้เป็นชื่อไฟล์: ${id}`);
+    throw new AppError("TLS_MATERIALIZE_FAILED", {
+      th: `domain id ไม่ปลอดภัยสำหรับใช้เป็นชื่อไฟล์: ${id}`,
+      en: `Domain id is not safe to use as a file name: ${id}`,
+    });
   }
 }
 
@@ -73,10 +76,10 @@ export function materializeCertificates(certs: DecryptedCertificate[]): Material
     mkdirSync(certsDir, { recursive: true });
     mkdirSync(dynamicDir, { recursive: true });
   } catch (err) {
-    throw new AppError(
-      "TLS_MATERIALIZE_FAILED",
-      `สร้างโฟลเดอร์ certificate ไม่ได้: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    throw new AppError("TLS_MATERIALIZE_FAILED", {
+      th: `สร้างโฟลเดอร์ certificate ไม่ได้: ${err instanceof Error ? err.message : String(err)}`,
+      en: `Could not create the certificate folder: ${err instanceof Error ? err.message : String(err)}`,
+    });
   }
 
   const expectedFiles = new Set<string>();
@@ -143,9 +146,9 @@ function writeAtomic(path: string, content: string, mode: number): void {
     } catch {
       // best effort — ไฟล์ tmp ค้างไม่กระทบ Traefik (นามสกุล .tmp ไม่ถูกโหลด)
     }
-    throw new AppError(
-      "TLS_MATERIALIZE_FAILED",
-      `เขียนไฟล์ certificate ไม่สำเร็จ: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    throw new AppError("TLS_MATERIALIZE_FAILED", {
+      th: `เขียนไฟล์ certificate ไม่สำเร็จ: ${err instanceof Error ? err.message : String(err)}`,
+      en: `Could not write the certificate file: ${err instanceof Error ? err.message : String(err)}`,
+    });
   }
 }

@@ -103,30 +103,48 @@ export async function exchangeManifestCode(
     });
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
-      throw new AppError("GITHUB_UNAVAILABLE", "GitHub API ไม่ตอบสนองภายในเวลาที่กำหนด");
+      throw new AppError("GITHUB_UNAVAILABLE", {
+        th: "GitHub API ไม่ตอบสนองภายในเวลาที่กำหนด",
+        en: "GitHub API did not respond in time",
+      });
     }
-    throw new AppError("GITHUB_UNAVAILABLE", "ติดต่อ GitHub API ไม่ได้");
+    throw new AppError("GITHUB_UNAVAILABLE", {
+      th: "ติดต่อ GitHub API ไม่ได้",
+      en: "Could not reach the GitHub API",
+    });
   } finally {
     clearTimeout(timer);
   }
 
   if (res.status === 404) {
     // code หมดอายุหรือใช้ไปแล้ว
-    throw new AppError("VALIDATION_ERROR", "manifest code หมดอายุหรือถูกใช้ไปแล้ว — สร้าง app ใหม่");
+    throw new AppError("VALIDATION_ERROR", {
+      th: "manifest code หมดอายุหรือถูกใช้ไปแล้ว — สร้าง app ใหม่",
+      en: "Manifest code has expired or was already used. Create the app again",
+    });
   }
   if (!res.ok) {
-    throw new AppError("GITHUB_UNAVAILABLE", `GitHub manifest conversion ตอบ ${res.status}`);
+    throw new AppError("GITHUB_UNAVAILABLE", {
+      th: `GitHub manifest conversion ตอบ ${res.status}`,
+      en: `GitHub manifest conversion returned ${res.status}`,
+    });
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(await res.text());
   } catch {
-    throw new AppError("GITHUB_UNAVAILABLE", "manifest conversion response ไม่ใช่ JSON ที่ถูกต้อง");
+    throw new AppError("GITHUB_UNAVAILABLE", {
+      th: "manifest conversion response ไม่ใช่ JSON ที่ถูกต้อง",
+      en: "Manifest conversion response is not valid JSON",
+    });
   }
 
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new AppError("GITHUB_UNAVAILABLE", "manifest conversion response ผิดรูปแบบ");
+    throw new AppError("GITHUB_UNAVAILABLE", {
+      th: "manifest conversion response ผิดรูปแบบ",
+      en: "Malformed manifest conversion response",
+    });
   }
   const obj = parsed as Record<string, unknown>;
   for (const field of [
@@ -140,7 +158,10 @@ export async function exchangeManifestCode(
     "client_secret",
   ]) {
     if (!(field in obj)) {
-      throw new AppError("GITHUB_UNAVAILABLE", `manifest conversion response ขาด field '${field}'`);
+      throw new AppError("GITHUB_UNAVAILABLE", {
+        th: `manifest conversion response ขาด field '${field}'`,
+        en: `Manifest conversion response is missing field '${field}'`,
+      });
     }
   }
 

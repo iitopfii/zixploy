@@ -6,6 +6,7 @@
  * control-api สร้าง record + งาน แล้ว worker เป็นคน provision จริง (ADR-0002)
  */
 const api = useApi();
+const { t } = useI18n();
 
 const { data: catalog } = await useAsyncData(
   "service-catalog",
@@ -22,7 +23,7 @@ const {
   "services",
   async () => {
     const { data, error: apiError } = await api.api.v1.services.get();
-    if (apiError) throw new Error("โหลดรายการ database ไม่สำเร็จ");
+    if (apiError) throw new Error(t("databases.error.load"));
     return data?.items ?? [];
   },
   { server: false },
@@ -92,8 +93,7 @@ async function submitCreate() {
       exposedPort: form.exposePort ? form.exposedPort : null,
     });
     if (apiError) {
-      const body = apiError.value as { error?: { message?: string } } | null;
-      createError.value = body?.error?.message ?? "สร้างไม่สำเร็จ";
+      createError.value = apiErrorMessage(apiError, "databases.error.create");
       return;
     }
     resetCreate();
@@ -165,7 +165,7 @@ const credRows = computed(() => {
   const c = creds.value;
   if (!c) return [];
   const rows = [
-    { label: "Host (ภายในเซิร์ฟเวอร์)", value: String(c.internalHost) },
+    { label: t("databases.creds.host"), value: String(c.internalHost) },
     { label: "Port", value: String(c.internalPort) },
   ];
   if (credsMode.value === "user-password") {
@@ -202,14 +202,11 @@ async function copy(text: string, label: string) {
   setTimeout(() => (copied.value = ""), 1800);
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  creating: "กำลังสร้าง",
-  starting: "กำลังเริ่ม",
-  running: "ทำงานอยู่",
-  stopped: "หยุดแล้ว",
-  failed: "ล้มเหลว",
-  deleting: "กำลังลบ",
-};
+// เรียกจาก template — อ่าน locale ตอน render จึงเปลี่ยนตามภาษาเอง · status ที่ไม่รู้จักแสดงค่าดิบ
+function statusLabel(status: string): string {
+  const key = `databases.status.${status}`;
+  return hasMessage(key) ? t(key) : status;
+}
 
 const CATEGORY_LABEL: Record<string, string> = {
   sql: "SQL",
@@ -220,12 +217,10 @@ const CATEGORY_LABEL: Record<string, string> = {
 };
 
 // ต้องตรงกับ SERVICE_BACKUP_SETTINGS.allowedIntervalHours (internal/shared/src/constants.ts)
-const INTERVAL_HOUR_LABEL: Record<number, string> = {
-  6: "6 ชั่วโมง",
-  12: "12 ชั่วโมง",
-  24: "วัน",
-  168: "สัปดาห์",
-};
+function backupIntervalLabel(hours: number | null | undefined): string {
+  const key = `databases.interval.h${hours ?? 0}`;
+  return hasMessage(key) ? t(key) : t("databases.interval.other", { n: hours });
+}
 </script>
 
 <template>
@@ -233,15 +228,20 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
     <header class="page-head">
       <div>
         <h1>Databases</h1>
-        <p class="muted small">ฐานข้อมูลสำเร็จรูป กดสร้างแล้วใช้ได้เลย ไม่ต้องเขียน Dockerfile</p>
+        <p class="muted small">{{ $t("databases.subtitle") }}</p>
       </div>
       <div class="actions">
-        <button class="secondary icon" title="โหลดใหม่" aria-label="โหลดใหม่" @click="refresh()">
+        <button
+          class="secondary icon"
+          :title="$t('databases.reload')"
+          :aria-label="$t('databases.reload')"
+          @click="refresh()"
+        >
           <AppIcon name="refresh" :size="15" />
         </button>
         <button v-if="!creating" class="primary" @click="creating = true">
           <AppIcon name="plus" :size="15" />
-          เพิ่ม Database
+          {{ $t("databases.add") }}
         </button>
       </div>
     </header>
@@ -249,10 +249,10 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
     <!-- ── ตัวเลือก template ── -->
     <section v-if="creating" class="card stack">
       <div class="row-between">
-        <h2 class="section-title">เลือกชนิดฐานข้อมูล</h2>
+        <h2 class="section-title">{{ $t("databases.pickType") }}</h2>
         <button class="ghost small" @click="resetCreate">
           <AppIcon name="x" :size="14" />
-          ยกเลิก
+          {{ $t("common.cancel") }}
         </button>
       </div>
 
@@ -282,37 +282,36 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
       <form v-if="pickedTemplate" class="config inset" @submit.prevent="submitCreate">
         <div class="config-grid">
           <label>
-            <span>ชื่อ</span>
+            <span>{{ $t("databases.form.name") }}</span>
             <input v-model="form.name" maxlength="60" :disabled="saving" />
             <span v-if="pickedTemplate.credentialMode === 'full'" class="field-hint">
-              ใช้เป็นชื่อ user และชื่อ database ด้วย
+              {{ $t("databases.form.nameHintFull") }}
             </span>
             <span v-else-if="pickedTemplate.credentialMode === 'user-password'" class="field-hint">
-              ใช้เป็น access key ด้วย
+              {{ $t("databases.form.nameHintAccessKey") }}
             </span>
           </label>
 
           <label>
-            <span>เวอร์ชัน</span>
+            <span>{{ $t("databases.form.version") }}</span>
             <select v-model="form.version" :disabled="saving">
               <option v-for="v in pickedTemplate.versions" :key="v" :value="v">{{ v }}</option>
             </select>
-            <span class="field-hint">เลือกได้เฉพาะเวอร์ชันที่ทดสอบแล้ว</span>
+            <span class="field-hint">{{ $t("databases.form.versionHint") }}</span>
           </label>
         </div>
 
         <div class="expose">
           <div class="check-row">
             <input id="expose" v-model="form.exposePort" type="checkbox" :disabled="saving" />
-            <label for="expose">เปิด port ให้ต่อจากภายนอกเครื่อง</label>
+            <label for="expose">{{ $t("databases.form.expose") }}</label>
           </div>
           <p class="field-hint">
-            ไม่เปิด = ต่อได้เฉพาะ app ที่รันอยู่บนเซิร์ฟเวอร์นี้ (ปลอดภัยที่สุด)
-            เปิดเมื่อต้องการต่อด้วย DBeaver/TablePlus จากเครื่องตัวเอง
+            {{ $t("databases.form.exposeHint") }}
           </p>
 
           <label v-if="form.exposePort" class="port-field">
-            <span>Port บนเซิร์ฟเวอร์</span>
+            <span>{{ $t("databases.form.serverPort") }}</span>
             <input v-model.number="form.exposedPort" type="number" min="1024" max="60000" />
           </label>
 
@@ -322,19 +321,17 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
           >
             <AppIcon name="alert" :size="15" />
             <span>
-              {{ pickedTemplate.displayName }} ไม่มีรหัสผ่าน — เปิด port แล้วใครก็ตามที่รู้ IP ใช้ได้ทันที
-              ควรเปิดเฉพาะเมื่อมี firewall จำกัด IP ต้นทางแล้วเท่านั้น
+              {{ $t("databases.form.exposeNoAuthWarning", { name: pickedTemplate.displayName }) }}
             </span>
           </p>
           <p v-else-if="form.exposePort" class="alert alert-warn">
             <AppIcon name="alert" :size="15" />
             <span>
-              port นี้จะเปิดออกอินเทอร์เน็ต ใครก็ตามที่รู้ IP และรหัสผ่านจะต่อได้
-              — ตั้ง firewall จำกัด IP ต้นทางด้วยถ้าเป็นไปได้
+              {{ $t("databases.form.exposeWarning") }}
             </span>
           </p>
           <p v-if="pickedTemplate.defaultMemoryMb > 512" class="field-hint">
-            จอง RAM {{ pickedTemplate.defaultMemoryMb }} MB — ตรวจว่าเซิร์ฟเวอร์มี RAM ว่างพอก่อนสร้าง
+            {{ $t("databases.form.memoryHint", { mb: pickedTemplate.defaultMemoryMb }) }}
           </p>
         </div>
 
@@ -345,11 +342,15 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
 
         <div class="actions-end">
           <button type="button" class="secondary" :disabled="saving" @click="resetCreate">
-            ยกเลิก
+            {{ $t("common.cancel") }}
           </button>
           <button class="primary" type="submit" :disabled="saving || !form.name.trim()">
             <span v-if="saving" class="spinner" />
-            {{ saving ? "กำลังสร้าง…" : `สร้าง ${pickedTemplate.displayName}` }}
+            {{
+              saving
+                ? $t("common.creating")
+                : $t("databases.form.submit", { name: pickedTemplate.displayName })
+            }}
           </button>
         </div>
       </form>
@@ -366,19 +367,19 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
     <div v-else-if="error" class="card">
       <div class="empty">
         <span class="empty-icon"><AppIcon name="alert" :size="20" /></span>
-        <span class="empty-title">โหลดรายการ database ไม่สำเร็จ</span>
-        <button class="secondary" @click="refresh()">ลองใหม่</button>
+        <span class="empty-title">{{ $t("databases.error.load") }}</span>
+        <button class="secondary" @click="refresh()">{{ $t("common.retry") }}</button>
       </div>
     </div>
 
     <div v-else-if="!services?.length && !creating" class="card">
       <div class="empty">
         <span class="empty-icon"><AppIcon name="database" :size="20" /></span>
-        <span class="empty-title">ยังไม่มีฐานข้อมูล</span>
-        <p class="small">เพิ่ม PostgreSQL (pgvector), MySQL, Redis, MongoDB, MinIO หรือ ClamAV ได้ในไม่กี่คลิก</p>
+        <span class="empty-title">{{ $t("databases.empty.title") }}</span>
+        <p class="small">{{ $t("databases.empty.hint") }}</p>
         <button class="primary" @click="creating = true">
           <AppIcon name="plus" :size="15" />
-          เพิ่ม Database
+          {{ $t("databases.add") }}
         </button>
       </div>
     </div>
@@ -397,7 +398,7 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
               </div>
             </div>
             <span class="status" :class="`status-${svc.status}`">
-              {{ STATUS_LABEL[svc.status] ?? svc.status }}
+              {{ statusLabel(svc.status) }}
             </span>
           </div>
 
@@ -407,31 +408,31 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
           </p>
 
           <dl class="kv compact">
-            <dt>ต่อภายใน</dt>
+            <dt>{{ $t("databases.card.internal") }}</dt>
             <dd>
               <code class="tiny">{{ svc.internalHost }}:{{ svc.internalPort }}</code>
               <button
                 class="ghost tiny copy-btn"
-                aria-label="คัดลอก host"
-                title="คัดลอก"
+                :aria-label="$t('databases.card.copyHost')"
+                :title="$t('common.copy')"
                 @click="copy(`${svc.internalHost}:${svc.internalPort}`, `host-${svc.id}`)"
               >
                 <AppIcon :name="copied === `host-${svc.id}` ? 'check' : 'copy'" :size="12" />
               </button>
             </dd>
-            <dt>Port ภายนอก</dt>
+            <dt>{{ $t("databases.card.externalPort") }}</dt>
             <dd>
               <code v-if="svc.exposedPort" class="tiny">{{ svc.exposedPort }}</code>
-              <span v-else class="muted tiny">ปิด (ปลอดภัย)</span>
+              <span v-else class="muted tiny">{{ $t("databases.card.portClosed") }}</span>
             </dd>
             <dt>Backup</dt>
             <dd>
               <span v-if="svc.backupEnabled" class="tiny">
-                ทุก {{ INTERVAL_HOUR_LABEL[svc.backupIntervalHours ?? 0] ?? `${svc.backupIntervalHours} ชม.` }}
+                {{ backupIntervalLabel(svc.backupIntervalHours) }}
               </span>
-              <span v-else class="muted tiny">ไม่ได้ตั้งเวลา</span>
+              <span v-else class="muted tiny">{{ $t("databases.card.noSchedule") }}</span>
               <span v-if="svc.lastBackupAt" class="muted tiny">
-                — ล่าสุด {{ timeAgo(svc.lastBackupAt) }}
+                {{ $t("databases.card.lastBackup", { time: timeAgo(svc.lastBackupAt) }) }}
               </span>
             </dd>
           </dl>
@@ -443,7 +444,7 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
               @click="showCredentials(svc.id)"
             >
               <AppIcon name="key" :size="13" />
-              ข้อมูลเชื่อมต่อ
+              {{ $t("databases.action.credentials") }}
             </button>
 
             <button
@@ -477,7 +478,7 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
               @click="act(svc.id, 'stop')"
             >
               <AppIcon name="stop" :size="13" />
-              หยุด
+              {{ $t("databases.action.stop") }}
             </button>
             <button
               v-else
@@ -486,7 +487,7 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
               @click="act(svc.id, 'start')"
             >
               <AppIcon name="play" :size="13" />
-              เริ่ม
+              {{ $t("databases.action.start") }}
             </button>
 
             <button
@@ -495,7 +496,7 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
               @click="act(svc.id, 'restart')"
             >
               <AppIcon name="rotate" :size="13" />
-              รีสตาร์ท
+              {{ $t("databases.action.restart") }}
             </button>
 
             <span class="spacer" />
@@ -506,13 +507,13 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
               @click="confirmDelete = { id: svc.id, name: svc.name }"
             >
               <AppIcon name="trash" :size="13" />
-              ลบ
+              {{ $t("common.delete") }}
             </button>
           </div>
 
           <p v-if="svc.busy" class="busy-note tiny muted">
             <span class="spinner" />
-            กำลังดำเนินการ…
+            {{ $t("common.working") }}
           </p>
         </div>
       </li>
@@ -523,18 +524,22 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
       <div v-if="credsFor" class="backdrop" @click.self="credsFor = null">
         <div class="dialog card" role="dialog" aria-modal="true">
           <div class="row-between">
-            <h2 class="section-title">ข้อมูลเชื่อมต่อ</h2>
-            <button class="ghost icon small" aria-label="ปิด" @click="credsFor = null">
+            <h2 class="section-title">{{ $t("databases.action.credentials") }}</h2>
+            <button
+              class="ghost icon small"
+              :aria-label="$t('common.close')"
+              @click="credsFor = null"
+            >
               <AppIcon name="x" :size="15" />
             </button>
           </div>
 
-          <p v-if="credsLoading" class="muted small">กำลังโหลด…</p>
+          <p v-if="credsLoading" class="muted small">{{ $t("common.loading") }}</p>
 
           <template v-else-if="creds">
             <p v-if="credsMode !== 'none'" class="alert alert-warn tiny">
               <AppIcon name="lock" :size="14" />
-              <span>รหัสผ่านนี้เป็นความลับ — อย่าแชร์หรือ commit ลง repository</span>
+              <span>{{ $t("databases.creds.secretWarning") }}</span>
             </p>
 
             <div class="cred-list">
@@ -542,32 +547,34 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
                 <span class="cred-label muted tiny">{{ row.label }}</span>
                 <code class="cred-value">{{ row.value }}</code>
                 <button class="ghost tiny" @click="copy(row.value, row.label)">
-                  {{ copied === row.label ? "คัดลอกแล้ว" : "คัดลอก" }}
+                  {{ copied === row.label ? $t("common.copied") : $t("common.copy") }}
                 </button>
               </div>
             </div>
 
             <div class="uri-block">
-              <span class="eyebrow">Connection string (จาก app ในเซิร์ฟเวอร์นี้)</span>
+              <span class="eyebrow">{{ $t("databases.creds.internalUri") }}</span>
               <div class="uri-row">
                 <code class="uri">{{ creds.internalUri }}</code>
                 <button class="secondary small" @click="copy(String(creds.internalUri), 'uri')">
                   <AppIcon name="copy" :size="13" />
-                  {{ copied === "uri" ? "คัดลอกแล้ว" : "คัดลอก" }}
+                  {{ copied === "uri" ? $t("common.copied") : $t("common.copy") }}
                 </button>
               </div>
             </div>
 
             <div v-if="creds.externalUri" class="uri-block">
-              <span class="eyebrow">Connection string (จากเครื่องภายนอก)</span>
+              <span class="eyebrow">{{ $t("databases.creds.externalUri") }}</span>
               <div class="uri-row">
                 <code class="uri">{{ creds.externalUri }}</code>
                 <button class="secondary small" @click="copy(String(creds.externalUri), 'ext')">
                   <AppIcon name="copy" :size="13" />
-                  {{ copied === "ext" ? "คัดลอกแล้ว" : "คัดลอก" }}
+                  {{ copied === "ext" ? $t("common.copied") : $t("common.copy") }}
                 </button>
               </div>
-              <p class="field-hint">แทน <code>&lt;SERVER_IP&gt;</code> ด้วย IP จริงของเซิร์ฟเวอร์</p>
+              <i18n-t scope="global" keypath="databases.creds.serverIpHint" tag="p" class="field-hint">
+                <template #placeholder><code>&lt;SERVER_IP&gt;</code></template>
+              </i18n-t>
             </div>
           </template>
         </div>
@@ -576,9 +583,9 @@ const INTERVAL_HOUR_LABEL: Record<number, string> = {
 
     <ConfirmDialog
       :open="!!confirmDelete"
-      title="ลบ database"
-      message="container และข้อมูลทั้งหมดใน volume จะถูกลบถาวร กู้คืนไม่ได้"
-      confirm-label="ลบถาวร"
+      :title="$t('databases.confirmDelete.title')"
+      :message="$t('databases.confirmDelete.message')"
+      :confirm-label="$t('databases.deletePermanently')"
       :require-typed="confirmDelete?.name ?? ''"
       :busy="deleting"
       @cancel="confirmDelete = null"

@@ -1,0 +1,34 @@
+{
+  "environment": {
+    "check": {
+      "title": "ตรวจว่าค่าที่บันทึกไว้ยังถอดรหัสได้ด้วย master key ปัจจุบัน",
+      "action": "ตรวจสอบการถอดรหัส",
+      "working": "กำลังตรวจ…",
+      "none": "ยังไม่มี environment variable ให้ตรวจ",
+      "allOk": "ตรวจแล้ว {n} ตัว — ถอดรหัสได้ทั้งหมด",
+      "broken": "{broken} จาก {total} ตัวถอดรหัสไม่ได้ (master key อาจเปลี่ยน) — deploy จะไม่ได้ค่าเหล่านี้ กรอกค่าใหม่แล้วบันทึกเพื่อเข้ารหัสใหม่:",
+      "brokenInComponent": "{key} (component: {name})",
+      "failed": "ตรวจสอบไม่สำเร็จ"
+    },
+    "scope": {
+      "label": "ขอบเขต",
+      "project": "ทั้งโปรเจกต์ (project-wide)",
+      "component": "component: {name}",
+      "componentHint": "env นี้ใช้เฉพาะ component ที่เลือก (override ค่าระดับโปรเจกต์)",
+      "projectHint": "env นี้ใช้กับทุก component"
+    },
+    "import": {
+      "hint": "วาง .env content (KEY=VALUE) — ตรวจสอบก่อน save",
+      "working": "กำลัง parse…",
+      "failed": "parse ไม่ได้",
+      "warnings": "คำเตือน: {list}"
+    },
+    "unchanged": "(ไม่เปลี่ยน)",
+    "removeRow": "ลบแถวนี้",
+    "empty": "ยังไม่มี environment variables",
+    "addVariable": "เพิ่ม variable",
+    "error": {
+      "load": "โหลด env vars ไม่ได้"
+    }
+  }
+}

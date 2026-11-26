@@ -1,0 +1,72 @@
+{
+  "github": {
+    "subtitle": "จัดการ GitHub App ที่ใช้เชื่อมต่อ repository เข้ากับ project",
+    "callback": {
+      "appCreated": "สร้าง GitHub App สำเร็จ",
+      "appCreatedNamed": "สร้าง GitHub App \"{name}\" สำเร็จ",
+      "installed": "ติดตั้ง GitHub App สำเร็จ",
+      "installedNamed": "ติดตั้งกับ {account} สำเร็จ",
+      "manifestError": "สร้าง GitHub App ไม่สำเร็จ — code หมดอายุหรือถูกใช้ไปแล้ว ลองใหม่",
+      "error": "เกิดข้อผิดพลาด — ลองใหม่อีกครั้ง"
+    },
+    "masterKey": {
+      "title": "Master key ยังไม่ได้ configure",
+      "body": "GitHub App credentials ต้องเข้ารหัสก่อนเก็บลงฐานข้อมูล — ตั้งค่า {file} ชี้ไฟล์ที่มี key ขนาด 32 byte (base64) แล้ว restart Control API",
+      "bodyShort": "GitHub App credentials ต้องเข้ารหัสก่อนเก็บ — ตั้งค่า {file} บนเซิร์ฟเวอร์แล้ว restart Control API",
+      "detailsLink": "ดูรายละเอียดที่ GitHub Apps settings"
+    },
+    "apps": {
+      "yours": "GitHub Apps ของคุณ",
+      "create": "สร้าง GitHub App",
+      "createIntro": "ระบบจะสร้าง GitHub App ให้อัตโนมัติ — GitHub จะถามยืนยันแล้วส่ง credentials กลับมา (เก็บแบบเข้ารหัส ไม่ต้องคัดลอก key เอง)",
+      "name": "ชื่อ App",
+      "namePlaceholder": "เช่น Zixploy Deploy",
+      "nameHint": "{n}/34 — ชื่อต้องไม่ซ้ำกับ App อื่นบน GitHub",
+      "organization": "Organization (ไม่ระบุ = personal account)",
+      "opening": "กำลังเปิด GitHub…",
+      "createOnGithub": "สร้างบน GitHub",
+      "empty": "ยังไม่มี GitHub App",
+      "emptyHint": "สร้าง app แรกเพื่อเชื่อมต่อ repository",
+      "onGithub": "บน GitHub",
+      "notInstalled": "ยังไม่ได้ติดตั้งกับ account ใด",
+      "addInstallation": "เพิ่ม installation",
+      "install": "Install",
+      "deleteTitle": "ลบ GitHub App",
+      "deleteMessage": "ลบ app นี้ออกจาก Zixploy — installations ที่ผูกอยู่จะถูกตัดการเชื่อมต่อและ auto deploy ของ projects ที่เกี่ยวข้องจะถูกปิด (app บน GitHub ยังอยู่ ต้องลบเองผ่าน GitHub settings)"
+    },
+    "error": {
+      "nameRequired": "กรุณาระบุชื่อ app",
+      "nameTooLong": "ชื่อ app ต้องไม่เกิน 34 ตัวอักษร (GitHub limit)",
+      "manifest": "สร้าง manifest ไม่สำเร็จ",
+      "installUrl": "ไม่สามารถสร้าง install URL ได้"
+    },
+    "connect": {
+      "createHint": "สร้าง app จากหน้า settings เพื่อเชื่อมต่อ repository",
+      "askAdmin": "ติดต่อ admin ให้สร้างและติดตั้ง GitHub App ก่อน จึงจะเชื่อมต่อ repository ได้",
+      "notInstalled": "มี GitHub App แล้ว แต่ยังไม่ได้ติดตั้งกับ account ใด",
+      "redirecting": "กำลัง redirect…",
+      "installApp": "Install {name}",
+      "via": "via {name}",
+      "manage": "จัดการ GitHub Apps"
+    },
+    "picker": {
+      "unnamedApp": "GitHub App (ไม่ระบุ)",
+      "noApps": "ยังไม่มี GitHub App ที่ติดตั้ง — สร้างและติดตั้งที่หน้า settings ก่อน",
+      "accountCount": "{n} account",
+      "changeApp": "เปลี่ยน app",
+      "suspended": "GitHub installation นี้ถูก suspend — unsuspend ผ่าน GitHub App settings ก่อน",
+      "searchRepo": "ค้นหา repository…",
+      "reposFailed": "ไม่สามารถดึง repositories ได้",
+      "prev": "ก่อนหน้า",
+      "next": "ถัดไป",
+      "page": "หน้า {page} / {total}",
+      "noRepoMatch": "ไม่พบ repository ที่ตรงกับ \"{query}\"",
+      "noRepos": "ไม่มี repository ที่เข้าถึงได้ — ตรวจสอบ GitHub App permissions",
+      "changeRepo": "เปลี่ยน repository",
+      "searchBranch": "ค้นหา branch…",
+      "branchesFailed": "ไม่สามารถดึง branches ได้",
+      "selectBranch": "เลือก branch นี้",
+      "noBranchMatch": "ไม่พบ branch ที่ตรงกับ \"{query}\""
+    }
+  }
+}

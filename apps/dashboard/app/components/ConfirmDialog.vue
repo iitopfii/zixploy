@@ -55,9 +55,11 @@ onMounted(() => {
           </div>
 
           <label v-if="requireTyped" class="confirm-field">
-            <span>
-              พิมพ์ <code>{{ requireTyped }}</code> เพื่อยืนยัน
-            </span>
+            <i18n-t scope="global" keypath="common.typeToConfirm" tag="span">
+              <template #text>
+                <code>{{ requireTyped }}</code>
+              </template>
+            </i18n-t>
             <input
               ref="typedInput"
               v-model="typed"
@@ -70,10 +72,12 @@ onMounted(() => {
           </label>
 
           <div class="actions-end">
-            <button class="secondary" :disabled="busy" @click="emit('cancel')">ยกเลิก</button>
+            <button class="secondary" :disabled="busy" @click="emit('cancel')">
+              {{ $t("common.cancel") }}
+            </button>
             <button class="danger-solid" :disabled="!canConfirm" @click="emit('confirm')">
               <span v-if="busy" class="spinner" />
-              {{ busy ? "กำลังดำเนินการ…" : (confirmLabel ?? "ยืนยัน") }}
+              {{ busy ? $t("common.working") : (confirmLabel ?? $t("common.confirm")) }}
             </button>
           </div>
         </div>

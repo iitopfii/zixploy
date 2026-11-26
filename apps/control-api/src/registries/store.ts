@@ -58,7 +58,8 @@ export function getRegistry(db: Database, id: string): RegistryDto {
   const row = db
     .query<RegistryRow, [string]>(`SELECT ${SELECT_PUBLIC} FROM registry_credentials WHERE id = ?`)
     .get(id);
-  if (!row) throw new AppError("REGISTRY_NOT_FOUND", "ไม่พบ registry นี้");
+  if (!row)
+    throw new AppError("REGISTRY_NOT_FOUND", { th: "ไม่พบ registry นี้", en: "Registry not found" });
   return toDto(row);
 }
 
@@ -77,10 +78,10 @@ export async function createRegistry(
     ).run(id, input.registry, input.username, ciphertext, now, now);
   } catch (err) {
     if (err instanceof Error && err.message.includes("UNIQUE")) {
-      throw new AppError(
-        "REGISTRY_DUPLICATE",
-        `มี credential ของ ${input.registry} อยู่แล้ว — แก้ไขแถวเดิมแทน`,
-      );
+      throw new AppError("REGISTRY_DUPLICATE", {
+        th: `มี credential ของ ${input.registry} อยู่แล้ว — แก้ไขแถวเดิมแทน`,
+        en: `A credential for ${input.registry} already exists. Edit the existing entry instead`,
+      });
     }
     throw err;
   }

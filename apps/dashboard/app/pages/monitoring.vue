@@ -6,14 +6,15 @@
  * (control-api ไม่แตะ Docker หรือ /proc เอง ตาม ADR-0002)
  */
 const api = useApi();
+const { t } = useI18n();
 
 type Range = "1h" | "6h" | "24h";
 const range = ref<Range>("1h");
-const ranges: Array<{ key: Range; label: string }> = [
-  { key: "1h", label: "1 ชม." },
-  { key: "6h", label: "6 ชม." },
-  { key: "24h", label: "24 ชม." },
-];
+const ranges = computed<Array<{ key: Range; label: string }>>(() => [
+  { key: "1h", label: t("monitoring.range.h1") },
+  { key: "6h", label: t("monitoring.range.h6") },
+  { key: "24h", label: t("monitoring.range.h24") },
+]);
 
 const { data, pending, error, refresh } = await useAsyncData(
   "system-metrics",
@@ -21,7 +22,7 @@ const { data, pending, error, refresh } = await useAsyncData(
     const { data: body, error: apiError } = await api.api.v1.system.metrics.get({
       query: { range: range.value },
     });
-    if (apiError) throw new Error("โหลด metrics ไม่สำเร็จ");
+    if (apiError) throw new Error(t("monitoring.error.load"));
     return body;
   },
   { server: false, watch: [range] },
@@ -95,13 +96,12 @@ async function cleanCache() {
   try {
     const { error } = await api.api.v1.system.maintenance.cleanup.post({ type: "prune_all" });
     if (error) {
-      const body = error.value as { error?: { message?: string } } | null;
-      cleanError.value = body?.error?.message ?? "สั่งล้างไม่สำเร็จ";
+      cleanError.value = apiErrorMessage(error, "monitoring.cleanup.failed");
       return;
     }
     await refreshMaintenance();
   } catch {
-    cleanError.value = "ติดต่อ API ไม่ได้";
+    cleanError.value = t("common.apiUnreachable");
   }
 }
 
@@ -118,10 +118,10 @@ const lastCleanup = computed(
     <header class="page-head">
       <div>
         <h1>Monitoring</h1>
-        <p class="muted small">ทรัพยากรของเซิร์ฟเวอร์ที่รัน Zixploy</p>
+        <p class="muted small">{{ $t("monitoring.server.subtitle") }}</p>
       </div>
       <div class="actions">
-        <div class="range-switch" role="group" aria-label="ช่วงเวลา">
+        <div class="range-switch" role="group" :aria-label="$t('monitoring.range.label')">
           <button
             v-for="r in ranges"
             :key="r.key"
@@ -132,7 +132,12 @@ const lastCleanup = computed(
             {{ r.label }}
           </button>
         </div>
-        <button class="secondary icon" title="โหลดใหม่" aria-label="โหลดใหม่" @click="refresh()">
+        <button
+          class="secondary icon"
+          :title="$t('monitoring.reload')"
+          :aria-label="$t('monitoring.reload')"
+          @click="refresh()"
+        >
           <AppIcon name="refresh" :size="15" />
         </button>
       </div>
@@ -141,8 +146,7 @@ const lastCleanup = computed(
     <div v-if="stale" class="alert alert-warn">
       <AppIcon name="alert" :size="16" />
       <span>
-        ข้อมูลล่าสุดเมื่อ {{ timeAgo(latest?.ts) }} — deploy worker อาจหยุดทำงาน
-        ตรวจสอบสถานะ worker ที่แถบด้านซ้าย
+        {{ $t("monitoring.server.stale", { time: timeAgo(latest?.ts) }) }}
       </span>
     </div>
 
@@ -159,10 +163,10 @@ const lastCleanup = computed(
     <div v-else-if="error" class="card">
       <div class="empty">
         <span class="empty-icon"><AppIcon name="alert" :size="20" /></span>
-        <span class="empty-title">โหลด metrics ไม่สำเร็จ</span>
+        <span class="empty-title">{{ $t("monitoring.error.load") }}</span>
         <button class="secondary" @click="refresh()">
           <AppIcon name="refresh" :size="15" />
-          ลองใหม่
+          {{ $t("common.retry") }}
         </button>
       </div>
     </div>
@@ -171,14 +175,13 @@ const lastCleanup = computed(
     <div v-else-if="!latest" class="card">
       <div class="empty">
         <span class="empty-icon"><AppIcon name="activity" :size="20" /></span>
-        <span class="empty-title">ยังไม่มีข้อมูล metrics</span>
+        <span class="empty-title">{{ $t("monitoring.server.emptyTitle") }}</span>
         <p class="small">
-          deploy worker เก็บตัวอย่างทุก 15 วินาที — รอสักครู่แล้วโหลดใหม่
-          ถ้ายังไม่ขึ้น ให้ตรวจว่า worker ทำงานอยู่
+          {{ $t("monitoring.server.emptyHint") }}
         </p>
         <button class="secondary" @click="refresh()">
           <AppIcon name="refresh" :size="15" />
-          โหลดใหม่
+          {{ $t("monitoring.reload") }}
         </button>
       </div>
     </div>
@@ -189,7 +192,7 @@ const lastCleanup = computed(
         <section class="card metric">
           <div class="metric-head">
             <span class="eyebrow">CPU</span>
-            <span class="badge tiny">{{ latest.cpuCount }} core</span>
+            <span class="badge tiny">{{ trCount("monitoring.server.cores", latest.cpuCount) }}</span>
           </div>
           <p class="metric-value" :class="`v-${usageTone(latest.cpuPercent)}`">
             {{ formatPercent(latest.cpuPercent) }}
@@ -205,14 +208,19 @@ const lastCleanup = computed(
         <!-- Memory -->
         <section class="card metric">
           <div class="metric-head">
-            <span class="eyebrow">หน่วยความจำ</span>
+            <span class="eyebrow">{{ $t("monitoring.memory") }}</span>
             <span class="badge tiny">{{ formatBytes(latest.memTotalBytes) }}</span>
           </div>
           <p class="metric-value" :class="`v-${usageTone(memPercent)}`">
             {{ formatPercent(memPercent) }}
           </p>
           <p class="metric-sub muted tiny">
-            ใช้ {{ formatBytes(latest.memUsedBytes) }} จาก {{ formatBytes(latest.memTotalBytes) }}
+            {{
+              $t("monitoring.server.memUsed", {
+                used: formatBytes(latest.memUsedBytes),
+                total: formatBytes(latest.memTotalBytes),
+              })
+            }}
           </p>
           <MetricChart
             :points="memSeries"
@@ -225,14 +233,18 @@ const lastCleanup = computed(
         <!-- Disk -->
         <section class="card metric">
           <div class="metric-head">
-            <span class="eyebrow">ดิสก์</span>
+            <span class="eyebrow">{{ $t("monitoring.disk") }}</span>
             <span class="badge tiny">{{ formatBytes(latest.diskTotalBytes) }}</span>
           </div>
           <p class="metric-value" :class="`v-${usageTone(diskPercent)}`">
             {{ formatPercent(diskPercent) }}
           </p>
           <p class="metric-sub muted tiny">
-            เหลือ {{ formatBytes(latest.diskTotalBytes - latest.diskUsedBytes) }} ว่าง
+            {{
+              $t("monitoring.server.diskFree", {
+                size: formatBytes(latest.diskTotalBytes - latest.diskUsedBytes),
+              })
+            }}
           </p>
           <MetricChart
             :points="diskSeries"
@@ -246,7 +258,7 @@ const lastCleanup = computed(
         <section class="card metric">
           <div class="metric-head">
             <span class="eyebrow">Load average</span>
-            <span class="badge tiny">1 / 5 / 15 นาที</span>
+            <span class="badge tiny">{{ $t("monitoring.server.loadWindow") }}</span>
           </div>
           <p class="metric-value" :class="`v-${usageTone(loadPercent)}`">
             {{ latest.load1.toFixed(2) }}
@@ -254,7 +266,13 @@ const lastCleanup = computed(
           <p class="metric-sub muted tiny">
             {{ latest.load5.toFixed(2) }} · {{ latest.load15.toFixed(2) }}
             <span class="sep">·</span>
-            {{ loadPercent >= 100 ? "เกินกำลังเครื่อง" : `${Math.round(loadPercent)}% ของ ${latest.cpuCount} core` }}
+            {{
+              loadPercent >= 100
+                ? $t("monitoring.server.overloaded")
+                : trCount("monitoring.server.loadOfCores", latest.cpuCount, {
+                    percent: Math.round(loadPercent),
+                  })
+            }}
           </p>
           <MetricChart
             :points="loadSeries"
@@ -266,9 +284,14 @@ const lastCleanup = computed(
 
       <p class="muted tiny foot">
         <AppIcon name="clock" :size="12" />
-        เก็บตัวอย่างทุก {{ Math.round((data?.range.sampleIntervalMs ?? 15000) / 1000) }} วินาที
-        · อัปเดตล่าสุด {{ timeAgo(latest.ts) }}
-        · แสดง {{ points.length }} จุด
+        {{
+          trCount(
+            "monitoring.server.footSampling",
+            Math.round((data?.range.sampleIntervalMs ?? 15000) / 1000),
+          )
+        }}
+        · {{ $t("monitoring.server.footUpdated", { time: timeAgo(latest.ts) }) }}
+        · {{ trCount("monitoring.server.footPoints", points.length) }}
       </p>
     </template>
 
@@ -277,16 +300,15 @@ const lastCleanup = computed(
     <section class="card stack">
       <div class="row-between wrap">
         <div>
-          <h2 class="section-title">ล้างพื้นที่ดิสก์</h2>
+          <h2 class="section-title">{{ $t("monitoring.cleanup.title") }}</h2>
           <p class="muted small clean-desc">
-            ลบ build cache ที่เก่ากว่า 7 วัน และ image ที่ไม่มีอะไรใช้แล้ว
-            — ไม่แตะ image ของ deployment ที่ rollback ได้ และไม่แตะ database ที่หยุดอยู่
+            {{ $t("monitoring.cleanup.desc") }}
           </p>
         </div>
         <button class="secondary" :disabled="cleaning" @click="cleanCache">
           <span v-if="cleaning" class="spinner" />
           <AppIcon v-else name="trash" :size="15" />
-          {{ cleaning ? "กำลังล้าง…" : "ล้าง cache" }}
+          {{ cleaning ? $t("monitoring.cleanup.running") : $t("monitoring.cleanup.action") }}
         </button>
       </div>
 
@@ -297,23 +319,31 @@ const lastCleanup = computed(
 
       <p v-if="cleaning" class="alert alert-info">
         <AppIcon name="info" :size="15" />
-        <span>กำลังล้าง — อาจใช้เวลาสักครู่ ระหว่างนี้ deploy ยังทำงานได้ปกติ</span>
+        <span>{{ $t("monitoring.cleanup.inProgress") }}</span>
       </p>
 
       <div v-else-if="lastCleanup" class="inset last-clean">
         <template v-if="lastCleanup.status === 'done'">
           <AppIcon name="check" :size="15" class="ok-text" />
           <span class="small">
-            ล้างล่าสุด {{ timeAgo(lastCleanup.finishedAt) }} — คืนพื้นที่ได้
-            <strong>{{ formatBytes(lastCleanup.reclaimedBytes ?? 0) }}</strong>
+            <i18n-t scope="global" keypath="monitoring.cleanup.lastDone" tag="span">
+              <template #time>{{ timeAgo(lastCleanup.finishedAt) }}</template>
+              <template #size>
+                <strong>{{ formatBytes(lastCleanup.reclaimedBytes ?? 0) }}</strong>
+              </template>
+            </i18n-t>
             <span v-if="lastCleanup.summary" class="muted"> ({{ lastCleanup.summary }})</span>
           </span>
         </template>
         <template v-else>
           <AppIcon name="alert" :size="15" class="bad-text" />
           <span class="small">
-            ล้างล่าสุด {{ timeAgo(lastCleanup.finishedAt) }} ไม่สำเร็จ —
-            {{ lastCleanup.failureMessage }}
+            {{
+              $t("monitoring.cleanup.lastFailed", {
+                time: timeAgo(lastCleanup.finishedAt),
+                message: lastCleanup.failureMessage,
+              })
+            }}
           </span>
         </template>
       </div>

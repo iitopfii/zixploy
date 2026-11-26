@@ -11,6 +11,8 @@
  * การสร้าง/ลบ GitHub App ทำที่ /settings/github
  */
 const api = useApi();
+const { t } = useI18n();
+const { isAdmin } = usePermissions();
 
 const {
   data: status,
@@ -59,13 +61,13 @@ async function installApp(appId: string) {
   try {
     const { data, error } = await api.api.v1.github.apps({ id: appId })["install-url"].get();
     if (error || !data?.url) {
-      installError.value = "ไม่สามารถสร้าง install URL ได้";
+      installError.value = t("github.error.installUrl");
       return;
     }
     // เปิดหน้า GitHub ใน tab เดิม — GitHub จะ redirect กลับมา
     window.location.href = data.url;
   } catch {
-    installError.value = "ติดต่อ API ไม่ได้";
+    installError.value = t("common.apiUnreachable");
   } finally {
     installLoading.value = false;
   }
@@ -93,10 +95,13 @@ const activeInstallations = computed(
       <div class="alert alert-warn">
         <AppIcon name="key" :size="16" />
         <div class="stack-sm">
-          <strong>Master key ยังไม่ได้ configure</strong>
-          <span>GitHub App credentials ต้องเข้ารหัสก่อนเก็บ — ตั้งค่า <code>ZIXPLOY_MASTER_KEY_FILE</code> บนเซิร์ฟเวอร์แล้ว restart Control API</span>
-          <NuxtLink to="/settings/github" class="inline-link">
-            ดูรายละเอียดที่ GitHub Apps settings
+          <strong>{{ $t("github.masterKey.title") }}</strong>
+          <i18n-t scope="global" keypath="github.masterKey.bodyShort" tag="span">
+            <template #file><code>ZIXPLOY_MASTER_KEY_FILE</code></template>
+          </i18n-t>
+          <!-- หน้า GitHub Apps settings เป็นของ admin เท่านั้น -->
+          <NuxtLink v-if="isAdmin" to="/settings/github" class="inline-link">
+            {{ $t("github.masterKey.detailsLink") }}
             <AppIcon name="chevronRight" :size="12" />
           </NuxtLink>
         </div>
@@ -107,22 +112,26 @@ const activeInstallations = computed(
     <template v-else-if="apps.length === 0">
       <div class="empty">
         <span class="empty-icon"><AppIcon name="github" :size="20" /></span>
-        <span class="empty-title">ยังไม่มี GitHub App</span>
-        <p class="small">สร้าง app จากหน้า settings เพื่อเชื่อมต่อ repository</p>
-        <NuxtLink to="/settings/github" class="btn primary">
-          สร้าง GitHub App
-        </NuxtLink>
+        <span class="empty-title">{{ $t("github.apps.empty") }}</span>
+        <template v-if="isAdmin">
+          <p class="small">{{ $t("github.connect.createHint") }}</p>
+          <NuxtLink to="/settings/github" class="btn primary">
+            {{ $t("github.apps.create") }}
+          </NuxtLink>
+        </template>
+        <p v-else class="small">{{ $t("github.connect.askAdmin") }}</p>
       </div>
     </template>
 
     <!-- มี app แล้วแต่ยังไม่ได้ install -->
     <template v-else-if="activeInstallations.length === 0">
-      <p class="muted small">มี GitHub App แล้ว แต่ยังไม่ได้ติดตั้งกับ account ใด</p>
+      <p class="muted small">{{ $t("github.connect.notInstalled") }}</p>
       <p v-if="installError" class="alert alert-bad">
         <AppIcon name="alert" :size="15" />
         <span>{{ installError }}</span>
       </p>
-      <div class="actions">
+      <!-- ติดตั้ง GitHub App เป็นงานของ admin -->
+      <div v-if="isAdmin" class="actions">
         <button
           v-for="app in apps"
           :key="app.id"
@@ -131,9 +140,14 @@ const activeInstallations = computed(
           @click="installApp(app.id)"
         >
           <span v-if="installLoading" class="spinner" />
-          {{ installLoading ? "กำลัง redirect…" : `Install ${app.name}` }}
+          {{
+            installLoading
+              ? $t("github.connect.redirecting")
+              : $t("github.connect.installApp", { name: app.name })
+          }}
         </button>
       </div>
+      <p v-else class="muted small">{{ $t("github.connect.askAdmin") }}</p>
     </template>
 
     <!-- พร้อมใช้ -->
@@ -153,15 +167,19 @@ const activeInstallations = computed(
           </span>
           <span class="account-name">{{ install.accountLogin }}</span>
           <span class="muted small">{{ install.accountType }}</span>
-          <span v-if="install.appName" class="muted tiny">via {{ install.appName }}</span>
+          <span v-if="install.appName" class="muted tiny">
+            {{ $t("github.connect.via", { name: install.appName }) }}
+          </span>
         </div>
       </div>
 
       <div class="row wrap">
-        <NuxtLink to="/settings/github" class="btn secondary small">จัดการ GitHub Apps</NuxtLink>
+        <NuxtLink v-if="isAdmin" to="/settings/github" class="btn secondary small">
+          {{ $t("github.connect.manage") }}
+        </NuxtLink>
         <button class="ghost small" @click="() => refreshInstallations()">
           <AppIcon name="refresh" :size="13" />
-          รีเฟรช
+          {{ $t("common.refresh") }}
         </button>
       </div>
       <p v-if="installError" class="alert alert-bad">

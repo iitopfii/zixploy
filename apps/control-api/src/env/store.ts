@@ -94,14 +94,24 @@ function validateKeys(vars: EnvVarInput[]): void {
     if (!ENV_VAR_KEY_RE.test(v.key)) {
       throw new AppError(
         "ENV_VAR_INVALID_KEY",
-        `key "${v.key}" ไม่ถูกต้อง — ต้องขึ้นต้นด้วยตัวอักษรหรือ underscore และมีเฉพาะ [A-Za-z0-9_]`,
+        {
+          th: `key "${v.key}" ไม่ถูกต้อง — ต้องขึ้นต้นด้วยตัวอักษรหรือ underscore และมีเฉพาะ [A-Za-z0-9_]`,
+          en: `Key "${v.key}" is invalid. It must start with a letter or underscore and contain only [A-Za-z0-9_]`,
+        },
         { key: v.key },
       );
     }
     if (seen.has(v.key)) {
-      throw new AppError("ENV_VAR_DUPLICATE_KEY", `key "${v.key}" ซ้ำกันในรายการที่ส่งมา`, {
-        key: v.key,
-      });
+      throw new AppError(
+        "ENV_VAR_DUPLICATE_KEY",
+        {
+          th: `key "${v.key}" ซ้ำกันในรายการที่ส่งมา`,
+          en: `Key "${v.key}" is duplicated in the submitted list`,
+        },
+        {
+          key: v.key,
+        },
+      );
     }
     seen.add(v.key);
   }

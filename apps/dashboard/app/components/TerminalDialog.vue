@@ -85,7 +85,8 @@ function connect() {
       return;
     }
     connState.value = "error";
-    connError.value = ev.reason || "เชื่อมต่อ terminal ไม่สำเร็จ";
+    // reason ว่าง = ใช้ข้อความ fallback ใน template (แปลตามภาษาปัจจุบัน)
+    connError.value = ev.reason;
     if (receivedAny) {
       terminal?.write(`\r\n\r\n[connection lost${ev.reason ? `: ${ev.reason}` : ""}]\r\n`);
     }
@@ -161,7 +162,7 @@ onUnmounted(() => {
       <div class="dialog card" role="dialog" aria-modal="true">
         <div class="row-between">
           <h2 class="section-title truncate">Terminal — {{ serviceName }}</h2>
-          <button class="ghost icon small" aria-label="ปิด" @click="emit('close')">
+          <button class="ghost icon small" :aria-label="$t('common.close')" @click="emit('close')">
             <AppIcon name="x" :size="15" />
           </button>
         </div>
@@ -169,16 +170,18 @@ onUnmounted(() => {
         <div class="toolbar">
           <span v-if="connState === 'connecting'" class="status status-starting">
             <span class="spinner" />
-            กำลังเชื่อมต่อ…
+            {{ $t("databases.terminal.connecting") }}
           </span>
           <span v-else-if="connState === 'live'" class="status status-running is-live">LIVE</span>
-          <span v-else-if="connState === 'ended'" class="status status-stopped">จบเซสชันแล้ว</span>
-          <span v-else class="status status-failed">เชื่อมต่อไม่สำเร็จ</span>
+          <span v-else-if="connState === 'ended'" class="status status-stopped">
+            {{ $t("databases.terminal.ended") }}
+          </span>
+          <span v-else class="status status-failed">{{ $t("databases.terminal.failed") }}</span>
         </div>
 
         <p v-if="connState === 'error'" class="alert alert-bad small">
           <AppIcon name="alert" :size="14" />
-          <span>{{ connError }}</span>
+          <span>{{ connError || $t("databases.terminal.connectError") }}</span>
         </p>
 
         <div ref="termEl" class="term-box" />

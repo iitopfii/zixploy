@@ -8,6 +8,8 @@
 const props = defineProps<{ projectId: string; archived: boolean; mode?: string }>();
 
 const api = useApi();
+const { t } = useI18n();
+const { isAdmin, canWrite } = usePermissions();
 
 // ---------------------------------------------------------------------------
 // Volume type
@@ -44,12 +46,12 @@ async function fetchVolumes() {
   try {
     const { data, error } = await api.api.v1.projects({ id: props.projectId }).volumes.get();
     if (error) {
-      loadError.value = "โหลด volumes ไม่ได้";
+      loadError.value = t("volumes.error.load");
       return;
     }
     volumes.value = (data?.volumes ?? []).filter((v) => v.lifecycle !== "deleted") as Volume[];
   } catch {
-    loadError.value = "ติดต่อ API ไม่ได้";
+    loadError.value = t("common.apiUnreachable");
   } finally {
     loading.value = false;
   }
@@ -76,8 +78,8 @@ async function fetchComponents() {
 await fetchComponents();
 
 function componentName(id: string | null): string {
-  if (!id) return "ไม่ได้ผูก — compose ไม่ mount";
-  return mountableComponents.value.find((c) => c.id === id)?.name ?? "component ที่ถูกลบ";
+  if (!id) return t("volumes.component.unbound");
+  return mountableComponents.value.find((c) => c.id === id)?.name ?? t("volumes.component.deleted");
 }
 
 // ---------------------------------------------------------------------------
@@ -111,9 +113,7 @@ async function createVolume() {
       ...(isCompose.value && createForm.componentId ? { componentId: createForm.componentId } : {}),
     });
     if (error) {
-      createError.value =
-        (error.value as { error?: { message?: string } } | null)?.error?.message ??
-        "สร้าง volume ไม่สำเร็จ";
+      createError.value = apiErrorMessage(error, "volumes.error.create");
       return;
     }
     showCreate.value = false;
@@ -122,7 +122,7 @@ async function createVolume() {
     createForm.hostPath = "";
     await fetchVolumes();
   } catch {
-    createError.value = "ติดต่อ API ไม่ได้";
+    createError.value = t("common.apiUnreachable");
   } finally {
     creating.value = false;
   }
@@ -144,14 +144,12 @@ async function detach(volumeId: string) {
       .volumes({ volumeId })
       .detach.post({});
     if (error) {
-      detachError.value[volumeId] =
-        (error.value as { error?: { message?: string } } | null)?.error?.message ??
-        "detach ไม่สำเร็จ";
+      detachError.value[volumeId] = apiErrorMessage(error, "volumes.error.detach");
       return;
     }
     await fetchVolumes();
   } catch {
-    detachError.value[volumeId] = "ติดต่อ API ไม่ได้";
+    detachError.value[volumeId] = t("common.apiUnreachable");
   } finally {
     detachingId.value = null;
   }
@@ -186,14 +184,13 @@ async function deleteVolume() {
       .volumes({ volumeId: confirmDeleteId.value })
       .delete();
     if (error) {
-      deleteError.value =
-        (error.value as { error?: { message?: string } } | null)?.error?.message ?? "ลบไม่สำเร็จ";
+      deleteError.value = apiErrorMessage(error, "common.deleteFailed");
       return;
     }
     confirmDeleteId.value = null;
     await fetchVolumes();
   } catch {
-    deleteError.value = "ติดต่อ API ไม่ได้";
+    deleteError.value = t("common.apiUnreachable");
   } finally {
     deleting.value = false;
   }
@@ -219,22 +216,26 @@ function lcTone(lc: string) {
   <div class="stack-lg">
     <div class="row-between">
       <h2 class="section-title">Volumes</h2>
-      <button v-if="!archived" class="primary small" @click="showCreate = !showCreate">
+      <button
+        v-if="canWrite && !archived"
+        class="primary small"
+        @click="showCreate = !showCreate"
+      >
         <AppIcon :name="showCreate ? 'x' : 'plus'" :size="14" />
-        {{ showCreate ? "ยกเลิก" : "สร้าง volume" }}
+        {{ showCreate ? $t("common.cancel") : $t("volumes.create") }}
       </button>
     </div>
 
     <!-- Create form -->
-    <div v-if="showCreate" class="inset stack">
+    <div v-if="showCreate && canWrite" class="inset stack">
       <label>
-        <span>ชื่อ</span>
+        <span>{{ $t("volumes.form.name") }}</span>
         <input v-model="createForm.displayName" placeholder="my-data" />
       </label>
       <label v-if="isCompose">
-        <span>Mount ที่ component</span>
+        <span>{{ $t("volumes.form.component") }}</span>
         <select v-model="createForm.componentId">
-          <option value="" disabled>เลือก component</option>
+          <option value="" disabled>{{ $t("volumes.form.selectComponent") }}</option>
           <option v-for="c in mountableComponents" :key="c.id" :value="c.id">{{ c.name }}</option>
         </select>
       </label>
@@ -242,19 +243,16 @@ function lcTone(lc: string) {
         <span>Mount path</span>
         <input v-model="createForm.mountPath" class="mono" placeholder="/app/data" />
       </label>
-      <label>
-        <span>Host path (bind mount) — ไม่บังคับ</span>
+      <label v-if="isAdmin">
+        <span>{{ $t("volumes.form.hostPath") }}</span>
         <input v-model="createForm.hostPath" class="mono" placeholder="/home/mydata" />
-        <span class="muted small">
-          เว้นว่าง = Docker จัดการที่เก็บให้ (แนะนำ) · ระบุ path เช่น /home/mydata =
-          ข้อมูลไปอยู่โฟลเดอร์นั้นบนเซิร์ฟเวอร์ตรงๆ — โฟลเดอร์ต้องมีอยู่แล้ว และแก้ path ทีหลังไม่ได้
-        </span>
+        <span class="muted small">{{ $t("volumes.form.hostPathHint") }}</span>
       </label>
       <label>
         <span>Access mode</span>
         <select v-model="createForm.accessMode">
-          <option value="shared-safe">shared-safe (แนะนำ)</option>
-          <option value="single-writer">single-writer (downtime ระหว่าง deploy)</option>
+          <option value="shared-safe">{{ $t("volumes.form.sharedSafe") }}</option>
+          <option value="single-writer">{{ $t("volumes.form.singleWriter") }}</option>
         </select>
       </label>
       <div class="check-row">
@@ -277,7 +275,7 @@ function lcTone(lc: string) {
         @click="createVolume"
       >
         <span v-if="creating" class="spinner" />
-        {{ creating ? "กำลังสร้าง…" : "สร้าง" }}
+        {{ creating ? $t("common.creating") : $t("common.create") }}
       </button>
     </div>
 
@@ -291,7 +289,7 @@ function lcTone(lc: string) {
     </p>
     <div v-else-if="volumes.length === 0" class="empty">
       <span class="empty-icon"><AppIcon name="database" :size="20" /></span>
-      <span class="empty-title">ยังไม่มี volume</span>
+      <span class="empty-title">{{ $t("volumes.empty") }}</span>
     </div>
 
     <!-- Volume list -->
@@ -326,11 +324,11 @@ function lcTone(lc: string) {
         <!-- lastError จาก reconciler แม่นกว่าข้อความ hardcode — fallback เมื่อยังไม่มีค่า (record เก่า) -->
         <p v-if="v.lifecycle === 'error'" class="alert alert-bad small">
           <AppIcon name="alert" :size="13" />
-          <span>{{ v.lastError ?? "Docker volume หายไป — อาจถูกลบด้วยมือ ดู runbook สำหรับ recovery" }}</span>
+          <span>{{ v.lastError ?? $t("volumes.status.missing") }}</span>
         </p>
         <p v-if="v.lifecycle === 'deletion_pending'" class="alert alert-warn small">
           <AppIcon name="clock" :size="13" />
-          <span>{{ v.lastError ?? "รอ worker ลบ Docker volume จริง…" }}</span>
+          <span>{{ v.lastError ?? $t("volumes.status.deletionPending") }}</span>
         </p>
 
         <p v-if="detachError[v.id]" class="alert alert-bad small">
@@ -338,7 +336,7 @@ function lcTone(lc: string) {
           <span>{{ detachError[v.id] }}</span>
         </p>
 
-        <div v-if="!archived" class="vol-actions">
+        <div v-if="canWrite && !archived" class="vol-actions">
           <button
             v-if="v.lifecycle === 'active'"
             class="secondary small"
@@ -346,30 +344,32 @@ function lcTone(lc: string) {
             @click="detach(v.id)"
           >
             <span v-if="detachingId === v.id" class="spinner" />
-            {{ detachingId === v.id ? "กำลัง detach…" : "Detach" }}
+            {{ detachingId === v.id ? $t("volumes.detach.working") : "Detach" }}
           </button>
 
           <button
             v-if="v.lifecycle !== 'deletion_pending'"
             class="danger small"
             :disabled="v.lifecycle === 'active'"
-            :title="v.lifecycle === 'active' ? 'ต้อง detach ก่อนลบ' : ''"
+            :title="v.lifecycle === 'active' ? $t('volumes.detach.first') : ''"
             @click="openDelete(v)"
           >
             <AppIcon name="trash" :size="13" />
-            ลบ
+            {{ $t("common.delete") }}
           </button>
         </div>
 
         <!-- Typed delete confirm -->
-        <div v-if="confirmDeleteId === v.id" class="confirm-delete">
-          <p class="warn-text small">
-            พิมพ์ชื่อ volume <strong>{{ v.displayName }}</strong> เพื่อยืนยันการลบ
-          </p>
-          <p class="muted small">ข้อมูลใน volume จะหายถาวร — ไม่สามารถกู้คืนได้</p>
+        <div v-if="confirmDeleteId === v.id && canWrite" class="confirm-delete">
+          <i18n-t scope="global" keypath="volumes.confirmDelete.prompt" tag="p" class="warn-text small">
+            <template #name>
+              <strong>{{ v.displayName }}</strong>
+            </template>
+          </i18n-t>
+          <p class="muted small">{{ $t("volumes.confirmDelete.warning") }}</p>
           <input
             v-model="confirmInput"
-            placeholder="ชื่อ volume"
+            :placeholder="$t('volumes.confirmDelete.placeholder')"
             @keydown.enter="deleteVolume"
           />
           <p v-if="deleteError" class="alert alert-bad small">
@@ -379,13 +379,13 @@ function lcTone(lc: string) {
           <div class="confirm-actions">
             <button class="danger small" :disabled="!canDelete || deleting" @click="deleteVolume">
               <span v-if="deleting" class="spinner" />
-              {{ deleting ? "กำลังลบ…" : "ยืนยันลบ" }}
+              {{ deleting ? $t("common.deleting") : $t("volumes.confirmDelete.confirm") }}
             </button>
             <button
               class="secondary small"
               @click="confirmDeleteId = null; confirmInput = ''"
             >
-              ยกเลิก
+              {{ $t("common.cancel") }}
             </button>
           </div>
         </div>
@@ -394,7 +394,7 @@ function lcTone(lc: string) {
 
     <p class="muted small note">
       <AppIcon name="info" :size="13" />
-      volume จะถูก mount ทุกครั้งที่ deploy — redeploy เพื่อให้การเปลี่ยนแปลงมีผล
+      {{ $t("volumes.note") }}
     </p>
   </div>
 </template>

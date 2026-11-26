@@ -1,5 +1,55 @@
+/**
+ * ข้อความของ dashboard แยกไฟล์ตามส่วนของแอป — i18n/locales/<ภาษา>/<ชื่อ>.json
+ * เพิ่มไฟล์ใหม่ต้องเพิ่มชื่อที่นี่ และต้องมีครบทั้ง th และ en (scripts/check-locales.ts ตรวจให้)
+ */
+const LOCALE_FILES = [
+  "common",
+  "format",
+  "nav",
+  "auth",
+  "members",
+  "projects",
+  "deploy",
+  "logs",
+  "components",
+  "domains",
+  "environment",
+  "volumes",
+  "monitoring",
+  "databases",
+  "docker",
+  "github",
+  "system",
+];
+
 export default defineNuxtConfig({
   compatibilityDate: "2026-08-01",
+  modules: ["@nuxtjs/i18n"],
+  i18n: {
+    // ไทยเป็นค่าเริ่มต้นเหมือนก่อนมีสองภาษา · ไม่ใส่ภาษาใน URL — ลิงก์เดิมทุกอันใช้ได้ต่อ
+    defaultLocale: "th",
+    strategy: "no_prefix",
+    locales: [
+      {
+        code: "th",
+        language: "th-TH",
+        name: "ไทย",
+        files: LOCALE_FILES.map((f) => `th/${f}.json`),
+      },
+      {
+        code: "en",
+        language: "en-US",
+        name: "English",
+        files: LOCALE_FILES.map((f) => `en/${f}.json`),
+      },
+    ],
+    // จำภาษาที่เลือกไว้ในคุกกี้ zx_locale — Control API อ่านคุกกี้เดียวกันเพื่อตอบ error ตามภาษา
+    detectBrowserLanguage: {
+      useCookie: true,
+      cookieKey: "zx_locale",
+      fallbackLocale: "th",
+    },
+  },
   devtools: { enabled: false },
   typescript: { strict: true },
   css: ["~/assets/main.css"],
@@ -8,7 +58,6 @@ export default defineNuxtConfig({
   app: {
     head: {
       title: "Zixploy · Deployment Platform",
-      htmlAttrs: { lang: "th" },
       meta: [
         { charset: "utf-8" },
         { name: "viewport", content: "width=device-width, initial-scale=1" },

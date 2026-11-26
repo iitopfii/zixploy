@@ -9,20 +9,30 @@
  */
 
 import { VOLUME_HOST_SENSITIVE_PATHS, VOLUME_SENSITIVE_PATHS } from "./constants";
+import type { LocalizedText } from "./i18n";
 
-export interface MountPathValidationResult {
-  ok: boolean;
-  reason?: string;
-}
+/** reason = ข้อความไทย (เหมือนเดิม) · reasonText = สองภาษา มีคู่กับ reason เสมอ */
+export type MountPathValidationResult =
+  | { ok: true; reason?: undefined; reasonText?: undefined }
+  | { ok: false; reason: string; reasonText: LocalizedText };
 
-export interface HostPathValidationResult {
-  ok: boolean;
-  reason?: string;
-  /** error code ที่ผู้เรียกควรใช้ — แยกรูปแบบผิด (INVALID) ออกจาก path อันตราย (SENSITIVE) */
-  code?: "VOLUME_INVALID_PATH" | "VOLUME_SENSITIVE_PATH";
-  /** path หลัง normalize (เมื่อ ok) — เก็บค่านี้ลง driver_opts.device เพื่อให้ค่าใน DB สม่ำเสมอ */
-  normalized?: string;
-}
+export type HostPathValidationResult =
+  | {
+      ok: true;
+      /** path หลัง normalize (เมื่อ ok) — เก็บค่านี้ลง driver_opts.device เพื่อให้ค่าใน DB สม่ำเสมอ */
+      normalized: string;
+      reason?: undefined;
+      reasonText?: undefined;
+      code?: undefined;
+    }
+  | {
+      ok: false;
+      reason: string;
+      reasonText: LocalizedText;
+      /** error code ที่ผู้เรียกควรใช้ — แยกรูปแบบผิด (INVALID) ออกจาก path อันตราย (SENSITIVE) */
+      code: "VOLUME_INVALID_PATH" | "VOLUME_SENSITIVE_PATH";
+      normalized?: undefined;
+    };
 
 /**
  * ตรวจ container mount path ให้ปลอดภัย:
@@ -34,23 +44,58 @@ export interface HostPathValidationResult {
  */
 export function validateMountPath(path: string): MountPathValidationResult {
   if (!path.startsWith("/")) {
-    return { ok: false, reason: "mount path ต้องเป็น absolute path (ขึ้นต้นด้วย /)" };
+    return {
+      ok: false,
+      reason: "mount path ต้องเป็น absolute path (ขึ้นต้นด้วย /)",
+      reasonText: {
+        th: "mount path ต้องเป็น absolute path (ขึ้นต้นด้วย /)",
+        en: "Mount path must be an absolute path (starting with /)",
+      },
+    };
   }
   if (path === "/") {
-    return { ok: false, reason: "ห้าม mount root filesystem ทั้งหมด" };
+    return {
+      ok: false,
+      reason: "ห้าม mount root filesystem ทั้งหมด",
+      reasonText: {
+        th: "ห้าม mount root filesystem ทั้งหมด",
+        en: "Mounting the entire root filesystem is not allowed",
+      },
+    };
   }
   if (path.includes("..")) {
-    return { ok: false, reason: "mount path ห้ามมี .. (path traversal)" };
+    return {
+      ok: false,
+      reason: "mount path ห้ามมี .. (path traversal)",
+      reasonText: {
+        th: "mount path ห้ามมี .. (path traversal)",
+        en: "Mount path must not contain .. (path traversal)",
+      },
+    };
   }
   if (path.includes("\0")) {
-    return { ok: false, reason: "mount path ห้ามมี null byte" };
+    return {
+      ok: false,
+      reason: "mount path ห้ามมี null byte",
+      reasonText: {
+        th: "mount path ห้ามมี null byte",
+        en: "Mount path must not contain a null byte",
+      },
+    };
   }
 
   const lower = path.toLowerCase();
   for (const forbidden of VOLUME_SENSITIVE_PATHS) {
     // ตรงเป๊ะ หรือ เป็น sub-path (เช่น /proc/cpuinfo)
     if (lower === forbidden || lower.startsWith(`${forbidden}/`)) {
-      return { ok: false, reason: `ห้าม mount path ที่อ่อนไหว: ${forbidden}` };
+      return {
+        ok: false,
+        reason: `ห้าม mount path ที่อ่อนไหว: ${forbidden}`,
+        reasonText: {
+          th: `ห้าม mount path ที่อ่อนไหว: ${forbidden}`,
+          en: `Mounting a sensitive path is not allowed: ${forbidden}`,
+        },
+      };
     }
   }
 
@@ -79,16 +124,32 @@ export function validateHostPath(
       ok: false,
       code: "VOLUME_INVALID_PATH",
       reason: "host path ต้องเป็น absolute path บนเซิร์ฟเวอร์ (ขึ้นต้นด้วย /)",
+      reasonText: {
+        th: "host path ต้องเป็น absolute path บนเซิร์ฟเวอร์ (ขึ้นต้นด้วย /)",
+        en: "Host path must be an absolute path on the server (starting with /)",
+      },
     };
   }
   if (path.includes("\0")) {
-    return { ok: false, code: "VOLUME_INVALID_PATH", reason: "host path ห้ามมี null byte" };
+    return {
+      ok: false,
+      code: "VOLUME_INVALID_PATH",
+      reason: "host path ห้ามมี null byte",
+      reasonText: {
+        th: "host path ห้ามมี null byte",
+        en: "Host path must not contain a null byte",
+      },
+    };
   }
   if (path.includes("..")) {
     return {
       ok: false,
       code: "VOLUME_INVALID_PATH",
       reason: "host path ห้ามมี .. (path traversal)",
+      reasonText: {
+        th: "host path ห้ามมี .. (path traversal)",
+        en: "Host path must not contain .. (path traversal)",
+      },
     };
   }
 
@@ -100,6 +161,10 @@ export function validateHostPath(
       ok: false,
       code: "VOLUME_SENSITIVE_PATH",
       reason: "ห้าม bind mount root filesystem ของ host",
+      reasonText: {
+        th: "ห้าม bind mount root filesystem ของ host",
+        en: "Bind mounting the host root filesystem is not allowed",
+      },
     };
   }
 
@@ -124,6 +189,10 @@ export function validateHostPath(
         ok: false,
         code: "VOLUME_SENSITIVE_PATH",
         reason: `ห้ามใช้ host path ที่อ่อนไหว: ${forbidden}`,
+        reasonText: {
+          th: `ห้ามใช้ host path ที่อ่อนไหว: ${forbidden}`,
+          en: `Using a sensitive host path is not allowed: ${forbidden}`,
+        },
       };
     }
   }

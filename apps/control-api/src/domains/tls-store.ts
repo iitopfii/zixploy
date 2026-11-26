@@ -15,6 +15,7 @@
 import type { Database } from "bun:sqlite";
 import {
   AppError,
+  errorText,
   type ParsedCertificate,
   type TlsMode,
   validateCertificateBundle,
@@ -78,10 +79,10 @@ function keyAad(domainId: string): string {
 
 function requireMasterKeys(masterKeys: MasterKeys | null): MasterKeys {
   if (!masterKeys) {
-    throw new AppError(
-      "TLS_ENCRYPTION_NOT_CONFIGURED",
-      "ยังไม่ได้ตั้งค่า master key — ตั้ง ZIXPLOY_MASTER_KEY_FILE ก่อนอัปโหลด certificate",
-    );
+    throw new AppError("TLS_ENCRYPTION_NOT_CONFIGURED", {
+      th: "ยังไม่ได้ตั้งค่า master key — ตั้ง ZIXPLOY_MASTER_KEY_FILE ก่อนอัปโหลด certificate",
+      en: "Master key is not configured. Set ZIXPLOY_MASTER_KEY_FILE before uploading a certificate",
+    });
   }
   return masterKeys;
 }
@@ -90,7 +91,7 @@ function loadRow(db: Database, domainId: string): TlsRow {
   const row = db
     .query<TlsRow, [string]>(`SELECT ${TLS_COLS} FROM project_domains WHERE id = ?`)
     .get(domainId);
-  if (!row) throw new AppError("DOMAIN_NOT_FOUND", "ไม่พบ domain นี้");
+  if (!row) throw new AppError("DOMAIN_NOT_FOUND", { th: "ไม่พบ domain นี้", en: "Domain not found" });
   return row;
 }
 
@@ -135,21 +136,23 @@ export function getCertificateInfo(db: Database, domainId: string): TlsCertifica
  * ที่นี่แค่จัดหมวด code ให้ client เลือก UI ที่เหมาะสม (เช่น ชี้ไปที่ field ไหนผิด)
  */
 function toTlsAppError(err: unknown): AppError {
+  // จัดหมวดจาก message ภาษาไทย (err.message เป็นไทยเสมอ) — ข้อความที่ตอบ client ใช้สองภาษาจาก errorText
   const message = err instanceof Error ? err.message : "certificate ไม่ถูกต้อง";
+  const text = errorText(err, { th: "certificate ไม่ถูกต้อง", en: "Invalid certificate" });
 
   if (message.includes("ไม่ตรงกับ certificate")) {
-    return new AppError("TLS_CERT_KEY_MISMATCH", message);
+    return new AppError("TLS_CERT_KEY_MISMATCH", text);
   }
   if (message.includes("หมดอายุ") || message.includes("ยังไม่ถึงวันเริ่มใช้งาน")) {
-    return new AppError("TLS_CERT_EXPIRED", message);
+    return new AppError("TLS_CERT_EXPIRED", text);
   }
   if (message.includes("ไม่ครอบ hostname")) {
-    return new AppError("TLS_CERT_HOSTNAME_MISMATCH", message);
+    return new AppError("TLS_CERT_HOSTNAME_MISMATCH", text);
   }
   if (message.includes("private key")) {
-    return new AppError("TLS_KEY_INVALID", message);
+    return new AppError("TLS_KEY_INVALID", text);
   }
-  return new AppError("TLS_CERT_INVALID", message);
+  return new AppError("TLS_CERT_INVALID", text);
 }
 
 export interface UploadCertificateResult {
@@ -209,7 +212,11 @@ export async function uploadCertificate(
   );
 
   const info = toInfo(loadRow(db, domainId));
-  if (!info) throw new AppError("INTERNAL_ERROR", "certificate หายไปหลังบันทึก");
+  if (!info)
+    throw new AppError("INTERNAL_ERROR", {
+      th: "certificate หายไปหลังบันทึก",
+      en: "Certificate disappeared after saving",
+    });
   return { info, parsed };
 }
 
@@ -222,7 +229,10 @@ export async function uploadCertificate(
 export function removeCertificate(db: Database, domainId: string): void {
   const row = loadRow(db, domainId);
   if (row.tls_mode !== "custom") {
-    throw new AppError("TLS_CERT_NOT_FOUND", "domain นี้ไม่ได้ใช้ custom certificate อยู่");
+    throw new AppError("TLS_CERT_NOT_FOUND", {
+      th: "domain นี้ไม่ได้ใช้ custom certificate อยู่",
+      en: "This domain is not using a custom certificate",
+    });
   }
 
   db.query(

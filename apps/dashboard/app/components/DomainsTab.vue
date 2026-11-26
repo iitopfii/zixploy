@@ -13,6 +13,8 @@
 const props = defineProps<{ projectId: string; archived: boolean; mode?: string }>();
 
 const api = useApi();
+const { t } = useI18n();
+const { canWrite } = usePermissions();
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,12 +64,12 @@ async function fetchDomains() {
   try {
     const { data, error } = await api.api.v1.projects({ id: props.projectId }).domains.get();
     if (error) {
-      loadError.value = "โหลด domains ไม่ได้";
+      loadError.value = t("domains.error.load");
       return;
     }
     domains.value = (data?.domains ?? []) as Domain[];
   } catch {
-    loadError.value = "ติดต่อ API ไม่ได้";
+    loadError.value = t("common.apiUnreachable");
   } finally {
     loading.value = false;
   }
@@ -110,7 +112,7 @@ function componentLabel(d: Domain): string {
   const target = d.componentId
     ? webComponents.value.find((c) => c.id === d.componentId)
     : webComponents.value[0];
-  return target ? target.name : "web ตัวแรก";
+  return target ? target.name : t("domains.firstWeb");
 }
 
 // ---------------------------------------------------------------------------
@@ -154,11 +156,6 @@ function applyExternalProxyPreset(form: {
   }
 }
 
-function errMessage(error: unknown, fallback: string): string {
-  const value = (error as { value?: { error?: { message?: string } } } | null)?.value;
-  return value?.error?.message ?? fallback;
-}
-
 async function addDomain() {
   adding.value = true;
   addError.value = "";
@@ -172,7 +169,7 @@ async function addDomain() {
       redirectHttp: addForm.redirectHttp,
     });
     if (error) {
-      addError.value = errMessage(error, "เพิ่ม domain ไม่สำเร็จ");
+      addError.value = apiErrorMessage(error, "domains.error.add");
       return;
     }
     showAdd.value = false;
@@ -180,7 +177,7 @@ async function addDomain() {
     addForm.pathPrefix = "";
     await fetchDomains();
   } catch {
-    addError.value = "ติดต่อ API ไม่ได้";
+    addError.value = t("common.apiUnreachable");
   } finally {
     adding.value = false;
   }
@@ -229,13 +226,13 @@ async function saveHttpsSettings(domainId: string) {
         ...(isCompose.value ? { componentId: editForm.componentId || null } : {}),
       });
     if (error) {
-      editError.value = errMessage(error, "บันทึกไม่สำเร็จ");
+      editError.value = apiErrorMessage(error, "common.saveFailed");
       return;
     }
     editPanelId.value = null;
     await fetchDomains();
   } catch {
-    editError.value = "ติดต่อ API ไม่ได้";
+    editError.value = t("common.apiUnreachable");
   } finally {
     editSaving.value = false;
   }
@@ -258,12 +255,11 @@ async function checkDns(domainId: string) {
     if (error) {
       // เดิม return เงียบ ๆ — ผู้ใช้กดแล้วเหมือนไม่มีอะไรเกิดขึ้น แยกไม่ออกว่า "ตรวจแล้วไม่เจอ"
       // กับ "เรียกตรวจไม่สำเร็จ" (session หมดอายุ, โดน origin-guard, server error)
-      const body = error.value as { error?: { message?: string } } | null;
       checkResults.value[domainId] = {
         status: "unknown",
         resolved: [],
         cloudflare: [],
-        error: body?.error?.message ?? "เรียกตรวจ DNS ไม่สำเร็จ — ลองรีเฟรชหน้าแล้วลองใหม่",
+        error: apiErrorMessage(error, "domains.dns.checkFailed"),
       };
       return;
     }
@@ -290,49 +286,30 @@ async function checkDns(domainId: string) {
  * "proxied" ไม่ใช่ปัญหา — Cloudflare proxy ซ่อน origin IP เป็นเรื่องปกติและตั้งใจ
  * (ก่อน M5 สถานะนี้ถูกรายงานเป็น mismatch ทำให้ผู้ใช้เข้าใจผิดว่าตั้ง DNS ผิด)
  */
-const DNS_PRESENTATION: Record<
-  string,
-  { tone: string; icon: IconName; label: string; hint: string }
-> = {
-  valid: {
-    tone: "tone-ok",
-    icon: "check",
-    label: "ชี้มาที่ server แล้ว",
-    hint: "domain พร้อมรับ traffic",
-  },
-  proxied: {
-    tone: "tone-info",
-    icon: "shield",
-    label: "ผ่าน Cloudflare",
-    hint: "Cloudflare proxy เปิดอยู่ — DDoS protection ทำงาน traffic วิ่งผ่าน Cloudflare มาที่ server นี้",
-  },
-  mismatch: {
-    tone: "tone-bad",
-    icon: "x",
-    label: "ชี้ไปที่อื่น",
-    hint: "A record ปัจจุบันไม่ได้ชี้มาที่ server นี้ และไม่ใช่ Cloudflare — แก้ที่ผู้ให้บริการ DNS",
-  },
-  unknown: {
-    tone: "tone-warn",
-    icon: "info",
-    label: "resolve ไม่ได้",
-    hint: "ยังไม่มี DNS record หรือ propagate ไม่เสร็จ (รอ 5–30 นาทีหลังสร้าง record)",
-  },
-  pending: {
-    tone: "tone-idle",
-    icon: "clock",
-    label: "ยังไม่ได้ตรวจ",
-    hint: 'กด "ตรวจ DNS" เพื่อตรวจสอบ',
-  },
-};
+const DNS_PRESENTATION = {
+  valid: { tone: "tone-ok", icon: "check" },
+  proxied: { tone: "tone-info", icon: "shield" },
+  mismatch: { tone: "tone-bad", icon: "x" },
+  unknown: { tone: "tone-warn", icon: "info" },
+  pending: { tone: "tone-idle", icon: "clock" },
+} satisfies Record<string, { tone: string; icon: IconName }>;
 
 /** ชื่อ icon ที่ AppIcon รองรับ — ใช้จำกัด type ของ DNS_PRESENTATION.icon ให้ตรงกับ set จริง */
 type IconName = "check" | "shield" | "x" | "info" | "clock";
+type DnsStatus = keyof typeof DNS_PRESENTATION;
 
-const FALLBACK_DNS_PRESENTATION = DNS_PRESENTATION.unknown as (typeof DNS_PRESENTATION)[string];
-
+/** label/hint อ่านจากไฟล์ภาษาตอนเรียก (ไม่เก็บข้อความไว้ใน constant) — เปลี่ยนภาษาแล้วอัปเดตตาม */
 function dns(status: string) {
-  return DNS_PRESENTATION[status] ?? FALLBACK_DNS_PRESENTATION;
+  const key: DnsStatus = Object.hasOwn(DNS_PRESENTATION, status)
+    ? (status as DnsStatus)
+    : "unknown";
+  const { tone, icon } = DNS_PRESENTATION[key];
+  return {
+    tone,
+    icon: icon as IconName,
+    label: t(`domains.dns.status.${key}.label`),
+    hint: t(`domains.dns.status.${key}.hint`),
+  };
 }
 
 /**
@@ -375,7 +352,7 @@ async function uploadCertificate(domainId: string) {
         privateKey: certForm.privateKey.trim(),
       });
     if (error) {
-      certError.value = errMessage(error, "อัปโหลด certificate ไม่สำเร็จ");
+      certError.value = apiErrorMessage(error, "domains.tls.uploadFailed");
       return;
     }
     certPanelId.value = null;
@@ -383,7 +360,7 @@ async function uploadCertificate(domainId: string) {
     certForm.privateKey = "";
     await fetchDomains();
   } catch {
-    certError.value = "ติดต่อ API ไม่ได้";
+    certError.value = t("common.apiUnreachable");
   } finally {
     certSaving.value = false;
   }
@@ -423,10 +400,10 @@ function certTone(daysLeft: number | null): string {
 
 function certExpiryText(daysLeft: number | null): string {
   if (daysLeft === null) return "";
-  if (daysLeft < 0) return `หมดอายุแล้ว ${-daysLeft} วัน — อัปโหลดใบใหม่`;
-  if (daysLeft === 0) return "หมดอายุวันนี้ — อัปโหลดใบใหม่";
-  if (daysLeft <= CERT_WARNING_DAYS) return `เหลืออีก ${daysLeft} วัน — เตรียมอัปโหลดใบใหม่`;
-  return `เหลืออีก ${daysLeft} วัน`;
+  if (daysLeft < 0) return trCount("domains.tls.expiry.expired", -daysLeft);
+  if (daysLeft === 0) return t("domains.tls.expiry.today");
+  if (daysLeft <= CERT_WARNING_DAYS) return trCount("domains.tls.expiry.soon", daysLeft);
+  return trCount("domains.tls.expiry.left", daysLeft);
 }
 
 // ---------------------------------------------------------------------------
@@ -457,13 +434,13 @@ async function deleteDomain(domainId: string) {
       .domains({ domainId })
       .delete();
     if (error) {
-      deleteError.value = errMessage(error, "ลบไม่สำเร็จ");
+      deleteError.value = apiErrorMessage(error, "common.deleteFailed");
       return;
     }
     confirmDeleteId.value = null;
     await fetchDomains();
   } catch {
-    deleteError.value = "ติดต่อ API ไม่ได้";
+    deleteError.value = t("common.apiUnreachable");
   } finally {
     deleting.value = false;
   }
@@ -474,8 +451,8 @@ async function deleteDomain(domainId: string) {
 // ---------------------------------------------------------------------------
 
 function fmtChecked(ms: number | null) {
-  if (!ms) return "ยังไม่เคยตรวจ";
-  return new Date(ms).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
+  if (!ms) return t("domains.dns.neverChecked");
+  return new Date(ms).toLocaleString(localeTag(), { dateStyle: "short", timeStyle: "short" });
 }
 
 /** fingerprint เต็มยาว 95 ตัวอักษร — ตัดให้พออ่านยืนยันได้โดยไม่ล้นบรรทัด */
@@ -504,41 +481,41 @@ async function copyIp(ip: string) {
     <div class="row-between wrap">
       <div>
         <h2 class="section-title">Domains</h2>
-        <p class="muted small subtitle">ชี้ domain มาที่ server นี้แล้วเลือกวิธีจัดการ HTTPS</p>
+        <p class="muted small subtitle">{{ $t("domains.subtitle") }}</p>
       </div>
-      <button v-if="!archived" class="primary small" @click="showAdd = !showAdd">
+      <button v-if="!archived && canWrite" class="primary small" @click="showAdd = !showAdd">
         <AppIcon :name="showAdd ? 'x' : 'plus'" :size="14" />
-        {{ showAdd ? "ยกเลิก" : "เพิ่ม domain" }}
+        {{ showAdd ? $t("common.cancel") : $t("domains.add") }}
       </button>
     </div>
 
     <!-- DNS setup hint — แสดง IP ที่ผู้ใช้ต้องชี้มา หลังตรวจ DNS ครั้งแรก -->
     <div v-if="serverIps.length > 0" class="alert alert-info hint-box">
       <AppIcon name="globe" :size="15" />
-      <span class="muted">สร้าง A record ชี้มาที่</span>
+      <span class="muted">{{ $t("domains.dnsHint.createARecord") }}</span>
       <code class="ip-code">{{ serverIps[0] }}</code>
       <button class="ghost tiny" @click="copyIp(serverIps[0] as string)">
         <AppIcon :name="copiedIp ? 'check' : 'copy'" :size="12" />
-        {{ copiedIp ? "คัดลอกแล้ว" : "คัดลอก" }}
+        {{ copiedIp ? $t("common.copied") : $t("common.copy") }}
       </button>
-      <span class="muted tiny">เปิด Cloudflare proxy ได้ — ระบบรองรับ</span>
+      <span class="muted tiny">{{ $t("domains.dnsHint.cloudflareOk") }}</span>
     </div>
 
     <!-- Add form -->
-    <div v-if="showAdd" class="inset stack">
+    <div v-if="showAdd && canWrite" class="inset stack">
       <label>
         <span>Hostname</span>
         <input v-model="addForm.hostname" placeholder="app.example.com" @keydown.enter="addDomain" />
       </label>
       <label>
-        <span>Path prefix <span class="muted tiny">(ไม่บังคับ — เว้นว่าง = ทั้ง host)</span></span>
+        <span>Path prefix <span class="muted tiny">{{ $t("domains.form.pathPrefixNote") }}</span></span>
         <input v-model="addForm.pathPrefix" placeholder="/api/" class="mono" />
       </label>
       <p v-if="addForm.pathPrefix.trim()" class="muted tiny">
-        เฉพาะ request ที่ path ขึ้นต้นด้วยค่านี้ — ชนะแถว "ทั้ง host" ของ hostname เดียวกันเสมอ
+        {{ $t("domains.form.pathPrefixHelp") }}
       </p>
       <label v-if="isCompose && webComponents.length > 0">
-        <span>ส่ง traffic ไปที่ component</span>
+        <span>{{ $t("domains.form.component") }}</span>
         <select
           v-model="addForm.componentId"
           @change="
@@ -547,12 +524,14 @@ async function copyIp(ip: string) {
               addForm.internalPort
           "
         >
-          <option value="">web ตัวแรก ({{ webComponents[0]?.name }})</option>
+          <option value="">
+            {{ $t("domains.form.firstWebOption", { name: webComponents[0]?.name }) }}
+          </option>
           <option v-for="c in webComponents" :key="c.id" :value="c.id">{{ c.name }}</option>
         </select>
       </label>
       <label class="short-field">
-        <span>Port ของ container</span>
+        <span>{{ $t("domains.form.containerPort") }}</span>
         <input v-model.number="addForm.internalPort" type="number" min="1" max="65535" />
       </label>
       <div class="form-checks">
@@ -563,7 +542,7 @@ async function copyIp(ip: string) {
             type="checkbox"
             :disabled="addForm.externalProxy"
           />
-          <label for="dom-https">เปิด HTTPS</label>
+          <label for="dom-https">{{ $t("domains.form.enableHttps") }}</label>
         </div>
         <div class="check-row">
           <input
@@ -572,7 +551,7 @@ async function copyIp(ip: string) {
             type="checkbox"
             :disabled="!addForm.httpsEnabled || addForm.externalProxy"
           />
-          <label for="dom-redirect">บังคับ HTTP → HTTPS</label>
+          <label for="dom-redirect">{{ $t("domains.form.forceRedirect") }}</label>
         </div>
       </div>
       <div class="check-row">
@@ -583,12 +562,11 @@ async function copyIp(ip: string) {
           @change="applyExternalProxyPreset(addForm)"
         />
         <label for="dom-ext-proxy">
-          TLS จัดการโดย proxy ภายนอก (เช่น Nginx Proxy Manager, Cloudflare, load balancer)
+          {{ $t("domains.form.externalProxy") }}
         </label>
       </div>
       <p v-if="addForm.externalProxy" class="muted tiny proxy-note">
-        proxy ภายนอกเป็นคน terminate TLS — Zixploy จะเสิร์ฟ HTTP ให้ proxy ตรง ๆ
-        (การเปิด HTTPS/redirect ที่นี่จะทำให้เกิด redirect วนซ้ำ)
+        {{ $t("domains.form.externalProxyNote") }}
       </p>
       <p v-if="addError" class="alert alert-bad small">
         <AppIcon name="alert" :size="13" />
@@ -601,7 +579,7 @@ async function copyIp(ip: string) {
         @click="addDomain"
       >
         <span v-if="adding" class="spinner" />
-        {{ adding ? "กำลังเพิ่ม…" : "เพิ่ม domain" }}
+        {{ adding ? $t("domains.adding") : $t("domains.add") }}
       </button>
     </div>
 
@@ -615,8 +593,8 @@ async function copyIp(ip: string) {
     </p>
     <div v-else-if="domains.length === 0" class="empty">
       <span class="empty-icon"><AppIcon name="globe" :size="20" /></span>
-      <span class="empty-title">ยังไม่มี domain</span>
-      <p class="small">เพิ่ม domain เพื่อรับ traffic จากภายนอก</p>
+      <span class="empty-title">{{ $t("domains.empty.title") }}</span>
+      <p class="small">{{ $t("domains.empty.hint") }}</p>
     </div>
 
     <!-- Domain list -->
@@ -635,7 +613,7 @@ async function copyIp(ip: string) {
               HTTPS
             </span>
             <span v-else class="badge">HTTP</span>
-            <span v-if="!d.enabled" class="badge">ปิดอยู่</span>
+            <span v-if="!d.enabled" class="badge">{{ $t("domains.disabledBadge") }}</span>
           </div>
         </div>
 
@@ -645,7 +623,9 @@ async function copyIp(ip: string) {
             <AppIcon :name="dns(d.dnsStatus).icon" :size="12" />
             {{ dns(d.dnsStatus).label }}
           </span>
-          <span class="muted tiny">ตรวจล่าสุด {{ fmtChecked(d.dnsCheckedAt) }}</span>
+          <span class="muted tiny">
+            {{ $t("domains.dns.lastChecked", { time: fmtChecked(d.dnsCheckedAt) }) }}
+          </span>
         </div>
         <p class="muted tiny hint">{{ dns(d.dnsStatus).hint }}</p>
         <p v-if="checkResults[d.id]?.error" class="alert alert-bad small">
@@ -653,30 +633,28 @@ async function copyIp(ip: string) {
           <span>{{ checkResults[d.id]?.error }}</span>
         </p>
         <p v-if="checkResults[d.id]?.resolved?.length" class="muted tiny mono">
-          resolve ได้: {{ checkResults[d.id]?.resolved.join(", ") }}
+          {{ $t("domains.dns.resolved", { addresses: checkResults[d.id]?.resolved.join(", ") }) }}
         </p>
 
         <!-- เตือนความเสี่ยง redirect วนซ้ำเมื่อ DNS ผ่าน proxy/CDN แต่ยังเปิด HTTPS/redirect -->
         <p v-if="riskProxyRedirectLoop(d)" class="alert alert-warn small">
           <AppIcon name="alert" :size="13" />
           <span>
-            DNS ของ domain นี้ชี้ผ่าน proxy/CDN — ถ้า TLS ถูก terminate ที่ proxy
-            การเปิด HTTPS/Redirect ที่นี่จะทำให้ redirect วนซ้ำ
-            พิจารณาใช้โหมด "TLS จัดการโดย proxy ภายนอก" ในปุ่มตั้งค่า HTTPS
+            {{ $t("domains.dns.proxyLoopWarning") }}
           </span>
         </p>
 
         <!-- TLS -->
         <div v-if="d.httpsEnabled" class="tls-section">
           <div class="tls-head">
-            <span class="tls-label">ใบรับรอง TLS</span>
+            <span class="tls-label">{{ $t("domains.tls.title") }}</span>
             <span class="badge" :class="d.tlsMode === 'custom' ? 'tone-info' : 'tone-ok'">
-              {{ d.tlsMode === "custom" ? "ใบรับรองของคุณ" : "Let's Encrypt (อัตโนมัติ)" }}
+              {{ d.tlsMode === "custom" ? $t("domains.tls.custom") : $t("domains.tls.letsEncrypt") }}
             </span>
           </div>
 
           <p v-if="d.tlsMode === 'letsencrypt'" class="muted tiny">
-            ระบบขอและต่ออายุใบรับรองให้อัตโนมัติ — ต้องให้ port 80 เข้าถึงได้จากภายนอก
+            {{ $t("domains.tls.letsEncryptHint") }}
           </p>
 
           <div v-else class="cert-info">
@@ -685,18 +663,18 @@ async function copyIp(ip: string) {
               <code class="tiny mono">{{ shortFingerprint(d.tlsCertFingerprint) }}</code>
             </div>
             <div class="cert-row">
-              <span class="muted tiny">หมดอายุ</span>
+              <span class="muted tiny">{{ $t("domains.tls.expires") }}</span>
               <span class="tiny" :class="`${certTone(certDaysLeft(d.tlsCertNotAfter))}-text`">
                 {{ certExpiryText(certDaysLeft(d.tlsCertNotAfter)) }}
               </span>
             </div>
-            <p class="muted tiny">ใบรับรองที่อัปโหลดเองไม่ต่ออายุอัตโนมัติ — ต้องอัปโหลดใบใหม่ก่อนหมดอายุ</p>
+            <p class="muted tiny">{{ $t("domains.tls.customHint") }}</p>
           </div>
 
-          <div v-if="!archived" class="tls-actions">
+          <div v-if="!archived && canWrite" class="tls-actions">
             <button class="secondary tiny" @click="openCertPanel(d.id)">
               <AppIcon name="key" :size="12" />
-              {{ d.tlsMode === "custom" ? "เปลี่ยนใบรับรอง" : "อัปโหลดใบรับรองเอง" }}
+              {{ d.tlsMode === "custom" ? $t("domains.tls.replace") : $t("domains.tls.upload") }}
             </button>
             <button
               v-if="d.tlsMode === 'custom'"
@@ -705,16 +683,21 @@ async function copyIp(ip: string) {
               @click="removeCertificate(d.id)"
             >
               <span v-if="removingCertId === d.id" class="spinner" />
-              {{ removingCertId === d.id ? "กำลังลบ…" : "กลับไปใช้ Let's Encrypt" }}
+              {{
+                removingCertId === d.id
+                  ? $t("common.deleting")
+                  : $t("domains.tls.backToLetsEncrypt")
+              }}
             </button>
           </div>
 
           <!-- Upload panel -->
-          <div v-if="certPanelId === d.id" class="inset stack cert-panel">
-            <p class="muted tiny">
-              วาง PEM ทั้งสองช่อง — ใบรับรองต้องครอบ <code>{{ d.hostname }}</code>
-              และ private key ต้องไม่มี passphrase
-            </p>
+          <div v-if="certPanelId === d.id && canWrite" class="inset stack cert-panel">
+            <i18n-t scope="global" keypath="domains.tls.pasteHint" tag="p" class="muted tiny">
+              <template #hostname>
+                <code>{{ d.hostname }}</code>
+              </template>
+            </i18n-t>
             <label class="stack-sm">
               <span class="tiny">Certificate (full chain)</span>
               <textarea
@@ -746,39 +729,43 @@ async function copyIp(ip: string) {
                 @click="uploadCertificate(d.id)"
               >
                 <span v-if="certSaving" class="spinner" />
-                {{ certSaving ? "กำลังบันทึก…" : "บันทึกใบรับรอง" }}
+                {{ certSaving ? $t("common.saving") : $t("domains.tls.save") }}
               </button>
-              <button class="secondary small" @click="certPanelId = null">ยกเลิก</button>
+              <button class="secondary small" @click="certPanelId = null">
+                {{ $t("common.cancel") }}
+              </button>
             </div>
           </div>
         </div>
 
         <!-- Actions -->
-        <div v-if="!archived" class="card-actions">
+        <div v-if="!archived && canWrite" class="card-actions">
           <button class="secondary small" :disabled="checkingId === d.id" @click="checkDns(d.id)">
             <span v-if="checkingId === d.id" class="spinner" />
             <AppIcon v-else name="refresh" :size="13" />
-            {{ checkingId === d.id ? "กำลังตรวจ…" : "ตรวจ DNS" }}
+            {{ checkingId === d.id ? $t("domains.dns.checking") : $t("domains.dns.check") }}
           </button>
           <button class="secondary small" @click="toggleEditPanel(d)">
             <AppIcon name="settings" :size="13" />
-            ตั้งค่า HTTPS
+            {{ $t("domains.httpsSettings") }}
           </button>
           <button class="secondary small" @click="toggleEnabled(d)">
-            {{ d.enabled ? "ปิดใช้งาน" : "เปิดใช้งาน" }}
+            {{ d.enabled ? $t("domains.disable") : $t("domains.enable") }}
           </button>
           <button class="danger small" @click="confirmDeleteId = d.id">
             <AppIcon name="trash" :size="13" />
-            ลบ
+            {{ $t("common.delete") }}
           </button>
         </div>
 
         <!-- inline แก้ไข HTTPS/redirect — field เดิมของ PATCH ไม่มี field ใหม่ -->
-        <div v-if="editPanelId === d.id" class="inset stack edit-panel">
+        <div v-if="editPanelId === d.id && canWrite" class="inset stack edit-panel">
           <label v-if="isCompose && webComponents.length > 0">
-            <span>ส่ง traffic ไปที่ component</span>
+            <span>{{ $t("domains.form.component") }}</span>
             <select v-model="editForm.componentId">
-              <option value="">web ตัวแรก ({{ webComponents[0]?.name }})</option>
+              <option value="">
+                {{ $t("domains.form.firstWebOption", { name: webComponents[0]?.name }) }}
+              </option>
               <option v-for="c in webComponents" :key="c.id" :value="c.id">{{ c.name }}</option>
             </select>
           </label>
@@ -790,7 +777,7 @@ async function copyIp(ip: string) {
                 type="checkbox"
                 :disabled="editForm.externalProxy"
               />
-              <label :for="`edit-https-${d.id}`">เปิด HTTPS</label>
+              <label :for="`edit-https-${d.id}`">{{ $t("domains.form.enableHttps") }}</label>
             </div>
             <div class="check-row">
               <input
@@ -799,7 +786,7 @@ async function copyIp(ip: string) {
                 type="checkbox"
                 :disabled="!editForm.httpsEnabled || editForm.externalProxy"
               />
-              <label :for="`edit-redirect-${d.id}`">บังคับ HTTP → HTTPS</label>
+              <label :for="`edit-redirect-${d.id}`">{{ $t("domains.form.forceRedirect") }}</label>
             </div>
           </div>
           <div class="check-row">
@@ -810,12 +797,11 @@ async function copyIp(ip: string) {
               @change="applyExternalProxyPreset(editForm)"
             />
             <label :for="`edit-ext-proxy-${d.id}`">
-              TLS จัดการโดย proxy ภายนอก (เช่น Nginx Proxy Manager, Cloudflare, load balancer)
+              {{ $t("domains.form.externalProxy") }}
             </label>
           </div>
           <p v-if="editForm.externalProxy" class="muted tiny proxy-note">
-            proxy ภายนอกเป็นคน terminate TLS — Zixploy จะเสิร์ฟ HTTP ให้ proxy ตรง ๆ
-            (การเปิด HTTPS/redirect ที่นี่จะทำให้เกิด redirect วนซ้ำ)
+            {{ $t("domains.form.externalProxyNote") }}
           </p>
           <p v-if="editError" class="alert alert-bad small">
             <AppIcon name="alert" :size="13" />
@@ -824,17 +810,23 @@ async function copyIp(ip: string) {
           <div class="confirm-actions">
             <button class="primary small" :disabled="editSaving" @click="saveHttpsSettings(d.id)">
               <span v-if="editSaving" class="spinner" />
-              {{ editSaving ? "กำลังบันทึก…" : "บันทึก" }}
+              {{ editSaving ? $t("common.saving") : $t("common.save") }}
             </button>
-            <button class="secondary small" @click="editPanelId = null">ยกเลิก</button>
+            <button class="secondary small" @click="editPanelId = null">
+              {{ $t("common.cancel") }}
+            </button>
           </div>
         </div>
 
         <!-- inline confirm delete -->
-        <div v-if="confirmDeleteId === d.id" class="confirm-delete">
+        <div v-if="confirmDeleteId === d.id && canWrite" class="confirm-delete">
           <p class="alert alert-warn small">
             <AppIcon name="alert" :size="13" />
-            <span>ลบ domain <strong>{{ d.hostname }}</strong>? traffic ที่เข้ามาจะไม่ถูก route อีก</span>
+            <i18n-t scope="global" keypath="domains.delete.confirm" tag="span">
+              <template #hostname>
+                <strong>{{ d.hostname }}</strong>
+              </template>
+            </i18n-t>
           </p>
           <p v-if="deleteError" class="alert alert-bad small">
             <AppIcon name="alert" :size="13" />
@@ -843,13 +835,13 @@ async function copyIp(ip: string) {
           <div class="confirm-actions">
             <button class="danger small" :disabled="deleting" @click="deleteDomain(d.id)">
               <span v-if="deleting" class="spinner" />
-              {{ deleting ? "กำลังลบ…" : "ยืนยันลบ" }}
+              {{ deleting ? $t("common.deleting") : $t("domains.delete.confirmButton") }}
             </button>
             <button
               class="secondary small"
               @click="confirmDeleteId = null; deleteError = ''"
             >
-              ยกเลิก
+              {{ $t("common.cancel") }}
             </button>
           </div>
         </div>

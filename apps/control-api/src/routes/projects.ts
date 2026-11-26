@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { API_PREFIX, AppError, isLinkNetworkName, isUlid, ulid } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
 import { getClientIp, recordAuditEvent } from "../audit/log";
+import { assertAdmin } from "../auth/policy";
 import { authPlugin, requireAuthenticated } from "../plugins/auth";
 
 interface ProjectRow {
@@ -152,11 +153,13 @@ const SELECT_COLUMNS = `p.id, p.name, p.status, p.mode, p.source_type, p.install
 
 function loadProject(db: Database, id: string): ProjectRow {
   // ตรวจรูปแบบ ID ก่อนแตะ DB — public ID เป็น ULID เสมอ (ADR-0005)
-  if (!isUlid(id)) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+  if (!isUlid(id))
+    throw new AppError("PROJECT_NOT_FOUND", { th: "ไม่พบ project นี้", en: "Project not found" });
   const row = db
     .query<ProjectRow, [string]>(`SELECT ${SELECT_COLUMNS} FROM projects p WHERE p.id = ?`)
     .get(id);
-  if (!row) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+  if (!row)
+    throw new AppError("PROJECT_NOT_FOUND", { th: "ไม่พบ project นี้", en: "Project not found" });
   return row;
 }
 
@@ -168,9 +171,16 @@ const RESERVED_PORTS = new Set([80, 443, 3000, 3001]);
 
 function assertExposedPortAvailable(db: Database, port: number, projectId: string): void {
   if (RESERVED_PORTS.has(port)) {
-    throw new AppError("VALIDATION_ERROR", `port ${port} ถูกใช้โดยระบบ Zixploy เอง — เลือก port อื่น`, {
-      field: "exposedPort",
-    });
+    throw new AppError(
+      "VALIDATION_ERROR",
+      {
+        th: `port ${port} ถูกใช้โดยระบบ Zixploy เอง — เลือก port อื่น`,
+        en: `Port ${port} is used by Zixploy itself. Choose another port`,
+      },
+      {
+        field: "exposedPort",
+      },
+    );
   }
   const projectHit = db
     .query<{ name: string }, [number, string]>(
@@ -180,7 +190,10 @@ function assertExposedPortAvailable(db: Database, port: number, projectId: strin
   if (projectHit) {
     throw new AppError(
       "VALIDATION_ERROR",
-      `port ${port} ถูกใช้โดย project "${projectHit.name}" อยู่แล้ว`,
+      {
+        th: `port ${port} ถูกใช้โดย project "${projectHit.name}" อยู่แล้ว`,
+        en: `Port ${port} is already used by project "${projectHit.name}"`,
+      },
       { field: "exposedPort" },
     );
   }
@@ -190,7 +203,10 @@ function assertExposedPortAvailable(db: Database, port: number, projectId: strin
   if (serviceHit) {
     throw new AppError(
       "VALIDATION_ERROR",
-      `port ${port} ถูกใช้โดย database "${serviceHit.name}" อยู่แล้ว`,
+      {
+        th: `port ${port} ถูกใช้โดย database "${serviceHit.name}" อยู่แล้ว`,
+        en: `Port ${port} is already used by database "${serviceHit.name}"`,
+      },
       { field: "exposedPort" },
     );
   }
@@ -200,10 +216,18 @@ function assertExposedPortAvailable(db: Database, port: number, projectId: strin
 function assertSafeRelativePath(value: string, field: string): void {
   const normalized = value.replaceAll("\\", "/");
   if (normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized)) {
-    throw new AppError("VALIDATION_ERROR", `${field} ต้องเป็น relative path`, { field });
+    throw new AppError(
+      "VALIDATION_ERROR",
+      { th: `${field} ต้องเป็น relative path`, en: `${field} must be a relative path` },
+      { field },
+    );
   }
   if (normalized.split("/").includes("..")) {
-    throw new AppError("VALIDATION_ERROR", `${field} ต้องไม่มี ".."`, { field });
+    throw new AppError(
+      "VALIDATION_ERROR",
+      { th: `${field} ต้องไม่มี ".."`, en: `${field} must not contain ".."` },
+      { field },
+    );
   }
 }
 
@@ -216,14 +240,24 @@ function assertLinkNetworkUsable(db: Database, projectId: string, mode: string, 
   if (!isLinkNetworkName(name)) {
     throw new AppError(
       "VALIDATION_ERROR",
-      'ชื่อ link network ใช้ได้เฉพาะ a-z 0-9 และ "-" ยาวไม่เกิน 40 ตัว ขึ้นต้นด้วยตัวอักษรหรือตัวเลข',
+      {
+        th: 'ชื่อ link network ใช้ได้เฉพาะ a-z 0-9 และ "-" ยาวไม่เกิน 40 ตัว ขึ้นต้นด้วยตัวอักษรหรือตัวเลข',
+        en: 'A link network name may only contain a-z, 0-9 and "-", be at most 40 characters long and start with a letter or digit',
+      },
       { field: "linkNetwork" },
     );
   }
   if (mode !== "compose") {
-    throw new AppError("VALIDATION_ERROR", "link network ใช้ได้เฉพาะ project แบบ compose", {
-      field: "linkNetwork",
-    });
+    throw new AppError(
+      "VALIDATION_ERROR",
+      {
+        th: "link network ใช้ได้เฉพาะ project แบบ compose",
+        en: "A link network is only available for compose projects",
+      },
+      {
+        field: "linkNetwork",
+      },
+    );
   }
   const clashes = db
     .query<{ name: string; project_name: string }, [string, string, string]>(
@@ -240,7 +274,10 @@ function assertLinkNetworkUsable(db: Database, projectId: string, mode: string, 
     const list = clashes.map((c) => `"${c.name}" (${c.project_name})`).join(", ");
     throw new AppError(
       "VALIDATION_ERROR",
-      `ชื่อ component ซ้ำกับ project อื่นใน link "${name}": ${list} — เปลี่ยนชื่อก่อน`,
+      {
+        th: `ชื่อ component ซ้ำกับ project อื่นใน link "${name}": ${list} — เปลี่ยนชื่อก่อน`,
+        en: `Component names clash with another project in link "${name}": ${list}. Rename them first`,
+      },
       { field: "linkNetwork" },
     );
   }
@@ -252,15 +289,26 @@ export function projectRoutes(db: Database) {
     .guard({ beforeHandle: requireAuthenticated })
     .get(
       "/",
-      ({ query }) => {
+      ({ query, requireUser }) => {
+        const user = requireUser();
         const includeArchived = query.includeArchived === "true";
+        // admin เห็นทุกโปรเจกต์ · developer/viewer เห็นเฉพาะที่เป็นสมาชิก (project_members)
+        const conditions: string[] = [];
+        const args: string[] = [];
+        if (!includeArchived) conditions.push("p.archived_at IS NULL");
+        if (user.role !== "admin") {
+          conditions.push(
+            "EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.user_id = ?)",
+          );
+          args.push(user.id);
+        }
         const rows = db
-          .query<ProjectRow, []>(
+          .query<ProjectRow, string[]>(
             `SELECT ${SELECT_COLUMNS} FROM projects p
-             ${includeArchived ? "" : "WHERE p.archived_at IS NULL"}
+             ${conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""}
              ORDER BY p.id DESC`,
           )
-          .all();
+          .all(...args);
         return { items: rows.map(toProject) };
       },
       {
@@ -287,11 +335,21 @@ export function projectRoutes(db: Database) {
     })
     .patch(
       "/:id",
-      ({ params, body, request, requireSession }) => {
+      ({ params, body, request, requireSession, requireUser }) => {
         const session = requireSession();
         const existing = loadProject(db, params.id);
         if (existing.archived_at !== null) {
-          throw new AppError("PROJECT_ARCHIVED", "project นี้ถูก archive แล้ว แก้ไขไม่ได้");
+          throw new AppError("PROJECT_ARCHIVED", {
+            th: "project นี้ถูก archive แล้ว แก้ไขไม่ได้",
+            en: "This project is archived and cannot be edited",
+          });
+        }
+        // link network ต่อโปรเจกต์นี้เข้ากับ container ของโปรเจกต์อื่น — ข้ามขอบเขตสมาชิก จึงเป็นของ admin
+        if (body.linkNetwork !== undefined && body.linkNetwork !== existing.link_network) {
+          assertAdmin(requireUser(), {
+            th: "ต้องเป็น admin จึงจะเปลี่ยน link network ได้",
+            en: "Only an admin can change the link network",
+          });
         }
         if (body.dockerfilePath !== undefined) {
           assertSafeRelativePath(body.dockerfilePath, "dockerfilePath");

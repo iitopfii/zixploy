@@ -109,9 +109,16 @@ function assertValidRepoFullName(name: string): void {
   // owner/repo — ทั้งสองส่วนต้อง non-empty, ห้ามมี slash เกิน 1 ตัว
   const parts = name.split("/");
   if (parts.length !== 2 || !parts[0] || !parts[1]) {
-    throw new AppError("VALIDATION_ERROR", "repoFullName ต้องอยู่ในรูปแบบ owner/repo", {
-      field: "repoFullName",
-    });
+    throw new AppError(
+      "VALIDATION_ERROR",
+      {
+        th: "repoFullName ต้องอยู่ในรูปแบบ owner/repo",
+        en: "repoFullName must be in the form owner/repo",
+      },
+      {
+        field: "repoFullName",
+      },
+    );
   }
 }
 
@@ -221,7 +228,10 @@ export function githubRoutes(db: Database, registry: GitHubAppRegistry) {
       ({ params }) => {
         const url = registry.getInstallUrl(params.id);
         if (!url) {
-          throw new AppError("INSTALLATION_NOT_FOUND", "ไม่พบ GitHub App นี้");
+          throw new AppError("INSTALLATION_NOT_FOUND", {
+            th: "ไม่พบ GitHub App นี้",
+            en: "GitHub App not found",
+          });
         }
         return { url };
       },
@@ -381,7 +391,10 @@ export function githubRoutes(db: Database, registry: GitHubAppRegistry) {
       async ({ params, query }) => {
         const installationId = Number(params.installationId);
         if (!installationId || Number.isNaN(installationId)) {
-          throw new AppError("VALIDATION_ERROR", "installationId ไม่ถูกต้อง");
+          throw new AppError("VALIDATION_ERROR", {
+            th: "installationId ไม่ถูกต้อง",
+            en: "Invalid installationId",
+          });
         }
 
         // ตรวจว่า installation นี้อยู่ในระบบของเรา
@@ -392,21 +405,30 @@ export function githubRoutes(db: Database, registry: GitHubAppRegistry) {
           .get(installationId);
 
         if (!row) {
-          throw new AppError("INSTALLATION_NOT_FOUND", "ไม่พบ GitHub installation นี้");
+          throw new AppError("INSTALLATION_NOT_FOUND", {
+            th: "ไม่พบ GitHub installation นี้",
+            en: "GitHub installation not found",
+          });
         }
         if (row.status === "suspended") {
-          throw new AppError(
-            "GITHUB_UNAVAILABLE",
-            "GitHub installation นี้ถูก suspend — ตรวจสอบ GitHub App settings",
-          );
+          throw new AppError("GITHUB_UNAVAILABLE", {
+            th: "GitHub installation นี้ถูก suspend — ตรวจสอบ GitHub App settings",
+            en: "This GitHub installation is suspended. Check the GitHub App settings",
+          });
         }
         if (row.status === "deleted") {
-          throw new AppError("INSTALLATION_NOT_FOUND", "GitHub installation นี้ถูกถอนการติดตั้งแล้ว");
+          throw new AppError("INSTALLATION_NOT_FOUND", {
+            th: "GitHub installation นี้ถูกถอนการติดตั้งแล้ว",
+            en: "This GitHub installation has been uninstalled",
+          });
         }
 
         const service = await registry.getServiceForInstallation(installationId);
         if (!service) {
-          throw new AppError("GITHUB_UNAVAILABLE", "GitHub App ของ installation นี้ไม่พร้อมใช้งาน");
+          throw new AppError("GITHUB_UNAVAILABLE", {
+            th: "GitHub App ของ installation นี้ไม่พร้อมใช้งาน",
+            en: "The GitHub App for this installation is unavailable",
+          });
         }
 
         const page = Math.max(1, Number(query.page ?? 1));
@@ -441,18 +463,27 @@ export function githubRoutes(db: Database, registry: GitHubAppRegistry) {
       async ({ query }) => {
         const installationId = Number(query.installationId);
         if (!installationId || Number.isNaN(installationId)) {
-          throw new AppError("VALIDATION_ERROR", "installationId ไม่ถูกต้อง");
+          throw new AppError("VALIDATION_ERROR", {
+            th: "installationId ไม่ถูกต้อง",
+            en: "Invalid installationId",
+          });
         }
 
         const { repo } = query;
         if (!repo) {
-          throw new AppError("VALIDATION_ERROR", "ต้องระบุ repo (owner/repo)");
+          throw new AppError("VALIDATION_ERROR", {
+            th: "ต้องระบุ repo (owner/repo)",
+            en: "repo (owner/repo) is required",
+          });
         }
         assertValidRepoFullName(repo);
 
         const service = await registry.getServiceForInstallation(installationId);
         if (!service) {
-          throw new AppError("GITHUB_UNAVAILABLE", "GitHub App ของ installation นี้ไม่พร้อมใช้งาน");
+          throw new AppError("GITHUB_UNAVAILABLE", {
+            th: "GitHub App ของ installation นี้ไม่พร้อมใช้งาน",
+            en: "The GitHub App for this installation is unavailable",
+          });
         }
 
         const page = Math.max(1, Number(query.page ?? 1));
@@ -482,7 +513,10 @@ export function githubRoutes(db: Database, registry: GitHubAppRegistry) {
       "/:id/source",
       async ({ params, body }) => {
         if (!isUlid(params.id)) {
-          throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+          throw new AppError("PROJECT_NOT_FOUND", {
+            th: "ไม่พบ project นี้",
+            en: "Project not found",
+          });
         }
 
         const project = db
@@ -491,9 +525,16 @@ export function githubRoutes(db: Database, registry: GitHubAppRegistry) {
           )
           .get(params.id);
 
-        if (!project) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+        if (!project)
+          throw new AppError("PROJECT_NOT_FOUND", {
+            th: "ไม่พบ project นี้",
+            en: "Project not found",
+          });
         if (project.archived_at !== null) {
-          throw new AppError("PROJECT_ARCHIVED", "project นี้ถูก archive แล้ว");
+          throw new AppError("PROJECT_ARCHIVED", {
+            th: "project นี้ถูก archive แล้ว",
+            en: "This project is archived",
+          });
         }
 
         assertValidRepoFullName(body.repoFullName);
@@ -506,18 +547,24 @@ export function githubRoutes(db: Database, registry: GitHubAppRegistry) {
           .get(body.installationId);
 
         if (!installRow) {
-          throw new AppError("INSTALLATION_NOT_FOUND", "ไม่พบ GitHub installation นี้ในระบบ");
+          throw new AppError("INSTALLATION_NOT_FOUND", {
+            th: "ไม่พบ GitHub installation นี้ในระบบ",
+            en: "GitHub installation not found in the system",
+          });
         }
         if (installRow.status !== "active") {
-          throw new AppError(
-            "GITHUB_UNAVAILABLE",
-            "GitHub installation ไม่ได้ active — reinstall หรือ unsuspend ก่อน",
-          );
+          throw new AppError("GITHUB_UNAVAILABLE", {
+            th: "GitHub installation ไม่ได้ active — reinstall หรือ unsuspend ก่อน",
+            en: "The GitHub installation is not active. Reinstall or unsuspend it first",
+          });
         }
 
         const service = await registry.getServiceForInstallation(body.installationId);
         if (!service) {
-          throw new AppError("GITHUB_UNAVAILABLE", "GitHub App ของ installation นี้ไม่พร้อมใช้งาน");
+          throw new AppError("GITHUB_UNAVAILABLE", {
+            th: "GitHub App ของ installation นี้ไม่พร้อมใช้งาน",
+            en: "The GitHub App for this installation is unavailable",
+          });
         }
 
         // validate repo access ผ่าน GitHub API
@@ -525,7 +572,10 @@ export function githubRoutes(db: Database, registry: GitHubAppRegistry) {
         if (validatedRepo.id !== body.repoId) {
           throw new AppError(
             "VALIDATION_ERROR",
-            "repoId ไม่ตรงกับ repository — ส่ง ID ที่ได้จาก GitHub API โดยตรง",
+            {
+              th: "repoId ไม่ตรงกับ repository — ส่ง ID ที่ได้จาก GitHub API โดยตรง",
+              en: "repoId does not match the repository. Send the ID returned by the GitHub API",
+            },
             { field: "repoId" },
           );
         }
@@ -577,7 +627,10 @@ export function githubRoutes(db: Database, registry: GitHubAppRegistry) {
       "/:id/source",
       ({ params }) => {
         if (!isUlid(params.id)) {
-          throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+          throw new AppError("PROJECT_NOT_FOUND", {
+            th: "ไม่พบ project นี้",
+            en: "Project not found",
+          });
         }
 
         const project = db
@@ -586,9 +639,16 @@ export function githubRoutes(db: Database, registry: GitHubAppRegistry) {
           )
           .get(params.id);
 
-        if (!project) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+        if (!project)
+          throw new AppError("PROJECT_NOT_FOUND", {
+            th: "ไม่พบ project นี้",
+            en: "Project not found",
+          });
         if (project.archived_at !== null) {
-          throw new AppError("PROJECT_ARCHIVED", "project นี้ถูก archive แล้ว");
+          throw new AppError("PROJECT_ARCHIVED", {
+            th: "project นี้ถูก archive แล้ว",
+            en: "This project is archived",
+          });
         }
 
         // reset กลับเป็น baseline 'github' ที่ยังไม่เชื่อม — ล้าง dockerfile_content ด้วยเผื่อเคยตั้งไว้

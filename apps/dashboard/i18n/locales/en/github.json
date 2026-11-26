@@ -1,0 +1,72 @@
+{
+  "github": {
+    "subtitle": "Manage the GitHub Apps that connect repositories to projects",
+    "callback": {
+      "appCreated": "GitHub App created",
+      "appCreatedNamed": "GitHub App \"{name}\" created",
+      "installed": "GitHub App installed",
+      "installedNamed": "Installed on {account}",
+      "manifestError": "Could not create the GitHub App. The code has expired or was already used. Try again.",
+      "error": "Something went wrong. Try again."
+    },
+    "masterKey": {
+      "title": "Master key is not configured",
+      "body": "GitHub App credentials must be encrypted before they are stored in the database. Set {file} to a file containing a 32-byte key (base64), then restart the Control API.",
+      "bodyShort": "GitHub App credentials must be encrypted before they are stored. Set {file} on the server, then restart the Control API.",
+      "detailsLink": "See details in GitHub Apps settings"
+    },
+    "apps": {
+      "yours": "Your GitHub Apps",
+      "create": "Create GitHub App",
+      "createIntro": "Zixploy creates the GitHub App for you. GitHub asks you to confirm, then sends the credentials back (stored encrypted, no need to copy a key yourself).",
+      "name": "App name",
+      "namePlaceholder": "e.g. Zixploy Deploy",
+      "nameHint": "{n}/34. The name must not match any other App on GitHub.",
+      "organization": "Organization (empty = personal account)",
+      "opening": "Opening GitHub…",
+      "createOnGithub": "Create on GitHub",
+      "empty": "No GitHub App yet",
+      "emptyHint": "Create your first app to connect a repository",
+      "onGithub": "On GitHub",
+      "notInstalled": "Not installed on any account yet",
+      "addInstallation": "Add installation",
+      "install": "Install",
+      "deleteTitle": "Delete GitHub App",
+      "deleteMessage": "This removes the app from Zixploy. Its installations are disconnected and auto deploy is turned off for the related projects. The app still exists on GitHub and must be deleted in GitHub settings."
+    },
+    "error": {
+      "nameRequired": "Enter an app name",
+      "nameTooLong": "The app name must be 34 characters or fewer (GitHub limit)",
+      "manifest": "Could not create the manifest",
+      "installUrl": "Could not create the install URL"
+    },
+    "connect": {
+      "createHint": "Create an app in settings to connect a repository",
+      "askAdmin": "Ask an admin to create and install a GitHub App before you connect a repository",
+      "notInstalled": "A GitHub App exists but is not installed on any account yet",
+      "redirecting": "Redirecting…",
+      "installApp": "Install {name}",
+      "via": "via {name}",
+      "manage": "Manage GitHub Apps"
+    },
+    "picker": {
+      "unnamedApp": "GitHub App (unnamed)",
+      "noApps": "No GitHub App is installed yet. Create and install one in settings first.",
+      "accountCount": "{n} account | {n} accounts",
+      "changeApp": "Change app",
+      "suspended": "This GitHub installation is suspended. Unsuspend it in the GitHub App settings first.",
+      "searchRepo": "Search repositories…",
+      "reposFailed": "Could not load repositories",
+      "prev": "Previous",
+      "next": "Next",
+      "page": "Page {page} / {total}",
+      "noRepoMatch": "No repository matches \"{query}\"",
+      "noRepos": "No accessible repositories. Check the GitHub App permissions.",
+      "changeRepo": "Change repository",
+      "searchBranch": "Search branches…",
+      "branchesFailed": "Could not load branches",
+      "selectBranch": "Use this branch",
+      "noBranchMatch": "No branch matches \"{query}\""
+    }
+  }
+}

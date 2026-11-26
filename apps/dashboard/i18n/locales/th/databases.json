@@ -1,0 +1,116 @@
+{
+  "databases": {
+    "subtitle": "ฐานข้อมูลสำเร็จรูป กดสร้างแล้วใช้ได้เลย ไม่ต้องเขียน Dockerfile",
+    "reload": "โหลดใหม่",
+    "add": "เพิ่ม Database",
+    "pickType": "เลือกชนิดฐานข้อมูล",
+    "deletePermanently": "ลบถาวร",
+    "error": {
+      "load": "โหลดรายการ database ไม่สำเร็จ",
+      "create": "สร้างไม่สำเร็จ"
+    },
+    "status": {
+      "creating": "กำลังสร้าง",
+      "starting": "กำลังเริ่ม",
+      "running": "ทำงานอยู่",
+      "stopped": "หยุดแล้ว",
+      "failed": "ล้มเหลว",
+      "deleting": "กำลังลบ"
+    },
+    "interval": {
+      "h6": "ทุก 6 ชั่วโมง",
+      "h12": "ทุก 12 ชั่วโมง",
+      "h24": "ทุกวัน",
+      "h168": "ทุกสัปดาห์",
+      "other": "ทุก {n} ชม."
+    },
+    "form": {
+      "name": "ชื่อ",
+      "nameHintFull": "ใช้เป็นชื่อ user และชื่อ database ด้วย",
+      "nameHintAccessKey": "ใช้เป็น access key ด้วย",
+      "version": "เวอร์ชัน",
+      "versionHint": "เลือกได้เฉพาะเวอร์ชันที่ทดสอบแล้ว",
+      "expose": "เปิด port ให้ต่อจากภายนอกเครื่อง",
+      "exposeHint": "ไม่เปิด = ต่อได้เฉพาะ app ที่รันอยู่บนเซิร์ฟเวอร์นี้ (ปลอดภัยที่สุด) เปิดเมื่อต้องการต่อด้วย DBeaver/TablePlus จากเครื่องตัวเอง",
+      "serverPort": "Port บนเซิร์ฟเวอร์",
+      "exposeNoAuthWarning": "{name} ไม่มีรหัสผ่าน — เปิด port แล้วใครก็ตามที่รู้ IP ใช้ได้ทันที ควรเปิดเฉพาะเมื่อมี firewall จำกัด IP ต้นทางแล้วเท่านั้น",
+      "exposeWarning": "port นี้จะเปิดออกอินเทอร์เน็ต ใครก็ตามที่รู้ IP และรหัสผ่านจะต่อได้ — ตั้ง firewall จำกัด IP ต้นทางด้วยถ้าเป็นไปได้",
+      "memoryHint": "จอง RAM {mb} MB — ตรวจว่าเซิร์ฟเวอร์มี RAM ว่างพอก่อนสร้าง",
+      "submit": "สร้าง {name}"
+    },
+    "empty": {
+      "title": "ยังไม่มีฐานข้อมูล",
+      "hint": "เพิ่ม PostgreSQL (pgvector), MySQL, Redis, MongoDB, MinIO หรือ ClamAV ได้ในไม่กี่คลิก"
+    },
+    "card": {
+      "internal": "ต่อภายใน",
+      "copyHost": "คัดลอก host",
+      "externalPort": "Port ภายนอก",
+      "portClosed": "ปิด (ปลอดภัย)",
+      "noSchedule": "ไม่ได้ตั้งเวลา",
+      "lastBackup": "— ล่าสุด {time}"
+    },
+    "action": {
+      "credentials": "ข้อมูลเชื่อมต่อ",
+      "stop": "หยุด",
+      "start": "เริ่ม",
+      "restart": "รีสตาร์ท"
+    },
+    "creds": {
+      "host": "Host (ภายในเซิร์ฟเวอร์)",
+      "secretWarning": "รหัสผ่านนี้เป็นความลับ — อย่าแชร์หรือ commit ลง repository",
+      "internalUri": "Connection string (จาก app ในเซิร์ฟเวอร์นี้)",
+      "externalUri": "Connection string (จากเครื่องภายนอก)",
+      "serverIpHint": "แทน {placeholder} ด้วย IP จริงของเซิร์ฟเวอร์"
+    },
+    "confirmDelete": {
+      "title": "ลบ database",
+      "message": "container และข้อมูลทั้งหมดใน volume จะถูกลบถาวร กู้คืนไม่ได้"
+    },
+    "backups": {
+      "auto": "สำรองข้อมูลอัตโนมัติตามตารางเวลา",
+      "frequency": "ความถี่",
+      "retention": "เก็บไว้ล่าสุดกี่ชุด",
+      "saveSettings": "บันทึกการตั้งค่า",
+      "history": "ประวัติ backup",
+      "triggering": "กำลังสั่ง…",
+      "backupNow": "สำรองข้อมูลตอนนี้",
+      "empty": "ยังไม่มี backup",
+      "download": "ดาวน์โหลด",
+      "error": {
+        "load": "โหลดประวัติ backup ไม่สำเร็จ",
+        "saveSettings": "บันทึกการตั้งค่าไม่สำเร็จ",
+        "trigger": "สั่ง backup ไม่สำเร็จ"
+      },
+      "status": {
+        "running": "กำลังสำรอง…",
+        "succeeded": "สำเร็จ",
+        "failed": "ล้มเหลว"
+      },
+      "trigger": {
+        "manual": "สั่งเอง",
+        "scheduled": "ตามตารางเวลา"
+      },
+      "confirmDelete": {
+        "title": "ลบ backup",
+        "message": "ไฟล์ backup ชุดนี้จะถูกลบถาวร กู้คืนไม่ได้"
+      },
+      "confirmRestore": {
+        "message": "ข้อมูลปัจจุบันทั้งหมดใน database นี้จะถูกเขียนทับด้วยข้อมูลจาก backup ชุดนี้ทันที — ย้อนกลับไม่ได้ (แนะนำให้สำรองข้อมูลปัจจุบันไว้ก่อนถ้ายังต้องการ)",
+        "confirm": "เขียนทับและ Restore"
+      }
+    },
+    "logs": {
+      "loadError": "โหลด log ไม่ได้",
+      "reconnect": "รีเชื่อม",
+      "clear": "ล้าง",
+      "waiting": "รอ log จาก container…"
+    },
+    "terminal": {
+      "connectError": "เชื่อมต่อ terminal ไม่สำเร็จ",
+      "connecting": "กำลังเชื่อมต่อ…",
+      "ended": "จบเซสชันแล้ว",
+      "failed": "เชื่อมต่อไม่สำเร็จ"
+    }
+  }
+}

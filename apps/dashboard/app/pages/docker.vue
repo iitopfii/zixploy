@@ -6,12 +6,13 @@
  * (control-api ไม่แตะ Docker เอง) — หน้านี้อ่านอย่างเดียว ไม่มีปุ่มสั่ง start/stop/ลบ
  */
 const api = useApi();
+const { t } = useI18n();
 
 const { data, pending, error, refresh } = await useAsyncData(
   "docker-inventory",
   async () => {
     const { data: body, error: apiError } = await api.api.v1.system.docker.get();
-    if (apiError) throw new Error("โหลด docker inventory ไม่สำเร็จ");
+    if (apiError) throw new Error(t("docker.error.load"));
     return body;
   },
   { server: false },
@@ -82,13 +83,13 @@ async function startImport(containerId: string, containerName: string) {
       .containers({ containerId })
       .import.post({});
     if (error) {
-      importError.value = apiMessage(error) ?? "เริ่มนำเข้าไม่สำเร็จ";
+      importError.value = apiErrorMessage(error, "docker.error.importStart");
       return;
     }
     projectName.value = containerName.replace(/^\//, "");
     await pollPreview(data.id);
   } catch {
-    importError.value = "ติดต่อ API ไม่ได้";
+    importError.value = t("common.apiUnreachable");
   } finally {
     importing.value = null;
   }
@@ -99,7 +100,7 @@ async function pollPreview(id: string) {
   for (let i = 0; i < 20; i++) {
     const { data, error } = await api.api.v1.system.docker.imports({ id }).get();
     if (error) {
-      importError.value = apiMessage(error) ?? "อ่านสถานะไม่สำเร็จ";
+      importError.value = apiErrorMessage(error, "docker.error.status");
       return;
     }
     if (data.status === "inspected" || data.status === "done") {
@@ -107,12 +108,12 @@ async function pollPreview(id: string) {
       return;
     }
     if (data.status === "failed") {
-      importError.value = data.failureMessage ?? "อ่าน config ของ container ไม่สำเร็จ";
+      importError.value = data.failureMessage ?? t("docker.error.inspect");
       return;
     }
     await new Promise((r) => setTimeout(r, 1000));
   }
-  importError.value = "รอ worker นานเกินไป — ตรวจว่า deploy-worker ทำงานอยู่";
+  importError.value = t("docker.error.workerTimeout");
 }
 
 async function confirmImport() {
@@ -124,7 +125,7 @@ async function confirmImport() {
       .imports({ id: preview.value.id })
       .confirm.post({ projectName: projectName.value.trim() || undefined });
     if (error) {
-      importError.value = apiMessage(error) ?? "ยืนยันไม่สำเร็จ";
+      importError.value = apiErrorMessage(error, "docker.error.confirm");
       return;
     }
     // worker สร้าง project ให้ — รอจน done แล้วพาไปหน้า project
@@ -136,19 +137,15 @@ async function confirmImport() {
         return;
       }
       if (data?.status === "failed") {
-        importError.value = data.failureMessage ?? "นำเข้าไม่สำเร็จ";
+        importError.value = data.failureMessage ?? t("docker.error.import");
         return;
       }
       await new Promise((r) => setTimeout(r, 1000));
     }
-    importError.value = "รอนานเกินไป — ลองดูสถานะอีกครั้งภายหลัง";
+    importError.value = t("docker.error.timeout");
   } finally {
     confirming.value = false;
   }
-}
-
-function apiMessage(error: unknown): string | undefined {
-  return (error as { value?: { error?: { message?: string } } } | null)?.value?.error?.message;
 }
 
 const STATE_TONE: Record<string, string> = {
@@ -170,14 +167,19 @@ function stateTone(state: string) {
       <div>
         <h1>Docker</h1>
         <p class="muted small">
-          container และ image ทั้งหมดบนเซิร์ฟเวอร์ (อ่านอย่างเดียว)
+          {{ $t("docker.subtitle") }}
         </p>
       </div>
       <div class="actions">
         <span v-if="data?.capturedAt" class="muted small" :title="fullDateTime(data.capturedAt)">
-          อัปเดต {{ timeAgo(data.capturedAt) }}
+          {{ $t("docker.updated", { time: timeAgo(data.capturedAt) }) }}
         </span>
-        <button class="secondary icon" title="โหลดใหม่" aria-label="โหลดใหม่" @click="refresh()">
+        <button
+          class="secondary icon"
+          :title="$t('docker.reload')"
+          :aria-label="$t('docker.reload')"
+          @click="refresh()"
+        >
           <AppIcon name="rotate" :size="15" />
         </button>
       </div>
@@ -191,23 +193,23 @@ function stateTone(state: string) {
 
     <p v-else-if="error" class="alert alert-bad">
       <AppIcon name="alert" :size="15" />
-      <span>โหลดข้อมูลไม่สำเร็จ — ลองโหลดใหม่</span>
+      <span>{{ $t("docker.loadFailed") }}</span>
     </p>
 
     <!-- worker ยังไม่เคยกวาด (เพิ่งติดตั้ง/worker ไม่ทำงาน) -->
     <div v-else-if="!data?.capturedAt" class="card">
       <div class="empty">
         <span class="empty-icon"><AppIcon name="box" :size="20" /></span>
-        <span class="empty-title">ยังไม่มีข้อมูล</span>
+        <span class="empty-title">{{ $t("docker.empty.title") }}</span>
         <p class="small">
-          รอ worker เก็บข้อมูลรอบแรก (~30 วินาที) — ถ้าค้างนาน ตรวจว่า deploy-worker ทำงานอยู่
+          {{ $t("docker.empty.hint") }}
         </p>
       </div>
     </div>
 
     <template v-else>
       <div class="row-between wrap">
-        <nav class="tabs" aria-label="ประเภทข้อมูล">
+        <nav class="tabs" :aria-label="$t('docker.tabsLabel')">
           <button
             class="tab"
             :class="{ active: tab === 'containers' }"
@@ -225,24 +227,24 @@ function stateTone(state: string) {
           v-model="filter"
           class="filter-input"
           type="search"
-          placeholder="ค้นหาชื่อ / image…"
+          :placeholder="$t('docker.filterPlaceholder')"
         />
       </div>
 
       <!-- ── Containers ── -->
       <div v-if="tab === 'containers'" class="card stack">
         <p class="muted small">
-          ทำงานอยู่ {{ runningCount }} จาก {{ data.containers.length }} container
+          {{ $t("docker.runningSummary", { running: runningCount, total: data.containers.length }) }}
         </p>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>ชื่อ</th>
-                <th>สถานะ</th>
+                <th>{{ $t("docker.col.name") }}</th>
+                <th>{{ $t("docker.col.state") }}</th>
                 <th>Image</th>
                 <th>Ports</th>
-                <th>ที่มา</th>
+                <th>{{ $t("docker.col.source") }}</th>
                 <th />
               </tr>
             </thead>
@@ -260,7 +262,7 @@ function stateTone(state: string) {
                 <td class="mono small">{{ c.ports ?? "—" }}</td>
                 <td>
                   <span class="badge" :class="c.managed ? 'tone-ok' : 'tone-idle'">
-                    {{ c.managed ? "Zixploy" : "อื่น ๆ" }}
+                    {{ c.managed ? "Zixploy" : $t("docker.sourceOther") }}
                   </span>
                 </td>
                 <td>
@@ -271,14 +273,20 @@ function stateTone(state: string) {
                     @click="startImport(c.containerId, c.name)"
                   >
                     <span v-if="importing === c.containerId" class="spinner" />
-                    {{ importing === c.containerId ? "กำลังอ่าน…" : "นำเข้า" }}
+                    {{
+                      importing === c.containerId
+                        ? $t("docker.import.reading")
+                        : $t("docker.import.action")
+                    }}
                   </button>
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
-        <p v-if="containers.length === 0" class="muted small">ไม่พบ container ที่ตรงกับคำค้น</p>
+        <p v-if="containers.length === 0" class="muted small">
+          {{ $t("docker.noContainers") }}
+        </p>
       </div>
 
       <!-- ── Images ── -->
@@ -290,9 +298,9 @@ function stateTone(state: string) {
                 <th>Repository</th>
                 <th>Tag</th>
                 <th>Image ID</th>
-                <th>ขนาด</th>
-                <th>สร้างเมื่อ</th>
-                <th>ที่มา</th>
+                <th>{{ $t("docker.col.size") }}</th>
+                <th>{{ $t("docker.col.created") }}</th>
+                <th>{{ $t("docker.col.source") }}</th>
               </tr>
             </thead>
             <tbody>
@@ -304,14 +312,14 @@ function stateTone(state: string) {
                 <td class="small muted">{{ i.createdSince ?? "—" }}</td>
                 <td>
                   <span class="badge" :class="i.managed ? 'tone-ok' : 'tone-idle'">
-                    {{ i.managed ? "Zixploy" : "อื่น ๆ" }}
+                    {{ i.managed ? "Zixploy" : $t("docker.sourceOther") }}
                   </span>
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
-        <p v-if="images.length === 0" class="muted small">ไม่พบ image ที่ตรงกับคำค้น</p>
+        <p v-if="images.length === 0" class="muted small">{{ $t("docker.noImages") }}</p>
       </div>
 
       <!-- error ของการนำเข้า (แสดงนอก dialog เพราะอาจพังตั้งแต่ยังไม่มี preview) -->
@@ -325,16 +333,22 @@ function stateTone(state: string) {
         <div v-if="preview" class="backdrop" @click.self="preview = null">
           <div class="dialog card stack">
             <div>
-              <h2 class="section-title">นำเข้า {{ preview.containerName }}</h2>
-              <p class="muted small">
-                สร้าง project จาก container นี้โดย<strong>ไม่แตะ container เดิม</strong> —
-                ของเดิมยังทำงานต่อ และจะยังไม่ deploy จนกว่าคุณจะกดเอง
-              </p>
+              <h2 class="section-title">
+                {{ $t("docker.import.title", { name: preview.containerName }) }}
+              </h2>
+              <i18n-t scope="global" keypath="docker.import.intro" tag="p" class="muted small">
+                <template #emphasis>
+                  <strong>{{ $t("docker.import.introEmphasis") }}</strong>
+                </template>
+              </i18n-t>
             </div>
 
             <label>
-              <span>ชื่อ project</span>
-              <input v-model="projectName" placeholder="ชื่อที่จะใช้ในระบบ" />
+              <span>{{ $t("docker.import.projectName") }}</span>
+              <input
+                v-model="projectName"
+                :placeholder="$t('docker.import.projectNamePlaceholder')"
+              />
             </label>
 
             <dl class="kv">
@@ -367,17 +381,16 @@ function stateTone(state: string) {
                 <template v-if="preview.envKeys.length">
                   <code v-for="k in preview.envKeys" :key="k" class="small port-chip">{{ k }}</code>
                   <p class="muted tiny">
-                    ค่าจะถูกอ่านจาก container แล้วเข้ารหัสเก็บตอนยืนยัน — ค่าไม่เคยผ่านหน้าเว็บ
+                    {{ $t("docker.import.envNote") }}
                   </p>
                 </template>
-                <span v-else class="muted small">ไม่มี</span>
+                <span v-else class="muted small">{{ $t("common.none") }}</span>
               </dd>
             </dl>
 
             <p class="muted small">
               <AppIcon name="info" :size="13" />
-              volume ที่ container เดิมใช้จะยังไม่ถูกผูกให้อัตโนมัติ — เพิ่มได้ที่แท็บ Volumes
-              ของ project หลังนำเข้า
+              {{ $t("docker.import.volumeNote") }}
             </p>
 
             <p v-if="importError" class="alert alert-bad small">
@@ -388,9 +401,11 @@ function stateTone(state: string) {
             <div class="actions">
               <button class="primary" :disabled="confirming" @click="confirmImport">
                 <span v-if="confirming" class="spinner" />
-                {{ confirming ? "กำลังสร้าง…" : "สร้าง project" }}
+                {{ confirming ? $t("common.creating") : $t("docker.import.create") }}
               </button>
-              <button class="secondary" :disabled="confirming" @click="preview = null">ยกเลิก</button>
+              <button class="secondary" :disabled="confirming" @click="preview = null">
+                {{ $t("common.cancel") }}
+              </button>
             </div>
           </div>
         </div>
@@ -398,8 +413,7 @@ function stateTone(state: string) {
 
       <p class="muted small note">
         <AppIcon name="info" :size="13" />
-        รายการนี้เป็น snapshot ที่ worker กวาดทุก ~30 วินาที — image ที่ไม่ได้ใช้ลบได้ที่
-        Monitoring → ล้างพื้นที่
+        {{ $t("docker.snapshotNote") }}
       </p>
     </template>
   </div>

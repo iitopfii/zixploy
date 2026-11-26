@@ -19,6 +19,7 @@ interface LogLine {
 }
 
 const api = useApi();
+const { t } = useI18n();
 const logs = ref<LogLine[]>([]);
 const loading = ref(true);
 const error = ref("");
@@ -39,13 +40,13 @@ async function load() {
       .services({ id: props.serviceId })
       .logs.get({ query: {} });
     if (apiError) {
-      error.value = "โหลด log ไม่ได้";
+      error.value = t("databases.logs.loadError");
       return;
     }
     logs.value = (data?.logs ?? []) as LogLine[];
     startSse();
   } catch {
-    error.value = "ติดต่อ API ไม่ได้";
+    error.value = t("common.apiUnreachable");
   } finally {
     loading.value = false;
   }
@@ -121,7 +122,7 @@ function onScroll() {
 }
 
 function fmtTime(ms: number) {
-  return new Date(ms).toLocaleString("th-TH", { timeStyle: "short" });
+  return new Date(ms).toLocaleString(localeTag(), { timeStyle: "short" });
 }
 </script>
 
@@ -131,7 +132,7 @@ function fmtTime(ms: number) {
       <div class="dialog card" role="dialog" aria-modal="true">
         <div class="row-between">
           <h2 class="section-title truncate">Logs — {{ serviceName }}</h2>
-          <button class="ghost icon small" aria-label="ปิด" @click="emit('close')">
+          <button class="ghost icon small" :aria-label="$t('common.close')" @click="emit('close')">
             <AppIcon name="x" :size="15" />
           </button>
         </div>
@@ -140,9 +141,9 @@ function fmtTime(ms: number) {
           <span class="status status-running is-live">LIVE</span>
           <button class="secondary small" @click="load">
             <AppIcon name="refresh" :size="13" />
-            รีเชื่อม
+            {{ $t("databases.logs.reconnect") }}
           </button>
-          <button class="ghost small" @click="logs = []">ล้าง</button>
+          <button class="ghost small" @click="logs = []">{{ $t("databases.logs.clear") }}</button>
           <span class="spacer" />
           <label class="autoscroll-label">
             <input v-model="autoScroll" type="checkbox" />
@@ -160,7 +161,9 @@ function fmtTime(ms: number) {
             <span class="skeleton" style="height: 14px; width: 90%" />
             <span class="skeleton" style="height: 14px; width: 75%" />
           </div>
-          <p v-else-if="logs.length === 0" class="muted small center">รอ log จาก container…</p>
+          <p v-else-if="logs.length === 0" class="muted small center">
+            {{ $t("databases.logs.waiting") }}
+          </p>
           <div
             v-for="l in logs"
             :key="l.seq"

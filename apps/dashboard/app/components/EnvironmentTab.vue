@@ -9,6 +9,8 @@
 const props = defineProps<{ projectId: string; archived: boolean }>();
 
 const api = useApi();
+const { t } = useI18n();
+const { canWrite } = usePermissions();
 
 // ---------------------------------------------------------------------------
 // Scope selector (Phase 18 · F) — project-wide หรือ env เจาะจง component (compose)
@@ -57,12 +59,12 @@ async function fetchEnv() {
       .projects({ id: props.projectId })
       .environment.get(scopeQuery());
     if (error) {
-      loadError.value = "โหลด env vars ไม่ได้";
+      loadError.value = t("environment.error.load");
       return;
     }
     existingMeta.value = (data?.variables ?? []) as EnvMeta[];
   } catch {
-    loadError.value = "ติดต่อ API ไม่ได้";
+    loadError.value = t("common.apiUnreachable");
   } finally {
     loading.value = false;
   }
@@ -149,8 +151,7 @@ async function importDotEnv() {
         content: importContent.value,
       });
     if (error) {
-      const msg = (error.value as { error?: { message?: string } } | null)?.error?.message;
-      importError.value = msg ?? "parse ไม่ได้";
+      importError.value = apiErrorMessage(error, "environment.import.failed");
       return;
     }
     // Merge parsed vars into editor (don't overwrite existing keys that have values)
@@ -174,10 +175,10 @@ async function importDotEnv() {
     showImport.value = false;
     importContent.value = "";
     if (data?.warnings?.length) {
-      saveError.value = `คำเตือน: ${data.warnings.join(", ")}`;
+      saveError.value = t("environment.import.warnings", { list: data.warnings.join(", ") });
     }
   } catch {
-    importError.value = "ติดต่อ API ไม่ได้";
+    importError.value = t("common.apiUnreachable");
   } finally {
     importing.value = false;
   }
@@ -216,15 +217,14 @@ async function save() {
       .projects({ id: props.projectId })
       .environment.put({ variables }, scopeQuery());
     if (error) {
-      const msg = (error.value as { error?: { message?: string } } | null)?.error?.message;
-      saveError.value = msg ?? "บันทึกไม่สำเร็จ";
+      saveError.value = apiErrorMessage(error, "common.saveFailed");
       return;
     }
     saveOk.value = true;
     dirty.value = false;
     await fetchEnv();
   } catch {
-    saveError.value = "ติดต่อ API ไม่ได้";
+    saveError.value = t("common.apiUnreachable");
   } finally {
     saving.value = false;
   }
@@ -253,12 +253,12 @@ async function checkDecryption() {
       .projects({ id: props.projectId })
       .environment.health.get();
     if (error || !data) {
-      checkError.value = "ตรวจสอบไม่สำเร็จ";
+      checkError.value = t("environment.check.failed");
       return;
     }
     checkResult.value = { total: data.total, broken: data.broken };
   } catch {
-    checkError.value = "ติดต่อ API ไม่ได้";
+    checkError.value = t("common.apiUnreachable");
   } finally {
     checking.value = false;
   }
@@ -267,7 +267,7 @@ async function checkDecryption() {
 function brokenLabel(b: BrokenEnvKey): string {
   if (!b.componentId) return b.key;
   const name = components.value.find((c) => c.id === b.componentId)?.name ?? b.componentId;
-  return `${b.key} (component: ${name})`;
+  return t("environment.check.brokenInComponent", { key: b.key, name });
 }
 </script>
 
@@ -280,15 +280,19 @@ function brokenLabel(b: BrokenEnvKey): string {
           v-if="!archived"
           class="secondary small"
           :disabled="checking"
-          title="ตรวจว่าค่าที่บันทึกไว้ยังถอดรหัสได้ด้วย master key ปัจจุบัน"
+          :title="$t('environment.check.title')"
           @click="checkDecryption"
         >
           <span v-if="checking" class="spinner" />
-          {{ checking ? "กำลังตรวจ…" : "ตรวจสอบการถอดรหัส" }}
+          {{ checking ? $t("environment.check.working") : $t("environment.check.action") }}
         </button>
-        <button v-if="!archived" class="secondary small" @click="showImport = !showImport">
+        <button
+          v-if="canWrite && !archived"
+          class="secondary small"
+          @click="showImport = !showImport"
+        >
           <AppIcon :name="showImport ? 'x' : 'copy'" :size="13" />
-          {{ showImport ? "ปิด" : "Import .env" }}
+          {{ showImport ? $t("common.close") : "Import .env" }}
         </button>
       </div>
     </div>
@@ -300,18 +304,24 @@ function brokenLabel(b: BrokenEnvKey): string {
     </p>
     <p v-else-if="checkResult && checkResult.total === 0" class="alert alert-ok small">
       <AppIcon name="check" :size="13" />
-      <span>ยังไม่มี environment variable ให้ตรวจ</span>
+      <span>{{ $t("environment.check.none") }}</span>
     </p>
     <p v-else-if="checkResult && checkResult.broken.length === 0" class="alert alert-ok small">
       <AppIcon name="check" :size="13" />
-      <span>ตรวจแล้ว {{ checkResult.total }} ตัว — ถอดรหัสได้ทั้งหมด</span>
+      <span>
+        {{ $t("environment.check.allOk", { n: checkResult.total }, checkResult.total) }}
+      </span>
     </p>
     <div v-else-if="checkResult" class="alert alert-bad small broken-list">
       <AppIcon name="alert" :size="13" />
       <div>
         <p>
-          {{ checkResult.broken.length }} จาก {{ checkResult.total }} ตัวถอดรหัสไม่ได้
-          (master key อาจเปลี่ยน) — deploy จะไม่ได้ค่าเหล่านี้ กรอกค่าใหม่แล้วบันทึกเพื่อเข้ารหัสใหม่:
+          {{
+            $t("environment.check.broken", {
+              broken: checkResult.broken.length,
+              total: checkResult.total,
+            })
+          }}
         </p>
         <p class="mono">{{ checkResult.broken.map(brokenLabel).join(", ") }}</p>
       </div>
@@ -319,19 +329,21 @@ function brokenLabel(b: BrokenEnvKey): string {
 
     <!-- Scope selector — เฉพาะ compose project ที่มี component (Phase 18 · F) -->
     <label v-if="components.length > 0" class="scope-select">
-      <span>ขอบเขต</span>
+      <span>{{ $t("environment.scope.label") }}</span>
       <select v-model="scope" :disabled="archived">
-        <option value="">ทั้งโปรเจกต์ (project-wide)</option>
-        <option v-for="c in components" :key="c.id" :value="c.id">component: {{ c.name }}</option>
+        <option value="">{{ $t("environment.scope.project") }}</option>
+        <option v-for="c in components" :key="c.id" :value="c.id">
+          {{ $t("environment.scope.component", { name: c.name }) }}
+        </option>
       </select>
       <small class="muted">
-        {{ scope ? "env นี้ใช้เฉพาะ component ที่เลือก (override ค่าระดับโปรเจกต์)" : "env นี้ใช้กับทุก component" }}
+        {{ scope ? $t("environment.scope.componentHint") : $t("environment.scope.projectHint") }}
       </small>
     </label>
 
     <!-- Import panel -->
-    <div v-if="showImport" class="inset stack">
-      <p class="muted small">วาง .env content (KEY=VALUE) — ตรวจสอบก่อน save</p>
+    <div v-if="showImport && canWrite" class="inset stack">
+      <p class="muted small">{{ $t("environment.import.hint") }}</p>
       <textarea
         v-model="importContent"
         class="mono"
@@ -345,13 +357,13 @@ function brokenLabel(b: BrokenEnvKey): string {
       <div class="actions">
         <button class="primary small" :disabled="importing || !importContent.trim()" @click="importDotEnv">
           <span v-if="importing" class="spinner" />
-          {{ importing ? "กำลัง parse…" : "Parse & Merge" }}
+          {{ importing ? $t("environment.import.working") : "Parse & Merge" }}
         </button>
         <button
           class="secondary small"
           @click="showImport = false; importContent = ''; importError = ''"
         >
-          ยกเลิก
+          {{ $t("common.cancel") }}
         </button>
       </div>
     </div>
@@ -381,17 +393,17 @@ function brokenLabel(b: BrokenEnvKey): string {
             v-model="row.key"
             class="mono"
             placeholder="KEY"
-            :disabled="archived"
+            :disabled="archived || !canWrite"
             @input="onRowChange"
           />
           <input
             v-model="row.value"
             :type="row.isSecret ? 'password' : 'text'"
-            :placeholder="row.isExisting ? '(ไม่เปลี่ยน)' : 'value'"
-            :disabled="archived"
+            :placeholder="row.isExisting ? $t('environment.unchanged') : 'value'"
+            :disabled="archived || !canWrite"
             @input="onRowChange"
           />
-          <select v-model="row.scope" :disabled="archived" @change="onRowChange">
+          <select v-model="row.scope" :disabled="archived || !canWrite" @change="onRowChange">
             <option value="runtime">runtime</option>
             <option value="build">build</option>
             <option value="both">both</option>
@@ -400,21 +412,21 @@ function brokenLabel(b: BrokenEnvKey): string {
             v-model="row.isSecret"
             type="checkbox"
             title="Secret"
-            :disabled="archived"
+            :disabled="archived || !canWrite"
             @change="onRowChange"
           />
           <input
             v-model="row.enabled"
             type="checkbox"
             title="Enabled"
-            :disabled="archived"
+            :disabled="archived || !canWrite"
             @change="onRowChange"
           />
           <button
-            v-if="!archived"
+            v-if="canWrite && !archived"
             class="danger tiny icon"
-            title="ลบแถวนี้"
-            aria-label="ลบแถวนี้"
+            :title="$t('environment.removeRow')"
+            :aria-label="$t('environment.removeRow')"
             @click="removeRow(i)"
           >
             <AppIcon name="x" :size="12" />
@@ -423,12 +435,12 @@ function brokenLabel(b: BrokenEnvKey): string {
         </div>
       </div>
 
-      <p v-if="rows.length === 0 && !dirty" class="muted small">ยังไม่มี environment variables</p>
+      <p v-if="rows.length === 0 && !dirty" class="muted small">{{ $t("environment.empty") }}</p>
 
       <div class="row-between wrap env-footer">
-        <button v-if="!archived" class="secondary small" @click="addRow">
+        <button v-if="canWrite && !archived" class="secondary small" @click="addRow">
           <AppIcon name="plus" :size="13" />
-          เพิ่ม variable
+          {{ $t("environment.addVariable") }}
         </button>
         <div class="row wrap save-area">
           <p v-if="saveError" class="alert alert-bad small">
@@ -437,12 +449,19 @@ function brokenLabel(b: BrokenEnvKey): string {
           </p>
           <p v-if="saveOk" class="alert alert-ok small">
             <AppIcon name="check" :size="13" />
-            <span>บันทึกแล้ว</span>
+            <span>{{ $t("common.saved") }}</span>
           </p>
-          <button v-if="dirty && !archived" class="secondary small" @click="initRows">ยกเลิก</button>
-          <button v-if="!archived" class="primary" :disabled="saving || !dirty" @click="save">
+          <button v-if="dirty && canWrite && !archived" class="secondary small" @click="initRows">
+            {{ $t("common.cancel") }}
+          </button>
+          <button
+            v-if="canWrite && !archived"
+            class="primary"
+            :disabled="saving || !dirty"
+            @click="save"
+          >
             <span v-if="saving" class="spinner" />
-            {{ saving ? "กำลังบันทึก…" : "บันทึก" }}
+            {{ saving ? $t("common.saving") : $t("common.save") }}
           </button>
         </div>
       </div>

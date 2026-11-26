@@ -8,6 +8,8 @@
  * 3. branch: เลือก branch (search)
  */
 const api = useApi();
+const { t } = useI18n();
+const { isAdmin, canWrite } = usePermissions();
 
 export interface PickerInstallation {
   id: string;
@@ -46,7 +48,7 @@ const appGroups = computed(() => {
     } else {
       groups.set(key, {
         appId: key,
-        appName: inst.appName ?? "GitHub App (ไม่ระบุ)",
+        appName: inst.appName ?? t("github.picker.unnamedApp"),
         items: [inst],
       });
     }
@@ -193,13 +195,15 @@ function confirmPick(branch: string) {
     <!-- Step 1: เลือก App + account -->
     <template v-if="step === 'app'">
       <p v-if="appGroups.length === 0" class="muted small">
-        ยังไม่มี GitHub App ที่ติดตั้ง — สร้างและติดตั้งที่หน้า settings ก่อน
+        {{ isAdmin ? $t("github.picker.noApps") : $t("github.connect.askAdmin") }}
       </p>
 
       <div v-for="group in appGroups" :key="group.appId" class="inset app-group">
         <div class="app-group-head">
           <strong>{{ group.appName }}</strong>
-          <span class="muted small">{{ group.items.length }} account</span>
+          <span class="muted small">
+            {{ trCount("github.picker.accountCount", group.items.length) }}
+          </span>
         </div>
         <ul class="account-list">
           <li
@@ -234,7 +238,7 @@ function confirmPick(branch: string) {
       <div class="selected-context">
         <button class="secondary tiny" @click="backToApps">
           <AppIcon name="arrowLeft" :size="12" />
-          เปลี่ยน app
+          {{ $t("github.picker.changeApp") }}
         </button>
         <span class="muted small">
           {{ selectedInstallation?.appName }} / {{ selectedInstallation?.accountLogin }}
@@ -243,15 +247,25 @@ function confirmPick(branch: string) {
 
       <p v-if="selectedInstallation?.status === 'suspended'" class="alert alert-warn">
         <AppIcon name="alert" :size="14" />
-        <span>GitHub installation นี้ถูก suspend — unsuspend ผ่าน GitHub App settings ก่อน</span>
+        <span>{{ $t("github.picker.suspended") }}</span>
       </p>
 
       <div class="search-bar">
         <div class="search-field">
           <AppIcon name="search" :size="14" />
-          <input v-model="searchQuery" type="search" placeholder="ค้นหา repository…" @input="page = 1" />
+          <input
+            v-model="searchQuery"
+            type="search"
+            :placeholder="$t('github.picker.searchRepo')"
+            @input="page = 1"
+          />
         </div>
-        <button class="secondary small icon" title="รีเฟรช" aria-label="รีเฟรช" @click="() => refreshRepos()">
+        <button
+          class="secondary small icon"
+          :title="$t('common.refresh')"
+          :aria-label="$t('common.refresh')"
+          @click="() => refreshRepos()"
+        >
           <AppIcon name="refresh" :size="14" />
         </button>
       </div>
@@ -264,8 +278,10 @@ function confirmPick(branch: string) {
 
       <div v-else-if="repoError" class="alert alert-bad">
         <AppIcon name="alert" :size="15" />
-        <span>ไม่สามารถดึง repositories ได้</span>
-        <button class="secondary tiny" @click="() => refreshRepos()">ลองใหม่</button>
+        <span>{{ $t("github.picker.reposFailed") }}</span>
+        <button class="secondary tiny" @click="() => refreshRepos()">
+          {{ $t("common.retry") }}
+        </button>
       </div>
 
       <template v-else-if="filteredRepos.length > 0">
@@ -286,14 +302,22 @@ function confirmPick(branch: string) {
 
         <!-- pagination -->
         <div v-if="totalPages > 1" class="pagination">
-          <button :disabled="!hasPrev" class="secondary small" @click="page--">ก่อนหน้า</button>
-          <span class="muted small">หน้า {{ page }} / {{ totalPages }}</span>
-          <button :disabled="!hasNext" class="secondary small" @click="page++">ถัดไป</button>
+          <button :disabled="!hasPrev" class="secondary small" @click="page--">
+            {{ $t("github.picker.prev") }}
+          </button>
+          <span class="muted small">
+            {{ $t("github.picker.page", { page, total: totalPages }) }}
+          </span>
+          <button :disabled="!hasNext" class="secondary small" @click="page++">
+            {{ $t("github.picker.next") }}
+          </button>
         </div>
       </template>
 
-      <p v-else-if="searchQuery" class="muted small">ไม่พบ repository ที่ตรงกับ "{{ searchQuery }}"</p>
-      <p v-else class="muted small">ไม่มี repository ที่เข้าถึงได้ — ตรวจสอบ GitHub App permissions</p>
+      <p v-else-if="searchQuery" class="muted small">
+        {{ $t("github.picker.noRepoMatch", { query: searchQuery }) }}
+      </p>
+      <p v-else class="muted small">{{ $t("github.picker.noRepos") }}</p>
     </template>
 
     <!-- Step 3: Branch -->
@@ -301,7 +325,7 @@ function confirmPick(branch: string) {
       <div class="selected-context">
         <button class="secondary tiny" @click="selectedRepo = null">
           <AppIcon name="arrowLeft" :size="12" />
-          เปลี่ยน repository
+          {{ $t("github.picker.changeRepo") }}
         </button>
         <strong>{{ selectedRepo?.fullName }}</strong>
         <span v-if="selectedRepo?.private" class="badge tone-warn">Private</span>
@@ -310,7 +334,11 @@ function confirmPick(branch: string) {
       <div class="search-bar">
         <div class="search-field">
           <AppIcon name="search" :size="14" />
-          <input v-model="searchBranch" type="search" placeholder="ค้นหา branch…" />
+          <input
+            v-model="searchBranch"
+            type="search"
+            :placeholder="$t('github.picker.searchBranch')"
+          />
         </div>
       </div>
 
@@ -321,7 +349,7 @@ function confirmPick(branch: string) {
 
       <div v-else-if="branchError" class="alert alert-bad">
         <AppIcon name="alert" :size="15" />
-        <span>ไม่สามารถดึง branches ได้</span>
+        <span>{{ $t("github.picker.branchesFailed") }}</span>
       </div>
 
       <template v-else-if="filteredBranches.length > 0">
@@ -342,17 +370,22 @@ function confirmPick(branch: string) {
         </ul>
 
         <div class="branch-actions">
+          <!-- เชื่อม/เปลี่ยน repository ของโปรเจกต์ต้องมีสิทธิ์เขียน — viewer ดูรายการได้อย่างเดียว -->
           <button
+            v-if="canWrite"
             class="primary"
             :disabled="!selectedBranch"
             @click="selectedBranch && confirmPick(selectedBranch)"
           >
-            เลือก branch นี้
+            {{ $t("github.picker.selectBranch") }}
           </button>
+          <span v-else class="muted small">{{ $t("common.readOnly") }}</span>
         </div>
       </template>
 
-      <p v-else class="muted small">ไม่พบ branch ที่ตรงกับ "{{ searchBranch }}"</p>
+      <p v-else class="muted small">
+        {{ $t("github.picker.noBranchMatch", { query: searchBranch }) }}
+      </p>
     </template>
   </div>
 </template>

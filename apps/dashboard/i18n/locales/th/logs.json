@@ -1,0 +1,13 @@
+{
+  "logs": {
+    "noDeployments": "ยังไม่มี deployment",
+    "empty": "ยังไม่มี log",
+    "waiting": "รอ log จาก container…",
+    "reconnect": "รีเชื่อม",
+    "clear": "ล้าง",
+    "error": {
+      "load": "โหลด logs ไม่ได้",
+      "loadRuntime": "โหลด runtime logs ไม่ได้"
+    }
+  }
+}

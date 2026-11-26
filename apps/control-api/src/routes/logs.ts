@@ -65,13 +65,21 @@ const runtimeLogEntrySchema = t.Object({
 // ---------------------------------------------------------------------------
 
 function requireDeployment(db: Database, id: string): { id: string; status: string } {
-  if (!isUlid(id)) throw new AppError("DEPLOYMENT_NOT_FOUND", "ไม่พบ deployment นี้");
+  if (!isUlid(id))
+    throw new AppError("DEPLOYMENT_NOT_FOUND", {
+      th: "ไม่พบ deployment นี้",
+      en: "Deployment not found",
+    });
   const row = db
     .query<{ id: string; status: string }, [string]>(
       "SELECT id, status FROM deployments WHERE id = ?",
     )
     .get(id);
-  if (!row) throw new AppError("DEPLOYMENT_NOT_FOUND", "ไม่พบ deployment นี้");
+  if (!row)
+    throw new AppError("DEPLOYMENT_NOT_FOUND", {
+      th: "ไม่พบ deployment นี้",
+      en: "Deployment not found",
+    });
   return row;
 }
 
@@ -96,17 +104,21 @@ function resolveAfterSeq(
 }
 
 function requireProject(db: Database, id: string): void {
-  if (!isUlid(id)) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+  if (!isUlid(id))
+    throw new AppError("PROJECT_NOT_FOUND", { th: "ไม่พบ project นี้", en: "Project not found" });
   const row = db
     .query<{ id: string }, [string]>("SELECT id FROM projects WHERE id = ? AND archived_at IS NULL")
     .get(id);
-  if (!row) throw new AppError("PROJECT_NOT_FOUND", "ไม่พบ project นี้");
+  if (!row)
+    throw new AppError("PROJECT_NOT_FOUND", { th: "ไม่พบ project นี้", en: "Project not found" });
 }
 
 function requireService(db: Database, id: string): void {
-  if (!isUlid(id)) throw new AppError("SERVICE_NOT_FOUND", "ไม่พบ service นี้");
+  if (!isUlid(id))
+    throw new AppError("SERVICE_NOT_FOUND", { th: "ไม่พบ service นี้", en: "Service not found" });
   const row = db.query<{ id: string }, [string]>("SELECT id FROM services WHERE id = ?").get(id);
-  if (!row) throw new AppError("SERVICE_NOT_FOUND", "ไม่พบ service นี้");
+  if (!row)
+    throw new AppError("SERVICE_NOT_FOUND", { th: "ไม่พบ service นี้", en: "Service not found" });
 }
 
 /**

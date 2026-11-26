@@ -7,6 +7,23 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+### Added
+- **สมาชิกและสิทธิ์** — เพิ่มผู้ใช้ได้หลายคนในหน้า Settings → สมาชิก (admin เท่านั้น) มี 3 role:
+  `admin` ทำได้ทุกอย่างและเห็นทุกโปรเจกต์ · `developer` deploy และแก้ไขได้ · `viewer` ดูอย่างเดียว
+  โดย developer/viewer เห็นเฉพาะโปรเจกต์ที่ admin เลือกให้ (โปรเจกต์อื่นตอบ 404 เหมือนไม่มีอยู่)
+  · ปิดบัญชี ตั้งรหัสผ่านใหม่ และลบสมาชิกได้ — ระบบกันไม่ให้เหลือ admin ที่ใช้งานได้น้อยกว่า 1 คน
+  · ส่วนของทั้งเครื่อง (Databases, Monitoring, Docker, GitHub Apps, ตั้งค่าระบบ, อัปเดต, audit log)
+  และสิ่งที่ข้ามขอบเขตโปรเจกต์ (bind mount, link network, ผูก managed service, สร้าง/archive โปรเจกต์)
+  เป็นของ admin · user เดิมเป็น admin ทั้งหมด พฤติกรรมหลังอัปเกรดไม่เปลี่ยน (migration 0035)
+- **สองภาษา ไทย/อังกฤษ** — สลับได้จากปุ่มที่ sidebar และหน้า login ค่าที่เลือกจำไว้ในคุกกี้
+  `zx_locale` · ข้อความ error จาก API ตอบตามภาษาที่เลือก (header `x-zixploy-locale` หรือคุกกี้)
+  ไม่ระบุ = ไทยเหมือนเดิม · ข้อความที่ worker บันทึกลงฐานข้อมูล (สาเหตุที่ deploy/backup ล้ม)
+  และ build log ยังเป็นภาษาไทย
+
+### Changed
+- `bootstrap:admin` สร้าง admin เพิ่มได้แม้มี user อยู่แล้ว และ `--reset` คืน role admin พร้อมเปิดบัญชี
+  ที่ถูกปิด — ใช้กู้คืนเมื่อไม่เหลือ admin ที่ login ได้
+
 ---
 
 ## [0.1.27] — 2026-11-24

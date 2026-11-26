@@ -25,6 +25,10 @@ import type { Database } from "bun:sqlite";
 import {
   API_PREFIX,
   AppError,
+  type Locale,
+  type LocalizedText,
+  localeFromHeaders,
+  localize,
   type ServiceType,
   serviceSupportsTerminal,
   TERMINAL_SETTINGS,
@@ -58,6 +62,8 @@ interface RelayEntry {
   browserWs: RelaySocket | null;
   workerWs: RelaySocket | null;
   lastActivityAt: number;
+  /** ภาษาของ browser ที่เปิด session (จาก header/คุกกี้ของ upgrade request) — ใช้กับ close reason */
+  locale: Locale;
   /** timer รอ worker มา claim — เคลียร์ทิ้งทันทีที่ worker ต่อสำเร็จ */
   waitTimer: ReturnType<typeof setTimeout> | null;
   /** timer idle timeout — reset ทุกครั้งที่มีข้อความไหลผ่านทั้งสองฝั่งต่อกันจริง */
@@ -83,7 +89,7 @@ function safeClose(ws: RelaySocket | null, code: number, reason: string): void {
 function endSession(
   db: Database,
   sessionId: string,
-  opts: { code: number; reason: string; failureMessage?: string },
+  opts: { code: number; reason: LocalizedText; failureMessage?: string },
 ): void {
   const entry = sessions.get(sessionId);
   if (!entry) return;
@@ -91,8 +97,9 @@ function endSession(
   if (entry.waitTimer) clearTimeout(entry.waitTimer);
   if (entry.idleTimer) clearTimeout(entry.idleTimer);
 
-  safeClose(entry.browserWs, opts.code, opts.reason);
-  safeClose(entry.workerWs, opts.code, opts.reason);
+  const reason = localize(opts.reason, entry.locale);
+  safeClose(entry.browserWs, opts.code, reason);
+  safeClose(entry.workerWs, opts.code, reason);
 
   markSessionClosed(
     db,
@@ -111,7 +118,10 @@ function scheduleIdleTimeout(
   entry.idleTimer = setTimeout(() => {
     endSession(db, sessionId, {
       code: 4009,
-      reason: "ปิด terminal อัตโนมัติ — ไม่มีการใช้งานนานเกินไป (idle timeout)",
+      reason: {
+        th: "ปิด terminal อัตโนมัติ — ไม่มีการใช้งานนานเกินไป (idle timeout)",
+        en: "Terminal closed automatically after being idle for too long (idle timeout)",
+      },
     });
   }, idleTimeoutMs);
 }
@@ -137,6 +147,11 @@ function relayMessage(
     scheduleIdleTimeout(db, sessionId, entry, idleTimeoutMs);
   }
   target?.send(message as never);
+}
+
+/** ภาษาของ upgrade request — header ของ WS handshake มาเป็น record (คีย์ตัวพิมพ์เล็ก) */
+function socketLocale(headers: Record<string, string | undefined>): Locale {
+  return localeFromHeaders({ get: (name) => headers[name.toLowerCase()] ?? null });
 }
 
 function bearerToken(headers: Record<string, string | undefined>): string | null {
@@ -169,15 +184,16 @@ export function terminalRoutes(db: Database, options: TerminalRouteOptions = {})
     .ws("/services/:id/terminal", {
       open(ws) {
         const serviceId = ws.data.params.id;
+        const locale = socketLocale(ws.data.headers);
 
         // ไม่มี internal token ตั้งไว้เลย = ฟีเจอร์นี้ปิดอยู่บนเครื่องนี้ — worker ต่อไม่ได้แน่นอน
         // เช็คก่อนสร้างแถว pending เลยเพื่อไม่ให้มีแถวค้างรอ worker ที่ไม่มีทางมา
         if (!loadInternalToken()) {
-          const err = new AppError(
-            "TERMINAL_UNAVAILABLE",
-            "ยังไม่ได้ตั้งค่า internal token บนเครื่องนี้ — terminal ใช้งานไม่ได้",
-          );
-          ws.close(4003, err.message);
+          const err = new AppError("TERMINAL_UNAVAILABLE", {
+            th: "ยังไม่ได้ตั้งค่า internal token บนเครื่องนี้ — terminal ใช้งานไม่ได้",
+            en: "The internal token is not configured on this machine, so the terminal is unavailable",
+          });
+          ws.close(4003, err.messageFor(locale));
           return;
         }
 
@@ -186,14 +202,26 @@ export function terminalRoutes(db: Database, options: TerminalRouteOptions = {})
         try {
           serviceType = requireService(db, serviceId).type;
         } catch (err) {
-          const message = err instanceof AppError ? err.message : "ไม่พบ service นี้";
+          const message =
+            err instanceof AppError
+              ? err.messageFor(locale)
+              : localize({ th: "ไม่พบ service นี้", en: "Service not found" }, locale);
           ws.close(4004, message);
           return;
         }
 
         // libsql (distroless) ไม่มี shell — ปฏิเสธก่อนสร้าง pending session ที่ไม่มีทางสำเร็จ
         if (!serviceSupportsTerminal(serviceType as ServiceType)) {
-          ws.close(4003, `engine "${serviceType}" ไม่มี shell ให้เปิด terminal`);
+          ws.close(
+            4003,
+            localize(
+              {
+                th: `engine "${serviceType}" ไม่มี shell ให้เปิด terminal`,
+                en: `Engine "${serviceType}" has no shell to open a terminal in`,
+              },
+              locale,
+            ),
+          );
           return;
         }
 
@@ -204,6 +232,7 @@ export function terminalRoutes(db: Database, options: TerminalRouteOptions = {})
           browserWs: ws,
           workerWs: null,
           lastActivityAt: Date.now(),
+          locale,
           waitTimer: null,
           idleTimer: null,
         };
@@ -215,7 +244,10 @@ export function terminalRoutes(db: Database, options: TerminalRouteOptions = {})
           if (entry.workerWs) return; // worker มาทันเวลาพอดี ไม่ต้องทำอะไร
           endSession(db, sessionId, {
             code: 4008,
-            reason: "worker unavailable — deploy-worker อาจไม่ได้รันอยู่",
+            reason: {
+              th: "worker unavailable — deploy-worker อาจไม่ได้รันอยู่",
+              en: "Worker unavailable. The deploy-worker may not be running",
+            },
             failureMessage: "worker unavailable",
           });
         }, waitTimeoutMs);
@@ -230,7 +262,10 @@ export function terminalRoutes(db: Database, options: TerminalRouteOptions = {})
       close(ws) {
         const sessionId = socketSession.get(ws.raw);
         if (!sessionId) return;
-        endSession(db, sessionId, { code: 1000, reason: "browser ปิดการเชื่อมต่อ" });
+        endSession(db, sessionId, {
+          code: 1000,
+          reason: { th: "browser ปิดการเชื่อมต่อ", en: "The browser closed the connection" },
+        });
       },
     });
 
@@ -240,9 +275,20 @@ export function terminalRoutes(db: Database, options: TerminalRouteOptions = {})
   // เช็คได้เร็วที่สุดคือหลัง upgrade ไปแล้ว)
   const workerApp = new Elysia().ws(`${TERMINAL_RELAY_PATH}/:sessionId`, {
     open(ws) {
+      // worker ไม่ส่ง header ภาษา = ไทยเหมือนเดิม (อ่านไว้เผื่อ client อื่นที่ส่งมา)
+      const locale = socketLocale(ws.data.headers);
       const token = bearerToken(ws.data.headers);
       if (!loadInternalToken() || !isValidInternalToken(token)) {
-        ws.close(4001, "internal token ไม่ถูกต้องหรือไม่ได้ตั้งค่า");
+        ws.close(
+          4001,
+          localize(
+            {
+              th: "internal token ไม่ถูกต้องหรือไม่ได้ตั้งค่า",
+              en: "The internal token is invalid or not configured",
+            },
+            locale,
+          ),
+        );
         return;
       }
 
@@ -252,8 +298,11 @@ export function terminalRoutes(db: Database, options: TerminalRouteOptions = {})
       // ไปแล้วก่อนหน้า (ไม่ควรเกิดในทางปฏิบัติเพราะ worker claim แถวใน DB แบบ atomic ก่อนต่อ
       // WS มาหาเราเสมอ แต่กันไว้เผื่อ race)
       if (!entry || entry.workerWs) {
-        const err = new AppError("TERMINAL_SESSION_NOT_FOUND", "ไม่พบ terminal session ที่รออยู่");
-        ws.close(4004, err.message);
+        const err = new AppError("TERMINAL_SESSION_NOT_FOUND", {
+          th: "ไม่พบ terminal session ที่รออยู่",
+          en: "No pending terminal session found",
+        });
+        ws.close(4004, err.messageFor(locale));
         return;
       }
 
@@ -276,7 +325,10 @@ export function terminalRoutes(db: Database, options: TerminalRouteOptions = {})
     close(ws) {
       const sessionId = socketSession.get(ws.raw);
       if (!sessionId) return;
-      endSession(db, sessionId, { code: 1000, reason: "worker ปิดการเชื่อมต่อ" });
+      endSession(db, sessionId, {
+        code: 1000,
+        reason: { th: "worker ปิดการเชื่อมต่อ", en: "The worker closed the connection" },
+      });
     },
   });
 

@@ -1,0 +1,116 @@
+{
+  "databases": {
+    "subtitle": "Ready-made databases. Create one and use it right away, no Dockerfile needed",
+    "reload": "Reload",
+    "add": "Add database",
+    "pickType": "Choose a database type",
+    "deletePermanently": "Delete permanently",
+    "error": {
+      "load": "Could not load the database list",
+      "create": "Could not create"
+    },
+    "status": {
+      "creating": "Creating",
+      "starting": "Starting",
+      "running": "Running",
+      "stopped": "Stopped",
+      "failed": "Failed",
+      "deleting": "Deleting"
+    },
+    "interval": {
+      "h6": "Every 6 hours",
+      "h12": "Every 12 hours",
+      "h24": "Every day",
+      "h168": "Every week",
+      "other": "Every {n} h"
+    },
+    "form": {
+      "name": "Name",
+      "nameHintFull": "Also used as the user name and the database name",
+      "nameHintAccessKey": "Also used as the access key",
+      "version": "Version",
+      "versionHint": "Only tested versions are available",
+      "expose": "Open a port for connections from outside the server",
+      "exposeHint": "Closed = only apps running on this server can connect (safest). Open it when you need to connect with DBeaver/TablePlus from your own machine.",
+      "serverPort": "Port on the server",
+      "exposeNoAuthWarning": "{name} has no password. Once the port is open, anyone who knows the IP can use it right away. Open it only when a firewall already restricts source IPs.",
+      "exposeWarning": "This port will be open to the internet. Anyone who knows the IP and the password can connect. Restrict source IPs with a firewall if possible.",
+      "memoryHint": "Reserves {mb} MB of RAM. Check that the server has enough free RAM before creating.",
+      "submit": "Create {name}"
+    },
+    "empty": {
+      "title": "No databases yet",
+      "hint": "Add PostgreSQL (pgvector), MySQL, Redis, MongoDB, MinIO or ClamAV in a few clicks"
+    },
+    "card": {
+      "internal": "Internal",
+      "copyHost": "Copy host",
+      "externalPort": "External port",
+      "portClosed": "Closed (safe)",
+      "noSchedule": "Not scheduled",
+      "lastBackup": "(last {time})"
+    },
+    "action": {
+      "credentials": "Connection details",
+      "stop": "Stop",
+      "start": "Start",
+      "restart": "Restart"
+    },
+    "creds": {
+      "host": "Host (inside the server)",
+      "secretWarning": "This password is secret. Do not share it or commit it to a repository.",
+      "internalUri": "Connection string (from apps on this server)",
+      "externalUri": "Connection string (from an external machine)",
+      "serverIpHint": "Replace {placeholder} with the server's real IP"
+    },
+    "confirmDelete": {
+      "title": "Delete database",
+      "message": "The container and all data in the volume will be permanently deleted. This cannot be undone."
+    },
+    "backups": {
+      "auto": "Back up automatically on a schedule",
+      "frequency": "Frequency",
+      "retention": "Number of recent backups to keep",
+      "saveSettings": "Save settings",
+      "history": "Backup history",
+      "triggering": "Starting…",
+      "backupNow": "Back up now",
+      "empty": "No backups yet",
+      "download": "Download",
+      "error": {
+        "load": "Could not load the backup history",
+        "saveSettings": "Could not save the settings",
+        "trigger": "Could not start the backup"
+      },
+      "status": {
+        "running": "Backing up…",
+        "succeeded": "Succeeded",
+        "failed": "Failed"
+      },
+      "trigger": {
+        "manual": "Manual",
+        "scheduled": "Scheduled"
+      },
+      "confirmDelete": {
+        "title": "Delete backup",
+        "message": "This backup file will be permanently deleted. This cannot be undone."
+      },
+      "confirmRestore": {
+        "message": "All current data in this database will be overwritten with the data from this backup immediately. This cannot be undone. Back up the current data first if you still need it.",
+        "confirm": "Overwrite and restore"
+      }
+    },
+    "logs": {
+      "loadError": "Could not load logs",
+      "reconnect": "Reconnect",
+      "clear": "Clear",
+      "waiting": "Waiting for logs from the container…"
+    },
+    "terminal": {
+      "connectError": "Could not connect to the terminal",
+      "connecting": "Connecting…",
+      "ended": "Session ended",
+      "failed": "Connection failed"
+    }
+  }
+}

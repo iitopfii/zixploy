@@ -1,0 +1,109 @@
+{
+  "components": {
+    "subtitle": "รันหลาย container ต่อโปรเจกต์ (เว็บ + worker + database) แบบ compose",
+    "mode": {
+      "compose": "โหมด: compose (multi-container)",
+      "single": "โหมด: single container"
+    },
+    "singleIntro": {
+      "title": "โปรเจกต์นี้ยังรันแบบ container เดียว",
+      "body": "กำหนด component ด้านล่างให้ครบ (ต้องมีอย่างน้อย 1 ตัวที่เป็น web) แล้วกด \"เปลี่ยนเป็น compose\" — deploy ครั้งถัดไปจะรันแบบหลาย container"
+    },
+    "empty": {
+      "title": "ยังไม่มี component",
+      "hint": "เพิ่ม component แรก (เช่น เว็บแอปของคุณ) เพื่อเริ่มต้น"
+    },
+    "disabledBadge": "ปิดใช้งาน",
+    "add": "เพิ่ม component",
+    "note": "การเปลี่ยนแปลง component จะมีผลเมื่อ deploy ครั้งถัดไป",
+    "action": {
+      "disable": "ปิดใช้งาน",
+      "enable": "เปิดใช้งาน"
+    },
+    "confirmDelete": {
+      "message": "ลบ component {name}? (ลบแค่นิยาม ไม่ลบข้อมูล)",
+      "confirm": "ยืนยันลบ"
+    },
+    "form": {
+      "editTitle": "แก้ไข {name}",
+      "name": "ชื่อ (DNS alias)",
+      "nameHint": "a-z, 0-9, ขีดกลาง — ใช้เป็นชื่อให้ container อื่นเรียกถึง",
+      "role": "ประเภท (role)",
+      "source": "ที่มาของ image",
+      "sourceBuild": "Build จาก Dockerfile",
+      "sourceImage": "Image สำเร็จรูป (registry)",
+      "sourceManaged": "อ้าง managed database",
+      "sourceLocked": "เปลี่ยนที่มาไม่ได้หลังสร้าง — ลบแล้วสร้างใหม่",
+      "targetStage": "Target stage (ไม่บังคับ)",
+      "imageHint": "ต้องระบุ tag หรือ digest — ห้ามใช้ latest",
+      "selectService": "— เลือก service —",
+      "noServices": "ยังไม่มี managed database — สร้างที่หน้า Databases ก่อน",
+      "managedEnvHint": "component ที่ตั้ง depends_on มาที่ตัวนี้จะได้ env เชื่อมต่อฉีดอัตโนมัติ:",
+      "isWeb": "เป็น web (public) — route ผ่าน domain ของโปรเจกต์",
+      "internalPort": "Internal port (สำหรับ health check)",
+      "healthPath": "Health check path (ไม่บังคับ)",
+      "healthInterval": "Health interval (วินาที)",
+      "healthTimeout": "Health timeout (วินาที)",
+      "healthWaitHint": "deploy รอ health check ได้นานสุดประมาณ interval × retries วินาที — service ที่ start ช้า (เช่น โหลดโมเดล) ให้เพิ่ม retries",
+      "healthCmd": "Health command (ไม่บังคับ)",
+      "healthCmdHint": "คำสั่งตรวจสุขภาพในคอนเทนเนอร์ (Docker HEALTHCHECK) — จำเป็นถ้ามี component อื่นตั้ง depends_on แบบ \"healthy\" มาที่ตัวนี้ (เช่น {a}, {b})",
+      "command": "Command (ไม่บังคับ)",
+      "commandHint": "เว้นวรรคคั่น argument (ใช้ \"...\" หรือ '...' ครอบค่าที่มีเว้นวรรค) — ไม่ผ่าน shell ถ้าต้องการ shell ให้เขียน {example}",
+      "cpuLimit": "CPU limit (ไม่บังคับ)",
+      "memoryLimit": "Memory limit MB (ไม่บังคับ)",
+      "memorySwap": "Memory + swap MB (ไม่บังคับ)",
+      "memorySwapPlaceholder": "เท่ากับ memory = ไม่ให้ swap",
+      "pidsLimit": "PID limit (ไม่บังคับ)",
+      "capDropAll": "ตัด Linux capability ทั้งหมด ({flag})",
+      "noNewPrivileges": "ห้ามยกระดับสิทธิ์ใน container ({flag})",
+      "dependsOn": "Depends on (เริ่มหลัง component เหล่านี้)",
+      "depStarted": "started (แค่เริ่มแล้ว)",
+      "depHealthy": "healthy (ผ่าน health check)"
+    },
+    "repo": {
+      "useProject": "ใช้ repo ของ project",
+      "change": "เปลี่ยน repo",
+      "other": "ใช้ repo อื่น",
+      "backToProject": "กลับไปใช้ repo ของ project",
+      "needGithub": "ต้องเชื่อม GitHub App ก่อนถึงเลือก repo อื่นได้",
+      "hint": "deploy จะ build commit ล่าสุดของ branch นี้ · redeploy ใช้ commit เดิม"
+    },
+    "promote": {
+      "title": "เปลี่ยนเป็น multi-container (compose)",
+      "ready": "พร้อมแล้ว — deploy ครั้งถัดไปจะรัน {n} component",
+      "notReady": "ต้องมีอย่างน้อย 1 component และอย่างน้อย 1 ตัวที่เป็น web ก่อนถึงจะเปลี่ยนได้",
+      "action": "เปลี่ยนเป็น compose",
+      "working": "กำลังเปลี่ยน…"
+    },
+    "error": {
+      "load": "โหลด components ไม่ได้",
+      "create": "เพิ่ม component ไม่สำเร็จ",
+      "promote": "เปลี่ยนเป็น compose ไม่สำเร็จ"
+    },
+    "dockerfile": {
+      "intro": "วาง Dockerfile ตรง ๆ แทนการเชื่อม repository — ระบบจะ build จากเนื้อหานี้ทุกครั้งที่ deploy โดยไม่มีการ git clone เลย เหมาะกับโปรเจกต์เล็ก ๆ ที่ไม่มี repo หรืออยากทดลองเร็ว ๆ",
+      "label": "เนื้อหา Dockerfile",
+      "discard": "ยกเลิกการแก้ไข",
+      "useAsSource": "ใช้เป็น source",
+      "error": {
+        "empty": "ต้องวางเนื้อหา Dockerfile",
+        "tooLarge": "เนื้อหาใหญ่เกิน {n}KB"
+      }
+    },
+    "compose": {
+      "error": {
+        "noServicesKey": "ไม่พบ 'services:' ระดับบนสุด — ไฟล์นี้ดูไม่ใช่ docker-compose.yml",
+        "servicesEmpty": "'services:' ว่างเปล่า — ไม่มี service ให้นำเข้า",
+        "serviceNotFound": "หา service ไม่เจอ — ตรวจสอบ indentation ของไฟล์",
+        "serviceFormat": "รูปแบบ service ไม่ตรงที่คาดไว้ — ต้องเป็น '{'<'}ชื่อ service{'>'}:' บรรทัดเดียว",
+        "serviceEmpty": "service \"{name}\" ว่างเปล่า",
+        "imageOnly": "service \"{name}\" ใช้ image สำเร็จรูป (ไม่มี 'build:') — นำเข้าแบบนี้ไม่ได้ ต้องมี build.context/dockerfile ในไฟล์",
+        "noBuildOrImage": "service \"{name}\" ไม่มี 'build:' หรือ 'image:' — ตรวจสอบไฟล์อีกครั้ง"
+      },
+      "warn": {
+        "multipleServices": "ไฟล์นี้มี {count} service — ใช้เฉพาะ service แรก (\"{name}\") เท่านั้น เพราะ project ในระบบนี้รองรับ 1 container ต่อ project",
+        "noPorts": "ไม่พบ 'ports:' ในไฟล์ — ต้องระบุ internal port เองหลังนำเข้า"
+      }
+    }
+  }
+}

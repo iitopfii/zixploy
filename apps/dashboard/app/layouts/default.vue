@@ -16,14 +16,23 @@ watch(
   () => (navOpen.value = false),
 );
 
-const nav = [
-  { to: "/", label: "Projects", icon: "grid" as const, exact: true },
-  { to: "/databases", label: "Databases", icon: "database" as const, exact: false },
-  { to: "/monitoring", label: "Monitoring", icon: "activity" as const, exact: false },
-  { to: "/docker", label: "Docker", icon: "box" as const, exact: false },
-  { to: "/settings/github", label: "GitHub Apps", icon: "github" as const, exact: false },
-  { to: "/settings/system", label: "ตั้งค่าระบบ", icon: "settings" as const, exact: false },
-];
+const { isAdmin } = usePermissions();
+
+/**
+ * label เป็น key ใน nav.* · adminOnly = ส่วนของระบบที่ developer/viewer เข้าไม่ได้
+ * (รายการเดียวกับ ADMIN_ONLY_PATHS ใน middleware/auth.global.ts — API ตรวจสิทธิ์จริงอีกชั้น)
+ */
+const NAV = [
+  { to: "/", label: "projects", icon: "grid", exact: true, adminOnly: false },
+  { to: "/databases", label: "databases", icon: "database", exact: false, adminOnly: true },
+  { to: "/monitoring", label: "monitoring", icon: "activity", exact: false, adminOnly: true },
+  { to: "/docker", label: "docker", icon: "box", exact: false, adminOnly: true },
+  { to: "/settings/github", label: "github", icon: "github", exact: false, adminOnly: true },
+  { to: "/settings/members", label: "members", icon: "shield", exact: false, adminOnly: true },
+  { to: "/settings/system", label: "system", icon: "settings", exact: false, adminOnly: true },
+] as const;
+
+const nav = computed(() => NAV.filter((item) => !item.adminOnly || isAdmin.value));
 
 const loggingOut = ref(false);
 async function logout() {
@@ -45,7 +54,7 @@ const initial = computed(() => (session.value.username ?? "?").charAt(0).toUpper
   <div class="shell">
     <!-- Mobile topbar -->
     <header class="mobile-bar">
-      <button class="ghost icon" aria-label="เปิดเมนู" @click="navOpen = !navOpen">
+      <button class="ghost icon" :aria-label="$t('nav.openMenu')" @click="navOpen = !navOpen">
         <AppIcon :name="navOpen ? 'x' : 'menu'" :size="18" />
       </button>
       <NuxtLink to="/" class="brand-mark">
@@ -68,8 +77,8 @@ const initial = computed(() => (session.value.username ?? "?").charAt(0).toUpper
         </span>
       </NuxtLink>
 
-      <nav class="nav" aria-label="หลัก">
-        <p class="nav-heading">จัดการ</p>
+      <nav class="nav" :aria-label="$t('nav.mainLabel')">
+        <p class="nav-heading">{{ $t("nav.heading") }}</p>
         <NuxtLink
           v-for="item in nav"
           :key="item.to"
@@ -78,24 +87,30 @@ const initial = computed(() => (session.value.username ?? "?").charAt(0).toUpper
           :class="{ active: item.exact ? route.path === item.to : route.path.startsWith(item.to) }"
         >
           <AppIcon :name="item.icon" :size="16" />
-          <span>{{ item.label }}</span>
+          <span>{{ $t(`nav.${item.label}`) }}</span>
         </NuxtLink>
       </nav>
 
       <div class="sidebar-foot">
-        <UpdateStatus />
+        <UpdateStatus v-if="isAdmin" />
         <SystemHealth />
+        <LocaleSwitch />
 
         <div v-if="session.authenticated" class="user">
-          <NuxtLink to="/settings/account" class="user-link" title="ตั้งค่าบัญชี">
+          <NuxtLink to="/settings/account" class="user-link" :title="$t('nav.account')">
             <span class="avatar" aria-hidden="true">{{ initial }}</span>
-            <span class="user-name truncate">{{ session.username }}</span>
+            <span class="user-text">
+              <span class="user-name truncate">{{ session.username }}</span>
+              <span v-if="session.role" class="user-role tiny muted">
+                {{ $t(`nav.role.${session.role}`) }}
+              </span>
+            </span>
           </NuxtLink>
           <button
             class="ghost icon small"
             :disabled="loggingOut"
-            title="ออกจากระบบ"
-            aria-label="ออกจากระบบ"
+            :title="$t('nav.logout')"
+            :aria-label="$t('nav.logout')"
             @click="logout"
           >
             <AppIcon name="logout" :size="15" />
@@ -335,5 +350,13 @@ const initial = computed(() => (session.value.username ?? "?").charAt(0).toUpper
   .content-inner {
     padding: var(--s-5) var(--s-4) var(--s-6);
   }
+}
+
+/* ชื่อผู้ใช้ + role ซ้อนสองบรรทัดข้าง avatar */
+.user-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
 }
 </style>

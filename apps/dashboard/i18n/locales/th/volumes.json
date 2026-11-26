@@ -1,0 +1,39 @@
+{
+  "volumes": {
+    "create": "สร้าง volume",
+    "empty": "ยังไม่มี volume",
+    "note": "volume จะถูก mount ทุกครั้งที่ deploy — redeploy เพื่อให้การเปลี่ยนแปลงมีผล",
+    "component": {
+      "unbound": "ไม่ได้ผูก — compose ไม่ mount",
+      "deleted": "component ที่ถูกลบ"
+    },
+    "form": {
+      "name": "ชื่อ",
+      "component": "Mount ที่ component",
+      "selectComponent": "เลือก component",
+      "hostPath": "Host path (bind mount) — ไม่บังคับ",
+      "hostPathHint": "เว้นว่าง = Docker จัดการที่เก็บให้ (แนะนำ) · ระบุ path เช่น /home/mydata = ข้อมูลไปอยู่โฟลเดอร์นั้นบนเซิร์ฟเวอร์ตรงๆ — โฟลเดอร์ต้องมีอยู่แล้ว และแก้ path ทีหลังไม่ได้",
+      "sharedSafe": "shared-safe (แนะนำ)",
+      "singleWriter": "single-writer (downtime ระหว่าง deploy)"
+    },
+    "status": {
+      "missing": "Docker volume หายไป — อาจถูกลบด้วยมือ ดู runbook สำหรับ recovery",
+      "deletionPending": "รอ worker ลบ Docker volume จริง…"
+    },
+    "detach": {
+      "working": "กำลัง detach…",
+      "first": "ต้อง detach ก่อนลบ"
+    },
+    "confirmDelete": {
+      "prompt": "พิมพ์ชื่อ volume {name} เพื่อยืนยันการลบ",
+      "warning": "ข้อมูลใน volume จะหายถาวร — ไม่สามารถกู้คืนได้",
+      "placeholder": "ชื่อ volume",
+      "confirm": "ยืนยันลบ"
+    },
+    "error": {
+      "load": "โหลด volumes ไม่ได้",
+      "create": "สร้าง volume ไม่สำเร็จ",
+      "detach": "detach ไม่สำเร็จ"
+    }
+  }
+}

@@ -10,7 +10,10 @@
  */
 
 import {
+  errorText,
   hasUpdate,
+  LocalizedError,
+  type LocalizedText,
   latestStableTag,
   SELF_UPDATE_DISABLED,
   UPDATE_CHECK,
@@ -31,6 +34,8 @@ export interface UpdateStatus {
   checkedAt: number;
   /** สาเหตุที่ตรวจไม่ได้ — null = ตรวจสำเร็จ */
   error: string | null;
+  /** `error` แบบสองภาษา — route เลือกภาษาด้วย localize() ก่อนตอบ (null เมื่อ error เป็น null) */
+  errorText: LocalizedText | null;
 }
 
 /**
@@ -54,10 +59,20 @@ async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Respon
 /** ขอ anonymous bearer token — ใช้ซ้ำได้ทั้ง tags/manifest/blob ในรอบตรวจเดียวกัน */
 async function fetchAnonymousToken(image: string): Promise<string> {
   const tokenRes = await fetchWithTimeout(UPDATE_CHECK.tokenUrl(image));
-  if (!tokenRes.ok) throw new Error(`ขอ token จาก registry ไม่สำเร็จ (${tokenRes.status})`);
+  if (!tokenRes.ok) {
+    throw new LocalizedError({
+      th: `ขอ token จาก registry ไม่สำเร็จ (${tokenRes.status})`,
+      en: `Could not get a token from the registry (${tokenRes.status})`,
+    });
+  }
 
   const tokenBody = (await tokenRes.json()) as { token?: string };
-  if (!tokenBody.token) throw new Error("registry ไม่ส่ง token กลับมา");
+  if (!tokenBody.token) {
+    throw new LocalizedError({
+      th: "registry ไม่ส่ง token กลับมา",
+      en: "The registry did not return a token",
+    });
+  }
   return tokenBody.token;
 }
 
@@ -72,9 +87,17 @@ async function fetchTags(image: string, token: string): Promise<string[]> {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
   if (tagsRes.status === 404) {
-    throw new Error("ยังไม่มี image เผยแพร่บน registry (หรือ package ยังเป็น private)");
+    throw new LocalizedError({
+      th: "ยังไม่มี image เผยแพร่บน registry (หรือ package ยังเป็น private)",
+      en: "No image has been published to the registry yet (or the package is still private)",
+    });
   }
-  if (!tagsRes.ok) throw new Error(`อ่าน tag จาก registry ไม่สำเร็จ (${tagsRes.status})`);
+  if (!tagsRes.ok) {
+    throw new LocalizedError({
+      th: `อ่าน tag จาก registry ไม่สำเร็จ (${tagsRes.status})`,
+      en: `Could not read tags from the registry (${tagsRes.status})`,
+    });
+  }
 
   const body = (await tagsRes.json()) as { tags?: string[] | null };
   return body.tags ?? [];
@@ -178,6 +201,7 @@ export async function checkForUpdate(force = false): Promise<UpdateStatus> {
       updateAvailable: false,
       checkedAt: now,
       error: null,
+      errorText: null,
     };
     return cache;
   }
@@ -194,15 +218,18 @@ export async function checkForUpdate(force = false): Promise<UpdateStatus> {
       updateAvailable: hasUpdate(ZIXPLOY_VERSION, latest),
       checkedAt: now,
       error: null,
+      errorText: null,
     };
   } catch (err) {
+    const text = errorText(err, { th: "ตรวจเวอร์ชันไม่สำเร็จ", en: "Version check failed" });
     cache = {
       current: ZIXPLOY_VERSION,
       latest: null,
       latestPublishedAt: null,
       updateAvailable: false,
       checkedAt: now,
-      error: err instanceof Error ? err.message : "ตรวจเวอร์ชันไม่สำเร็จ",
+      error: typeof text === "string" ? text : text.th,
+      errorText: typeof text === "string" ? { th: text, en: text } : text,
     };
   }
   return cache;

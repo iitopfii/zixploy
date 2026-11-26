@@ -12,6 +12,8 @@ import {
   API_PREFIX,
   AppError,
   hasUpdate,
+  localeFromHeaders,
+  localize,
   SELF_UPDATE_DISABLED,
   ulid,
   ZIXPLOY_VERSION,
@@ -40,14 +42,20 @@ export function updateRoutes(db: Database) {
 
     .get(
       "/version",
-      async ({ query }) => {
+      async ({ query, request }) => {
         const status = await checkForUpdate(query.refresh === "true");
         const active = db
           .query<{ id: string }, []>(
             "SELECT id FROM maintenance_jobs WHERE type = 'self_update' AND status IN ('pending','leased') LIMIT 1",
           )
           .get();
-        return { ...status, updating: active != null };
+        // ตอบ error เป็น string ตามภาษาของ request — errorText ({ th, en }) ไม่ส่งออกไป
+        const { errorText: checkError, ...rest } = status;
+        return {
+          ...rest,
+          error: checkError ? localize(checkError, localeFromHeaders(request.headers)) : null,
+          updating: active != null,
+        };
       },
       {
         query: t.Object({ refresh: t.Optional(t.String()) }),
@@ -61,21 +69,30 @@ export function updateRoutes(db: Database) {
         const session = requireSession();
 
         if (ZIXPLOY_VERSION === "dev" || SELF_UPDATE_DISABLED) {
-          throw new AppError(
-            "MAINTENANCE_FAILED",
-            "ระบบนี้รันจากซอร์สโดยตรง — อัปเดตผ่านหน้าเว็บไม่ได้ ใช้ git pull แทน",
-          );
+          throw new AppError("MAINTENANCE_FAILED", {
+            th: "ระบบนี้รันจากซอร์สโดยตรง — อัปเดตผ่านหน้าเว็บไม่ได้ ใช้ git pull แทน",
+            en: "This system runs directly from source. It cannot be updated from the web UI, use git pull instead",
+          });
         }
 
         const status = await checkForUpdate(true);
         const target = body?.version ?? status.latest;
 
         if (!target) {
-          throw new AppError("MAINTENANCE_FAILED", status.error ?? "ตรวจไม่พบเวอร์ชันใหม่บน registry");
+          throw new AppError(
+            "MAINTENANCE_FAILED",
+            status.errorText ?? {
+              th: "ตรวจไม่พบเวอร์ชันใหม่บน registry",
+              en: "No new version found on the registry",
+            },
+          );
         }
         // กันสั่งอัปเดตไปเวอร์ชันที่เก่ากว่าหรือเท่าเดิมโดยไม่ตั้งใจ
         if (!body?.version && !hasUpdate(ZIXPLOY_VERSION, target)) {
-          throw new AppError("MAINTENANCE_FAILED", `ใช้เวอร์ชัน ${ZIXPLOY_VERSION} ล่าสุดอยู่แล้ว`);
+          throw new AppError("MAINTENANCE_FAILED", {
+            th: `ใช้เวอร์ชัน ${ZIXPLOY_VERSION} ล่าสุดอยู่แล้ว`,
+            en: `Version ${ZIXPLOY_VERSION} is already the latest`,
+          });
         }
 
         const now = Date.now();
@@ -88,7 +105,10 @@ export function updateRoutes(db: Database) {
           ).run(id, target, ZIXPLOY_VERSION, session.userId, now, now);
         } catch (err) {
           if (err instanceof Error && err.message.includes("UNIQUE")) {
-            throw new AppError("MAINTENANCE_BUSY", "มีงานระบบกำลังทำงานอยู่ — รอให้เสร็จก่อนสั่งอัปเดต");
+            throw new AppError("MAINTENANCE_BUSY", {
+              th: "มีงานระบบกำลังทำงานอยู่ — รอให้เสร็จก่อนสั่งอัปเดต",
+              en: "A system job is already running. Wait for it to finish before starting an update",
+            });
           }
           throw err;
         }

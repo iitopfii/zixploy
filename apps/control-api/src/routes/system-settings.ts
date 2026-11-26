@@ -9,7 +9,7 @@
  */
 
 import type { Database } from "bun:sqlite";
-import { API_PREFIX, AppError, validateHostname } from "@zixploy/shared";
+import { API_PREFIX, AppError, errorText, validateHostname } from "@zixploy/shared";
 import { Elysia, t } from "elysia";
 import { getClientIp, recordAuditEvent } from "../audit/log";
 import { loadConfiguredIps } from "../domains/dns-check";
@@ -52,7 +52,7 @@ export function systemSettingsRoutes(db: Database, settings: SettingsStore) {
         } catch (err) {
           throw new AppError(
             "VALIDATION_ERROR",
-            err instanceof Error ? err.message : "domain ไม่ถูกต้อง",
+            errorText(err, { th: "domain ไม่ถูกต้อง", en: "Invalid domain" }),
             { field: "dashboardDomain" },
           );
         }
